@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -38,7 +39,7 @@ const (
 // GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid
 func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error) {
 	// Open the pid's mountinfo file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "mountinfo"), pid)
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "mountinfo")
 	file, err := os.Open(path)
 	if err != nil {
 		return "", "", err
@@ -83,7 +84,7 @@ func (c *cgroupv2) GetDeviceCGroupRootPath(
 	pid int,
 ) (string, error) {
 	// Open the pid's cgroup file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "cgroup"), pid)
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "cgroup")
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err

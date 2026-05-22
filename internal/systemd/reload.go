@@ -59,7 +59,9 @@ func Open() (*Watcher, error) {
 		dbus.WithMatchMember(reloadingMember),
 	)
 	if matchErr != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.L().Warn("close dbus conn after AddMatchSignal failure", "err", closeErr)
+		}
 
 		return nil, fmt.Errorf("add match signal %s: %w", reloadingFullName, matchErr)
 	}

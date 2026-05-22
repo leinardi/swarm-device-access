@@ -263,7 +263,7 @@ func consumeEvents(
 			sleepCtx(ctx, *backoff)
 			*backoff = nextBackoff(*backoff)
 
-			return true
+			return ctx.Err() == nil
 
 		case msg, ok := <-msgs:
 			if !ok {
@@ -272,7 +272,7 @@ func consumeEvents(
 				sleepCtx(ctx, *backoff)
 				*backoff = nextBackoff(*backoff)
 
-				return true
+				return ctx.Err() == nil
 			}
 
 			*backoff = minBackoff

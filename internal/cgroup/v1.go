@@ -23,13 +23,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 // GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid
 func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error) {
 	// Open the pid's mountinfo file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "mountinfo"), pid)
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "mountinfo")
 	file, err := os.Open(path)
 	if err != nil {
 		return "", "", err
@@ -80,7 +81,7 @@ func (c *cgroupv1) GetDeviceCGroupRootPath(
 	pid int,
 ) (string, error) {
 	// Open the pid's cgroup file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "cgroup"), pid)
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "cgroup")
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err

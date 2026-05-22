@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -67,7 +68,7 @@ var (
 // GetDeviceCGroupVersion returns the version of linux cgroups in use
 func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
 	// Open the pid's cgroup file in /proc.
-	path := fmt.Sprintf(filepath.Join(rootPath, "proc", "%v", "cgroup"), pid)
+	path := filepath.Join(rootPath, "proc", strconv.Itoa(pid), "cgroup")
 	file, err := os.Open(path)
 	if err != nil {
 		return -1, fmt.Errorf("failed to open cgroup path for pid '%d': %v", pid, err)
