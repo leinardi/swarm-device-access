@@ -34,7 +34,7 @@ func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 
 	file, err := os.Open(path)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
@@ -90,7 +90,7 @@ func (c *cgroupv1) GetDeviceCGroupRootPath(
 
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
@@ -160,7 +160,7 @@ func (c *cgroupv1) addDeviceRule(cgroupPath string, rule *DeviceRule) error {
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
@@ -169,7 +169,7 @@ func (c *cgroupv1) addDeviceRule(cgroupPath string, rule *DeviceRule) error {
 		fmt.Sprintf("%s %d:%d %s", rule.Type, *rule.Major, *rule.Minor, rule.Access),
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("write device rule to %q: %w", path, err)
 	}
 
 	return nil

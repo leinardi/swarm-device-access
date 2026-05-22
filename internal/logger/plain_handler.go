@@ -210,6 +210,10 @@ func emitKVInsideBraces(buffer *bytes.Buffer, attribute slog.Attr) {
 // with a leading space. It handles all slog kinds, including groups.
 // This consolidates the logic used by both writeAttrKV and emitKVInsideBraces.
 func writeKV(buffer *bytes.Buffer, key string, value slog.Value, includeLeadingSpace bool) {
+	if value.Kind() == slog.KindLogValuer {
+		value = value.Resolve()
+	}
+
 	if includeLeadingSpace {
 		buffer.WriteByte(' ')
 	}
@@ -228,17 +232,13 @@ func writeKV(buffer *bytes.Buffer, key string, value slog.Value, includeLeadingS
 		writeScalarValue(buffer, value)
 
 	case slog.KindLogValuer:
-		// Resolve and re-emit
-		resolved := value.Resolve()
-		writeKV(buffer, key, resolved, includeLeadingSpace) // recurse on resolved kind
+		writeScalarValue(buffer, value)
 
 	case slog.KindGroup:
 		groupAttributes := value.Group()
-		// Empty group -> {}
 		writeGroupBraced(buffer, key, groupAttributes)
 
 	default:
-		// Future-proof fallback
 		fmt.Fprint(buffer, value.Any())
 	}
 }

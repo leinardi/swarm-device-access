@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	BpfProgramLicense = "Apache"
+	bpfProgramLicense = "Apache"
 )
 
 // GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid
@@ -43,7 +43,7 @@ func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 
 	file, err := os.Open(path)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
@@ -93,7 +93,7 @@ func (c *cgroupv2) GetDeviceCGroupRootPath(
 
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
@@ -153,6 +153,11 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// new devices to the instructions of each existing program.
 	// If no existing programs found, create a new program with just our device filter.
 	var newProgs []*ebpf.Program
+	defer func() {
+		for _, p := range newProgs {
+			p.Close()
+		}
+	}()
 	if len(oldProgs) == 0 {
 		oldInsts := asm.Instructions{asm.Return()}
 
@@ -239,7 +244,7 @@ func generateNewProgram(rules []DeviceRule, oldInsts asm.Instructions) (*ebpf.Pr
 	spec := &ebpf.ProgramSpec{
 		Type:         ebpf.CGroupDevice,
 		Instructions: newInsts,
-		License:      BpfProgramLicense,
+		License:      bpfProgramLicense,
 	}
 	newProg, err := ebpf.NewProgram(spec)
 	if err != nil {

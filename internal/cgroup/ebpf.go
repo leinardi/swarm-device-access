@@ -44,10 +44,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func nilCloser() error {
-	return nil
-}
-
 type program struct {
 	insts       asm.Instructions
 	hasWildCard bool

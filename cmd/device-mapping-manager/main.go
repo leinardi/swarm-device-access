@@ -229,9 +229,7 @@ func run() int {
 
 	applyFileConfig(&fileCfg)
 
-	if logErr := logger.Configure(*logFormat, *logLevel, *logTime); logErr != nil {
-		fmt.Fprintf(os.Stderr, "logger setup failed, falling back to defaults: %v\n", logErr)
-	}
+	logger.Configure(*logFormat, *logLevel, *logTime)
 
 	log := logger.L()
 
@@ -622,13 +620,7 @@ func watchSIGHUP(ctx context.Context) {
 				effectiveLogTime = *fileCfg.LogTime
 			}
 
-			if logErr := logger.Configure(
-				effectiveLogFormat,
-				effectiveLogLevel,
-				effectiveLogTime,
-			); logErr != nil {
-				log.Error("logger reconfigure failed", "err", logErr)
-			}
+			logger.Configure(effectiveLogFormat, effectiveLogLevel, effectiveLogTime)
 
 			newDryRun := *dryRun
 			newRequireLabel := *requireLabel

@@ -21,11 +21,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // globalLogger holds the configured slog.Logger.
 // Access it with L() and set it with Set()/Configure().
-var globalLogger *slog.Logger
+var globalLogger atomic.Pointer[slog.Logger]
 
 // initOnce ensures the default logger is initialized exactly once.
 var initOnce sync.Once
@@ -34,27 +35,27 @@ var initOnce sync.Once
 // it returns a reasonable default text logger at INFO level to avoid nil panics.
 func L() *slog.Logger {
 	initOnce.Do(func() {
-		if globalLogger == nil {
+		if globalLogger.Load() == nil {
 			handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
 			})
-			globalLogger = slog.New(handler)
+			globalLogger.Store(slog.New(handler))
 		}
 	})
 
-	return globalLogger
+	return globalLogger.Load()
 }
 
 // Set replaces the global logger (primarily for tests or custom wiring).
 func Set(newLogger *slog.Logger) {
-	globalLogger = newLogger
+	globalLogger.Store(newLogger)
 }
 
 // Configure builds and installs a slog.Logger based on CLI flags.
 // format: "json" or "text" (unknown -> text)
 // level:  "debug", "info", "warn", "error", "fatal", "panic" (fatal/panic -> error)
 // includeTime: if false, the time attribute is removed from log records.
-func Configure(format, level string, includeTime bool) *slog.Logger {
+func Configure(format, level string, includeTime bool) {
 	logLevel := parseLevel(level)
 
 	var handler slog.Handler
@@ -74,10 +75,7 @@ func Configure(format, level string, includeTime bool) *slog.Logger {
 		})
 	}
 
-	configured := slog.New(handler)
-	Set(configured)
-
-	return configured
+	Set(slog.New(handler))
 }
 
 // timeStripper returns a ReplaceAttr function that removes the time attribute
