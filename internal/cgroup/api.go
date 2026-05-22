@@ -72,7 +72,7 @@ func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
 
 	file, err := os.Open(path)
 	if err != nil {
-		return -1, fmt.Errorf("failed to open cgroup path for pid '%d': %v", pid, err)
+		return -1, fmt.Errorf("failed to open cgroup path for pid '%d': %w", pid, err)
 	}
 	defer file.Close()
 

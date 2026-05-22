@@ -136,7 +136,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// Open the cgroup path.
 	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0)
 	if err != nil {
-		return fmt.Errorf("unable to open the cgroup path: %v", err)
+		return fmt.Errorf("unable to open the cgroup path: %w", err)
 	}
 	defer unix.Close(dirFD)
 
@@ -144,7 +144,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	oldProgs, err := FindAttachedCgroupDeviceFilters(dirFD)
 	if err != nil {
 		return fmt.Errorf(
-			"unable to find any existing device filters attached to the cgroup: %v",
+			"unable to find any existing device filters attached to the cgroup: %w",
 			err,
 		)
 	}
@@ -159,7 +159,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 		newProg, err := generateNewProgram(rules, oldInsts)
 		if err != nil {
 			return fmt.Errorf(
-				"unable to generate new device filter program with no existing programs: %v",
+				"unable to generate new device filter program with no existing programs: %w",
 				err,
 			)
 		}
@@ -170,7 +170,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 		oldInfo, err := oldProg.Info()
 		if err != nil {
 			return fmt.Errorf(
-				"unable to get Info() of the original device filters program: %v",
+				"unable to get Info() of the original device filters program: %w",
 				err,
 			)
 		}
@@ -178,7 +178,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 		oldInsts, err := oldInfo.Instructions()
 		if err != nil {
 			return fmt.Errorf(
-				"unable to get the instructions of the original device filters program: %v",
+				"unable to get the instructions of the original device filters program: %w",
 				err,
 			)
 		}
@@ -186,7 +186,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 		newProg, err := generateNewProgram(rules, oldInsts)
 		if err != nil {
 			return fmt.Errorf(
-				"unable to generate new device filter program from existing programs: %v",
+				"unable to generate new device filter program from existing programs: %w",
 				err,
 			)
 		}
@@ -212,13 +212,13 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	for _, oldProg := range oldProgs {
 		err = DetachCgroupDeviceFilter(oldProg, dirFD)
 		if err != nil {
-			return fmt.Errorf("unable to detach original device filters program: %v", err)
+			return fmt.Errorf("unable to detach original device filters program: %w", err)
 		}
 	}
 	for _, newProg := range newProgs {
 		err = AttachCgroupDeviceFilter(newProg, dirFD)
 		if err != nil {
-			return fmt.Errorf("unable to attach new device filters program: %v", err)
+			return fmt.Errorf("unable to attach new device filters program: %w", err)
 		}
 	}
 
@@ -230,7 +230,7 @@ func generateNewProgram(rules []DeviceRule, oldInsts asm.Instructions) (*ebpf.Pr
 	newInsts, err := PrependDeviceFilter(rules, oldInsts)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"unable to prepend new device filters to the original device filters program: %v",
+			"unable to prepend new device filters to the original device filters program: %w",
 			err,
 		)
 	}
@@ -243,7 +243,7 @@ func generateNewProgram(rules []DeviceRule, oldInsts asm.Instructions) (*ebpf.Pr
 	}
 	newProg, err := ebpf.NewProgram(spec)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create new device filters program: %v", err)
+		return nil, fmt.Errorf("unable to create new device filters program: %w", err)
 	}
 
 	return newProg, nil
