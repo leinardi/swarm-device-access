@@ -1,0 +1,57 @@
+# GPU passthrough example for Docker Swarm
+#
+# Runs the device-mapping-manager daemon globally (one instance per node)
+# and a CUDA worker service that bind-mounts the NVIDIA device files.
+#
+# Prerequisites on each node:
+#   - NVIDIA driver installed
+#   - /dev/nvidia0, /dev/nvidiactl, /dev/nvidia-uvm present
+#   - device-mapping-manager daemon running (global service below)
+#
+# Deploy:
+#   docker stack deploy -c docker-compose.yaml gpu-example
+
+services:
+  cuda-worker:
+    image: nvidia/cuda:12.4.0-base-ubuntu22.04
+    volumes:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+    command: [ "nvidia-smi" ]
+    deploy:
+      mode: replicated
+      replicas: 1
+  device-mapping-manager:
+    image: docker:29
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - run
+      - -i
+      - --rm
+      - --name=device-mapping-manager
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
+      - /sys:/host/sys
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
+      # Enable reload-after-daemon-reload (optional):
+      # - -v
+      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      # Only apply rules to containers with this label (optional):
+      # - ghcr.io/leinardi/device-mapping-manager:latest
+      # - -require-label=dmm.enable=true
+      # Limit scope to NVIDIA devices only (optional):
+      # - -device-allow=/dev/nvidia*
+      - ghcr.io/leinardi/device-mapping-manager:latest
+    entrypoint: docker
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any

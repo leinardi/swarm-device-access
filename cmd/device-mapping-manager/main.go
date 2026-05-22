@@ -62,6 +62,21 @@ const (
 	maxBackoff = 30 * time.Second
 )
 
+// stringSliceFlag is a repeatable flag: -device-allow /dev/nvidia* -device-allow /dev/dri/*
+type stringSliceFlag []string
+
+func (f *stringSliceFlag) String() string     { return strings.Join(*f, ",") }
+func (f *stringSliceFlag) Set(v string) error { *f = append(*f, v); return nil }
+func (f stringSliceFlag) contains(path string) bool {
+	for _, pattern := range f {
+		if ok, _ := filepath.Match(pattern, path); ok {
+			return true
+		}
+	}
+
+	return false
+}
+
 var (
 	logFormat    = flag.String("log-format", "text", "Either json, text or plain")
 	logLevel     = flag.String("log-level", "info", "Either debug, info, warn, error, fatal, panic")
@@ -74,13 +89,28 @@ var (
 	dryRun = flag.Bool("dry-run", false,
 		"Log device rules that would be applied without writing to the cgroup",
 	)
-	help = flag.Bool("help", false, "Display help message")
+	requireLabel = flag.String(
+		"require-label",
+		"",
+		"Only process containers that have this label (format: key=value). Empty means all containers.",
+	)
+
+	deviceAllow stringSliceFlag
+	deviceDeny  stringSliceFlag
+	help        = flag.Bool("help", false, "Display help message")
 )
 
 // ptr returns a pointer to v. Generic helper used to inline scalar pointers
 // for cgroup.DeviceRule fields.
 func ptr[T any](v T) *T {
 	return &v
+}
+
+func init() {
+	flag.Var(&deviceAllow, "device-allow",
+		"Glob pattern for /dev/... paths to allow (repeatable). Empty means allow all.")
+	flag.Var(&deviceDeny, "device-deny",
+		"Glob pattern for /dev/... paths to deny (repeatable; takes priority over -device-allow).")
 }
 
 func main() {
@@ -106,6 +136,9 @@ func run() int {
 		"commit", commit,
 		"date", date,
 		"dry_run", *dryRun,
+		"require_label", *requireLabel,
+		"device_allow", []string(deviceAllow),
+		"device_deny", []string(deviceDeny),
 	)
 
 	rootCtx, cancelRoot := signal.NotifyContext(
@@ -340,6 +373,34 @@ func sleepCtx(ctx context.Context, duration time.Duration) {
 	}
 }
 
+// containerMatchesLabelPolicy returns true if the container should be processed.
+// When requireLabel is empty every container passes. Otherwise the container
+// must have a label matching "key=value".
+func containerMatchesLabelPolicy(labels map[string]string, policy string) bool {
+	if policy == "" {
+		return true
+	}
+
+	key, value, _ := strings.Cut(policy, "=")
+
+	return labels[key] == value
+}
+
+// devicePathAllowed returns true when the /dev/... path is permitted by the
+// global allow/deny lists. Deny takes priority over allow. An empty allow list
+// means "allow everything".
+func devicePathAllowed(path string, allow, deny stringSliceFlag) bool {
+	if deny.contains(path) {
+		return false
+	}
+
+	if len(allow) == 0 {
+		return true
+	}
+
+	return allow.contains(path)
+}
+
 // processContainer inspects a container and applies cgroup BPF device-allow
 // rules for every bind mount sourced from /dev/...
 // procRootPath is the root used for /proc lookups; "/" in production, temp dir in tests.
@@ -360,6 +421,21 @@ func processContainer(
 
 	if info.State == nil || info.State.Pid == 0 {
 		log.Debug("container has no live pid; skipping", "id", id)
+
+		return nil
+	}
+
+	// Label policy check: skip containers that don't carry the required label.
+	var labels map[string]string
+	if info.Config != nil {
+		labels = info.Config.Labels
+	}
+
+	if !containerMatchesLabelPolicy(labels, *requireLabel) {
+		log.Debug("container skipped by label policy",
+			"id", id,
+			"require_label", *requireLabel,
+		)
 
 		return nil
 	}
@@ -413,6 +489,12 @@ func processContainer(
 // applyMount applies a device rule to a single file mount, or walks the
 // directory and applies rules to every contained device file.
 func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int, dryRun bool) error {
+	if !devicePathAllowed(mountPath, deviceAllow, deviceDeny) {
+		logger.L().Debug("device mount excluded by policy", "path", mountPath)
+
+		return nil
+	}
+
 	fileInfo, statErr := os.Stat(mountPath)
 	if statErr != nil {
 		return fmt.Errorf("stat %q: %w", mountPath, statErr)
@@ -428,6 +510,12 @@ func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int, dry
 		}
 
 		if info.IsDir() {
+			return nil
+		}
+
+		if !devicePathAllowed(walkedPath, deviceAllow, deviceDeny) {
+			logger.L().Debug("device file excluded by policy", "path", walkedPath)
+
 			return nil
 		}
 

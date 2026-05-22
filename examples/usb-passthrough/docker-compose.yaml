@@ -1,0 +1,49 @@
+# USB device passthrough example for Docker Swarm
+#
+# Passes /dev/bus/usb (entire USB bus) into a worker container.
+# The daemon walks the directory and applies a rule per USB device file.
+#
+# Prerequisites:
+#   - USB device connected and visible at /dev/bus/usb on the host
+#
+# Deploy:
+#   docker stack deploy -c docker-compose.yaml usb-example
+
+services:
+  device-mapping-manager:
+    image: docker:29
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - run
+      - -i
+      - --rm
+      - --name=device-mapping-manager
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
+      - /sys:/host/sys
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
+      # Restrict to USB bus devices only:
+      # - -device-allow=/dev/bus/usb/*
+      - ghcr.io/leinardi/device-mapping-manager:latest
+    entrypoint: docker
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any
+
+  usb-worker:
+    image: ubuntu:24.04
+    volumes:
+      # Bind-mount the entire USB bus; the daemon will apply rules to each device.
+      - /dev/bus/usb:/dev/bus/usb
+    command: [ "lsusb" ]
+    deploy:
+      mode: replicated
+      replicas: 1

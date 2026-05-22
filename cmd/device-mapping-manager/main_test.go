@@ -264,6 +264,56 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 	}
 }
 
+// ---- policy helper tests ----
+
+func TestContainerMatchesLabelPolicy(t *testing.T) {
+	cases := []struct {
+		labels map[string]string
+		policy string
+		want   bool
+	}{
+		{nil, "", true},
+		{map[string]string{"foo": "bar"}, "", true},
+		{map[string]string{"dmm.enable": "true"}, "dmm.enable=true", true},
+		{map[string]string{"dmm.enable": "false"}, "dmm.enable=true", false},
+		{map[string]string{}, "dmm.enable=true", false},
+		{nil, "dmm.enable=true", false},
+		{map[string]string{"dmm.enable": ""}, "dmm.enable=", true},
+	}
+
+	for _, tc := range cases {
+		got := containerMatchesLabelPolicy(tc.labels, tc.policy)
+		if got != tc.want {
+			t.Errorf("policy=%q labels=%v → got %v, want %v", tc.policy, tc.labels, got, tc.want)
+		}
+	}
+}
+
+func TestDevicePathAllowed(t *testing.T) {
+	cases := []struct {
+		path  string
+		allow stringSliceFlag
+		deny  stringSliceFlag
+		want  bool
+	}{
+		{"/dev/nvidia0", nil, nil, true},
+		{"/dev/nvidia0", stringSliceFlag{"/dev/nvidia*"}, nil, true},
+		{"/dev/sda", stringSliceFlag{"/dev/nvidia*"}, nil, false},
+		{"/dev/sda", nil, stringSliceFlag{"/dev/sd*"}, false},
+		// deny takes priority over allow
+		{"/dev/nvidia0", stringSliceFlag{"/dev/nvidia*"}, stringSliceFlag{"/dev/nvidia*"}, false},
+		{"/dev/nvidia0", nil, stringSliceFlag{"/dev/sd*"}, true},
+	}
+
+	for _, tc := range cases {
+		got := devicePathAllowed(tc.path, tc.allow, tc.deny)
+		if got != tc.want {
+			t.Errorf("path=%q allow=%v deny=%v → got %v, want %v",
+				tc.path, tc.allow, tc.deny, got, tc.want)
+		}
+	}
+}
+
 // ---- processContainer tests ----
 
 func TestProcessContainer_InspectError(t *testing.T) {

@@ -111,14 +111,17 @@ A copy of the daemon's compose file is in
 
 The binary is configured via CLI flags:
 
-| Flag             | Default                | Description                                                          |
-|------------------|------------------------|----------------------------------------------------------------------|
-| `-log-level`     | `info`                 | `debug`, `info`, `warn`, `error`                                     |
-| `-log-format`    | `text`                 | `text`, `json`, `plain`                                              |
-| `-log-time`      | `false`                | Include timestamps in log lines                                      |
-| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket                              |
-| `-dry-run`       | `false`                | Log device rules that would be applied without writing to the cgroup |
-| `-help`          |                        | Print this flag list and exit                                        |
+| Flag             | Default                | Description                                                                     |
+|------------------|------------------------|---------------------------------------------------------------------------------|
+| `-log-level`     | `info`                 | `debug`, `info`, `warn`, `error`                                                |
+| `-log-format`    | `text`                 | `text`, `json`, `plain`                                                         |
+| `-log-time`      | `false`                | Include timestamps in log lines                                                 |
+| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket                                         |
+| `-dry-run`       | `false`                | Log device rules that would be applied without writing to the cgroup            |
+| `-require-label` | `""`                   | Only process containers with this label (`key=value`). Empty = all containers.  |
+| `-device-allow`  | `""`                   | Glob for `/dev/...` paths to allow (repeatable). Empty = allow all.             |
+| `-device-deny`   | `""`                   | Glob for `/dev/...` paths to deny (repeatable). Deny takes priority over allow. |
+| `-help`          |                        | Print this flag list and exit                                                   |
 
 ## 🛠️ Development
 
