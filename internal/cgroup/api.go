@@ -21,6 +21,7 @@ package cgroup
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -67,16 +68,21 @@ var (
 
 // GetDeviceCGroupVersion returns the version of linux cgroups in use
 func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
-	// Open the pid's cgroup file in /proc.
 	path := filepath.Join(rootPath, "proc", strconv.Itoa(pid), "cgroup")
+
 	file, err := os.Open(path)
 	if err != nil {
 		return -1, fmt.Errorf("failed to open cgroup path for pid '%d': %v", pid, err)
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanCGroupVersion(file, path)
+}
+
+// scanCGroupVersion parses the cgroup hierarchy file and returns 1 (v1) or 2 (v2).
+// Extracted from GetDeviceCGroupVersion to allow unit testing without a real /proc.
+func scanCGroupVersion(r io.Reader, path string) (int, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for either a 'devices' or a '' (i.e. unified) entry

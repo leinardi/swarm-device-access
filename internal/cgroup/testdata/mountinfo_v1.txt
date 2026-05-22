@@ -1,0 +1,5 @@
+22 21 0:21 / /sys rw,nosuid,nodev,noexec,relatime shared:2 - sysfs sysfs rw
+23 21 0:22 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+35 22 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:11 - tmpfs tmpfs rw,mode=755
+43 35 0:31 / /sys/fs/cgroup/devices rw,nosuid,nodev,noexec,relatime shared:19 - cgroup cgroup rw,devices
+44 35 0:32 / /sys/fs/cgroup/memory rw,nosuid,nodev,noexec,relatime shared:20 - cgroup cgroup rw,memory

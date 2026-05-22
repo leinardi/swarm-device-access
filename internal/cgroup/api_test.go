@@ -20,6 +20,8 @@ package cgroup
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +119,58 @@ func TestNew_ValidVersions(t *testing.T) {
 
 	if v2 == nil {
 		t.Error("New(2) returned nil Interface")
+	}
+}
+
+func TestNew_InvalidVersionIncludesValue(t *testing.T) {
+	_, err := New(42)
+	if err == nil {
+		t.Fatal("New(42) must return an error")
+	}
+
+	if !strings.Contains(err.Error(), "42") {
+		t.Errorf("error %q does not include the invalid version number", err.Error())
+	}
+}
+
+func TestScanCGroupVersion(t *testing.T) {
+	cases := []struct {
+		fixture    string
+		wantVer    int
+		wantErrSub string
+	}{
+		{"testdata/cgroup_v1.txt", 1, ""},
+		{"testdata/cgroup_v2.txt", 2, ""},
+		// hybrid: both "" and "devices" present; devices takes priority (found["devices"] checked first)
+		{"testdata/cgroup_hybrid.txt", 1, ""},
+		{"testdata/cgroup_no_match.txt", -1, "no devices or unified"},
+		{"testdata/cgroup_malformed.txt", -1, "malformed"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			f, err := os.Open(tc.fixture)
+			if err != nil {
+				t.Fatalf("open fixture: %v", err)
+			}
+			defer f.Close()
+
+			got, err := scanCGroupVersion(f, tc.fixture)
+			if tc.wantErrSub != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrSub)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrSub) {
+					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.wantVer {
+				t.Errorf("got version %d, want %d", got, tc.wantVer)
+			}
+		})
 	}
 }

@@ -21,6 +21,7 @@ package cgroup
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,16 +30,21 @@ import (
 
 // GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid
 func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error) {
-	// Open the pid's mountinfo file in /proc.
 	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "mountinfo")
+
 	file, err := os.Open(path)
 	if err != nil {
 		return "", "", err
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanMountInfoV1(file, path)
+}
+
+// scanMountInfoV1 parses a mountinfo reader for the cgroup v1 devices subsystem entry.
+// Extracted from GetDeviceCGroupMountPath to allow unit testing without a real /proc.
+func scanMountInfoV1(r io.Reader, path string) (string, string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for a subsystem of 'devices' entry.
@@ -80,16 +86,21 @@ func (c *cgroupv1) GetDeviceCGroupRootPath(
 	prefix string,
 	pid int,
 ) (string, error) {
-	// Open the pid's cgroup file in /proc.
 	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "cgroup")
+
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanProcCgroupV1(file, path, prefix)
+}
+
+// scanProcCgroupV1 parses a /proc/<pid>/cgroup reader for the cgroup v1 devices root path.
+// Extracted from GetDeviceCGroupRootPath to allow unit testing without a real /proc.
+func scanProcCgroupV1(r io.Reader, path string, prefix string) (string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for either a subsystem of 'devices' entry.
