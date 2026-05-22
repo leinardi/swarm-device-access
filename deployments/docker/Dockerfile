@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1.7
+
+########################
+# deps: cache modules
+########################
+FROM --platform=$BUILDPLATFORM golang:1.26.3-alpine AS deps
+WORKDIR /src
+RUN --mount=type=cache,target=/var/cache/apk \
+	apk add --no-cache ca-certificates git
+COPY go.mod go.sum ./
+# Use a named cache so we can reuse it in the build stage (no COPY needed)
+RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
+	go mod download
+
+########################
+# build: compile static binary
+########################
+FROM --platform=$BUILDPLATFORM golang:1.26.3-alpine AS build
+ARG VERSION="dev"
+ARG COMMIT="none"
+ARG DATE="unknown"
+
+# Buildx provides these automatically for multi-arch builds
+ARG TARGETOS
+ARG TARGETARCH
+
+ENV CGO_ENABLED=0 \
+    GOOS=${TARGETOS} \
+    GOARCH=${TARGETARCH}
+
+WORKDIR /src
+RUN --mount=type=cache,target=/var/cache/apk \
+	apk add --no-cache ca-certificates
+
+# Bring in source
+COPY . .
+
+# Reuse the same module & build caches (BuildKit)
+RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
+	--mount=type=cache,target=/root/.cache/go-build \
+	go build -trimpath -buildvcs=false \
+		-ldflags="-s -w -X 'main.version=${VERSION}' -X 'main.commit=${COMMIT}' -X 'main.date=${DATE}'" \
+		-o /out/device-mapping-manager ./cmd/device-mapping-manager
+
+########################
+# runtime: alpine (root by default, required for cgroup BPF syscalls;
+# includes a shell + busybox utilities for in-container debugging).
+########################
+FROM alpine:3.23.4
+
+# hadolint ignore=DL3050
+LABEL org.opencontainers.image.title="device-mapping-manager" \
+	org.opencontainers.image.description="Listens to Docker container-start events and injects cgroup v2 BPF device-allow rules for containers that bind-mount /dev/... paths" \
+	org.opencontainers.image.source="https://github.com/leinardi/device-mapping-manager" \
+	org.opencontainers.image.licenses="Apache-2.0"
+
+# Copy the binary
+COPY --from=build /out/device-mapping-manager /usr/local/bin/device-mapping-manager
+
+# NOTE: the daemon must run as root and with elevated privileges. It writes
+# eBPF programs into the host's cgroup v2 hierarchy via /sys/fs/cgroup and
+# the bpf(2) syscall. The deployment is responsible for the bind mounts and
+# namespace settings — see deployments/docker/docker-compose.yaml for an
+# example layout (privileged, cgroupns=host, pid=host, /sys mount).
+#
+# The daemon spawns no child processes and handles SIGTERM/SIGINT directly via
+# signal.NotifyContext, so no init shim (tini, dumb-init) is needed — even when
+# the container is started with --pid=host (which would place an init shim
+# outside PID 1 of its own pid namespace and prevent it from working anyway).
+
+ENTRYPOINT ["/usr/local/bin/device-mapping-manager"]

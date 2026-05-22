@@ -73,7 +73,11 @@ func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 }
 
 // GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid
-func (c *cgroupv2) GetDeviceCGroupRootPath(procRootPath string, prefix string, pid int) (string, error) {
+func (c *cgroupv2) GetDeviceCGroupRootPath(
+	procRootPath string,
+	prefix string,
+	pid int,
+) (string, error) {
 	// Open the pid's cgroup file in /proc.
 	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "cgroup"), pid)
 	file, err := os.Open(path)
@@ -111,7 +115,7 @@ func (c *cgroupv2) GetDeviceCGroupRootPath(procRootPath string, prefix string, p
 // AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath
 func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// Open the cgroup path.
-	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0600)
+	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("unable to open the cgroup path: %v", err)
 	}
@@ -120,7 +124,10 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// Find any existing eBPF device filter programs attached to this cgroup.
 	oldProgs, err := FindAttachedCgroupDeviceFilters(dirFD)
 	if err != nil {
-		return fmt.Errorf("unable to find any existing device filters attached to the cgroup: %v", err)
+		return fmt.Errorf(
+			"unable to find any existing device filters attached to the cgroup: %v",
+			err,
+		)
 	}
 
 	// Generate a new set of eBPF programs by prepending instructions for the
@@ -132,7 +139,10 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 
 		newProg, err := generateNewProgram(rules, oldInsts)
 		if err != nil {
-			return fmt.Errorf("unable to generate new device filter program with no existing programs: %v", err)
+			return fmt.Errorf(
+				"unable to generate new device filter program with no existing programs: %v",
+				err,
+			)
 		}
 
 		newProgs = append(newProgs, newProg)
@@ -140,17 +150,26 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	for _, oldProg := range oldProgs {
 		oldInfo, err := oldProg.Info()
 		if err != nil {
-			return fmt.Errorf("unable to get Info() of the original device filters program: %v", err)
+			return fmt.Errorf(
+				"unable to get Info() of the original device filters program: %v",
+				err,
+			)
 		}
 
 		oldInsts, err := oldInfo.Instructions()
 		if err != nil {
-			return fmt.Errorf("unable to get the instructions of the original device filters program: %v", err)
+			return fmt.Errorf(
+				"unable to get the instructions of the original device filters program: %v",
+				err,
+			)
 		}
 
 		newProg, err := generateNewProgram(rules, oldInsts)
 		if err != nil {
-			return fmt.Errorf("unable to generate new device filter program from existing programs: %v", err)
+			return fmt.Errorf(
+				"unable to generate new device filter program from existing programs: %v",
+				err,
+			)
 		}
 
 		newProgs = append(newProgs, newProg)
@@ -188,7 +207,10 @@ func generateNewProgram(rules []DeviceRule, oldInsts asm.Instructions) (*ebpf.Pr
 	// Prepend instructions for the new devices to the original set of instructions.
 	newInsts, err := PrependDeviceFilter(rules, oldInsts)
 	if err != nil {
-		return nil, fmt.Errorf("unable to prepend new device filters to the original device filters program: %v", err)
+		return nil, fmt.Errorf(
+			"unable to prepend new device filters to the original device filters program: %v",
+			err,
+		)
 	}
 
 	// Generate new eBPF program for the merged device filter instructions.

@@ -24,11 +24,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
-type DeviceRule = specs.LinuxDeviceCgroup
+// DeviceRule mirrors the shape of specs.LinuxDeviceCgroup from
+// github.com/opencontainers/runtime-spec/specs-go, inlined here to avoid
+// pulling in the runtime-spec module for a single type.
+type DeviceRule struct {
+	Allow  bool   `json:"allow"`
+	Type   string `json:"type,omitempty"`
+	Major  *int64 `json:"major,omitempty"`
+	Minor  *int64 `json:"minor,omitempty"`
+	Access string `json:"access,omitempty"`
+}
 
 type Interface interface {
 	GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error)
@@ -47,11 +54,15 @@ func New(version int) (Interface, error) {
 	}
 }
 
-type cgroupv1 struct{}
-type cgroupv2 struct{}
+type (
+	cgroupv1 struct{}
+	cgroupv2 struct{}
+)
 
-var _ Interface = (*cgroupv1)(nil)
-var _ Interface = (*cgroupv2)(nil)
+var (
+	_ Interface = (*cgroupv1)(nil)
+	_ Interface = (*cgroupv2)(nil)
+)
 
 // GetDeviceCGroupVersion returns the version of linux cgroups in use
 func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {

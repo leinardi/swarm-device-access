@@ -1,0 +1,37 @@
+services:
+  device-mapping-manager:
+    image: ghcr.io/leinardi/device-mapping-manager:latest # dclint disable-line service-image-require-explicit-tag
+
+    volumes:
+      # The daemon listens to Docker events and inspects containers to find
+      # /dev/... bind mounts.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # The daemon writes BPF programs into the host's cgroup v2 hierarchy.
+      # /host/sys/fs/cgroup must point at the host's real cgroup tree; the
+      # daemon resolves cgroup paths through /host (see hostRootPath in main.go).
+      - /sys:/host/sys
+
+    # Example flags. Override on a per-deployment basis as needed.
+    command:
+      - "-log-level"
+      - "info"
+      - "-log-format"
+      - "text"
+
+    restart: unless-stopped
+    cgroup: host
+
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any
+    pid: host
+
+    # The daemon manipulates cgroup v2 BPF programs on the host. That requires
+    # full host privileges and access to the host's cgroup namespace, pid
+    # namespace, and /sys filesystem. None of the hardening flags used by other
+    # services (no-new-privileges, read_only, USER nonroot, etc.) are
+    # compatible with this workload.
+    privileged: true
+    userns_mode: host

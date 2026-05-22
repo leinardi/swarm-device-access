@@ -1,0 +1,423 @@
+//go:build linux
+
+/*
+ * Copyright 2026 Roberto Leinardi
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// Package main wires and runs the device-mapping-manager daemon.
+// It listens to Docker container-start events and injects cgroup v2 BPF
+// device-allow rules for any container that bind-mounts a /dev/... path.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"path"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/client"
+	"github.com/leinardi/device-mapping-manager/internal/cgroup"
+	"github.com/leinardi/device-mapping-manager/internal/logger"
+	"golang.org/x/sys/unix"
+)
+
+const (
+	// hostRootPath is where the host's "/" is expected to be mounted inside
+	// the daemon container. Setting cgroup BPF programs requires writing to
+	// /sys/fs/cgroup of the host, so the daemon needs the host root visible
+	// to it. See the example docker-compose for the bind mount layout.
+	hostRootPath = "/host"
+
+	minBackoff = 1 * time.Second
+	maxBackoff = 30 * time.Second
+)
+
+var (
+	logFormat    = flag.String("log-format", "text", "Either json, text or plain")
+	logLevel     = flag.String("log-level", "info", "Either debug, info, warn, error, fatal, panic")
+	logTime      = flag.Bool("log-time", false, "Include timestamp in logs")
+	dockerSocket = flag.String(
+		"docker-socket",
+		"/var/run/docker.sock",
+		"Path to the Docker UNIX socket",
+	)
+	help = flag.Bool("help", false, "Display help message")
+)
+
+// ptr returns a pointer to v. Generic helper used to inline scalar pointers
+// for cgroup.DeviceRule fields.
+func ptr[T any](v T) *T {
+	return &v
+}
+
+func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	flag.Parse()
+
+	if *help {
+		flag.PrintDefaults()
+
+		return 0
+	}
+
+	_ = logger.Configure(*logFormat, *logLevel, *logTime)
+	log := logger.L()
+
+	log.Info("device-mapping-manager starting",
+		"version", version,
+		"commit", commit,
+		"date", date,
+	)
+
+	rootCtx, cancelRoot := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	defer cancelRoot()
+
+	cli, err := client.NewClientWithOpts(
+		client.WithHost("unix://"+*dockerSocket),
+		client.WithAPIVersionNegotiation(),
+	)
+	if err != nil {
+		log.Error("docker client init failed", "err", err)
+
+		return 1
+	}
+	defer cli.Close()
+
+	// Apply rules to containers that are already running when we start up.
+	// Track their IDs so the start-event handler can skip them on the brief
+	// window where both events and the initial enumeration overlap.
+	processed := make(map[string]struct{})
+	if processErr := processExistingContainers(rootCtx, cli, processed); processErr != nil {
+		log.Warn("could not enumerate existing containers", "err", processErr)
+	}
+
+	listenEvents(rootCtx, cli, processed)
+
+	log.Info("device-mapping-manager shutting down")
+
+	return 0
+}
+
+// processExistingContainers iterates the currently running containers and
+// applies device rules to each one that bind-mounts /dev/... paths. Fixes
+// the upstream behavior of only reacting to future "start" events.
+func processExistingContainers(
+	ctx context.Context,
+	cli *client.Client,
+	processed map[string]struct{},
+) error {
+	log := logger.L()
+
+	containers, err := cli.ContainerList(ctx, container.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list containers: %w", err)
+	}
+
+	log.Debug("enumerating running containers", "count", len(containers))
+
+	for _, runningContainer := range containers {
+		processErr := processContainer(ctx, cli, runningContainer.ID)
+		if processErr != nil {
+			log.Warn("could not process running container",
+				"id", runningContainer.ID, "err", processErr)
+
+			continue
+		}
+
+		processed[runningContainer.ID] = struct{}{}
+	}
+
+	return nil
+}
+
+// listenEvents subscribes to Docker "start" events and applies device rules.
+// On stream error it reconnects with exponential backoff (capped) rather than
+// terminating the daemon — replaces the upstream log.Fatal(err) pattern.
+func listenEvents(
+	ctx context.Context,
+	cli *client.Client,
+	processed map[string]struct{},
+) {
+	log := logger.L()
+	backoff := minBackoff
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		msgs, errs := cli.Events(
+			ctx,
+			events.ListOptions{Filters: filters.NewArgs(filters.Arg("event", "start"))},
+		)
+
+		log.Debug("subscribed to docker events")
+
+		disconnected := consumeEvents(ctx, cli, msgs, errs, processed, &backoff)
+		if !disconnected {
+			return
+		}
+	}
+}
+
+// consumeEvents drains one events.Subscribe lifecycle. Returns true if the
+// caller should reconnect, false on context cancellation.
+func consumeEvents(
+	ctx context.Context,
+	cli *client.Client,
+	msgs <-chan events.Message,
+	errs <-chan error,
+	processed map[string]struct{},
+	backoff *time.Duration,
+) bool {
+	log := logger.L()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+
+		case streamErr := <-errs:
+			if streamErr == nil {
+				continue
+			}
+
+			if errors.Is(streamErr, context.Canceled) ||
+				errors.Is(streamErr, context.DeadlineExceeded) {
+				return false
+			}
+
+			log.Error("docker events stream error, reconnecting",
+				"err", streamErr, "backoff", *backoff)
+			sleepCtx(ctx, *backoff)
+			*backoff = nextBackoff(*backoff)
+
+			return true
+
+		case msg, ok := <-msgs:
+			if !ok {
+				log.Warn("docker events channel closed, reconnecting",
+					"backoff", *backoff)
+				sleepCtx(ctx, *backoff)
+				*backoff = nextBackoff(*backoff)
+
+				return true
+			}
+
+			*backoff = minBackoff
+
+			if _, alreadyProcessed := processed[msg.Actor.ID]; alreadyProcessed {
+				delete(processed, msg.Actor.ID)
+
+				continue
+			}
+
+			processErr := processContainer(ctx, cli, msg.Actor.ID)
+			if processErr != nil {
+				log.Warn("could not process container",
+					"id", msg.Actor.ID, "err", processErr)
+			}
+		}
+	}
+}
+
+func nextBackoff(current time.Duration) time.Duration {
+	next := current * 2
+	if next > maxBackoff {
+		return maxBackoff
+	}
+
+	return next
+}
+
+func sleepCtx(ctx context.Context, duration time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(duration):
+	}
+}
+
+// processContainer inspects a container and applies cgroup BPF device-allow
+// rules for every bind mount sourced from /dev/...
+func processContainer(ctx context.Context, cli *client.Client, id string) error {
+	log := logger.L()
+
+	info, inspectErr := cli.ContainerInspect(ctx, id)
+	if inspectErr != nil {
+		return fmt.Errorf("inspect container %q: %w", id, inspectErr)
+	}
+
+	if info.State == nil || info.State.Pid == 0 {
+		log.Debug("container has no live pid; skipping", "id", id)
+
+		return nil
+	}
+
+	pid := info.State.Pid
+
+	cgroupVersion, versionErr := cgroup.GetDeviceCGroupVersion("/", pid)
+	if versionErr != nil {
+		return fmt.Errorf("detect cgroup version for pid %d: %w", pid, versionErr)
+	}
+
+	log.Debug("cgroup version detected", "pid", pid, "version", cgroupVersion)
+
+	api, apiErr := cgroup.New(cgroupVersion)
+	if apiErr != nil {
+		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
+	}
+
+	cgroupPath, sysfsPath, mountErr := api.GetDeviceCGroupMountPath("/", pid)
+	if mountErr != nil {
+		return fmt.Errorf("resolve cgroup mount path: %w", mountErr)
+	}
+
+	cgroupPath = path.Join(hostRootPath, sysfsPath, cgroupPath)
+	log.Debug("cgroup path resolved", "pid", pid, "path", cgroupPath)
+
+	for _, mount := range info.Mounts {
+		if !strings.HasPrefix(mount.Source, "/dev") {
+			continue
+		}
+
+		log.Debug("device mount detected",
+			"id", id,
+			"pid", pid,
+			"source", mount.Source,
+			"destination", mount.Destination,
+		)
+
+		applyErr := applyMount(api, mount.Source, cgroupPath, pid)
+		if applyErr != nil {
+			log.Warn("could not apply device rule for mount",
+				"source", mount.Source,
+				"err", applyErr,
+			)
+		}
+	}
+
+	return nil
+}
+
+// applyMount applies a device rule to a single file mount, or walks the
+// directory and applies rules to every contained device file.
+func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int) error {
+	fileInfo, statErr := os.Stat(mountPath)
+	if statErr != nil {
+		return fmt.Errorf("stat %q: %w", mountPath, statErr)
+	}
+
+	if !fileInfo.IsDir() {
+		return applyDeviceRules(api, mountPath, cgroupPath, pid)
+	}
+
+	walkErr := filepath.Walk(mountPath, func(walkedPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		ruleErr := applyDeviceRules(api, walkedPath, cgroupPath, pid)
+		if ruleErr != nil {
+			logger.L().Warn("could not apply device rule",
+				"path", walkedPath,
+				"err", ruleErr,
+			)
+		}
+
+		return nil
+	})
+	if walkErr != nil {
+		return fmt.Errorf("walk %q: %w", mountPath, walkErr)
+	}
+
+	return nil
+}
+
+func applyDeviceRules(api cgroup.Interface, mountPath, cgroupPath string, pid int) error {
+	log := logger.L()
+
+	deviceType, major, minor, infoErr := getDeviceInfo(mountPath)
+	if infoErr != nil {
+		return infoErr
+	}
+
+	log.Debug("adding device rule",
+		"pid", pid,
+		"cgroup", cgroupPath,
+		"type", deviceType,
+		"major", major,
+		"minor", minor,
+	)
+
+	ruleErr := api.AddDeviceRules(cgroupPath, []cgroup.DeviceRule{
+		{
+			Access: "rwm",
+			Major:  ptr(major),
+			Minor:  ptr(minor),
+			Type:   deviceType,
+			Allow:  true,
+		},
+	})
+	if ruleErr != nil {
+		return fmt.Errorf("add device rule: %w", ruleErr)
+	}
+
+	return nil
+}
+
+func getDeviceInfo(devicePath string) (string, int64, int64, error) {
+	var stat unix.Stat_t
+
+	if statErr := unix.Stat(devicePath, &stat); statErr != nil {
+		return "", -1, -1, fmt.Errorf("stat %q: %w", devicePath, statErr)
+	}
+
+	var deviceType string
+
+	switch stat.Mode & unix.S_IFMT {
+	case unix.S_IFBLK:
+		deviceType = "b"
+	case unix.S_IFCHR:
+		deviceType = "c"
+	default:
+		return "", -1, -1, fmt.Errorf("device %q is neither character nor block device", devicePath)
+	}
+
+	major := int64(unix.Major(stat.Rdev))
+	minor := int64(unix.Minor(stat.Rdev))
+
+	return deviceType, major, minor, nil
+}

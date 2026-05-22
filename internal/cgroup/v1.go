@@ -65,11 +65,17 @@ func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		return parts[3], parts[4], nil
 	}
 
-	return "", "", fmt.Errorf("no cgroup filesystem mounted for the devices subsytem in mountinfo file")
+	return "", "", fmt.Errorf(
+		"no cgroup filesystem mounted for the devices subsytem in mountinfo file",
+	)
 }
 
 // GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid
-func (c *cgroupv1) GetDeviceCGroupRootPath(procRootPath string, prefix string, pid int) (string, error) {
+func (c *cgroupv1) GetDeviceCGroupRootPath(
+	procRootPath string,
+	prefix string,
+	pid int,
+) (string, error) {
 	// Open the pid's cgroup file in /proc.
 	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "cgroup"), pid)
 	file, err := os.Open(path)
@@ -134,14 +140,16 @@ func (c *cgroupv1) addDeviceRule(cgroupPath string, rule *DeviceRule) error {
 	} else {
 		path = filepath.Join(cgroupPath, "devices.deny")
 	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
 	// Write the device rule into the file.
-	_, err = file.WriteString(fmt.Sprintf("%s %d:%d %s", rule.Type, *rule.Major, *rule.Minor, rule.Access))
+	_, err = file.WriteString(
+		fmt.Sprintf("%s %d:%d %s", rule.Type, *rule.Major, *rule.Minor, rule.Access),
+	)
 	if err != nil {
 		return err
 	}

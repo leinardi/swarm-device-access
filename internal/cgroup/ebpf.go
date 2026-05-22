@@ -28,8 +28,11 @@
 package cgroup
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"runtime"
@@ -38,9 +41,6 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/link"
-	"github.com/google/uuid"
-	"github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
@@ -81,7 +81,7 @@ func (p *program) init() {
 }
 
 // appendDevice needs to be called from the last element of OCI linux.resources.devices to the head element.
-func (p *program) appendDevice(dev specs.LinuxDeviceCgroup, labelPrefix string) error {
+func (p *program) appendDevice(dev DeviceRule, labelPrefix string) error {
 	if p.blockID < 0 {
 		return errors.New("the program is finalized")
 	}
@@ -178,7 +178,10 @@ func (p *program) acceptBlock(accept bool) asm.Instructions {
 	}
 }
 
-func (p *program) finalize(origInsts asm.Instructions, labelPrefix string) (asm.Instructions, error) {
+func (p *program) finalize(
+	origInsts asm.Instructions,
+	labelPrefix string,
+) (asm.Instructions, error) {
 	lenInsts := len(p.insts)
 	// set blockSym to the first instruction of origInsts so we are able to jump to it properly
 	blockSym := fmt.Sprintf("%s-block-%d", labelPrefix, p.blockID)
@@ -243,7 +246,13 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 				// programs (and stops runc from breaking on distributions with
 				// very strict SELinux policies).
 				if errors.Is(err, os.ErrPermission) {
-					logrus.Debugf("ignoring existing CGROUP_DEVICE program (prog_id=%v) which cannot be accessed by runc -- likely due to LSM policy: %v", progId, err)
+					slog.Debug(
+						"ignoring existing CGROUP_DEVICE program (cannot be accessed -- likely LSM policy)",
+						"prog_id",
+						progId,
+						"err",
+						err,
+					)
 					continue
 				}
 				return nil, fmt.Errorf("cannot fetch program from id: %w", err)
@@ -258,8 +267,14 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 }
 
 // PrependDeviceFilter prepends a set of instructions for further device filtering to an existing device filtering ebpf program
-func PrependDeviceFilter(devices []specs.LinuxDeviceCgroup, origInsts asm.Instructions) (asm.Instructions, error) {
-	labelPrefix := uuid.New().String()
+func PrependDeviceFilter(
+	devices []DeviceRule,
+	origInsts asm.Instructions,
+) (asm.Instructions, error) {
+	labelPrefix, err := randomLabelPrefix()
+	if err != nil {
+		return nil, fmt.Errorf("generate label prefix: %w", err)
+	}
 	p := &program{}
 	p.init()
 	for i := len(devices) - 1; i >= 0; i-- {
@@ -269,6 +284,17 @@ func PrependDeviceFilter(devices []specs.LinuxDeviceCgroup, origInsts asm.Instru
 	}
 	insts, err := p.finalize(origInsts, labelPrefix)
 	return insts, err
+}
+
+// randomLabelPrefix returns a hex-encoded random string for use as a unique
+// label prefix in generated BPF instructions. Replaces the previous uuid.New()
+// dependency with stdlib crypto/rand.
+func randomLabelPrefix() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // DetachCgroupDeviceFilter detaches an existing device filter ebpf program from a cgroup.
@@ -293,7 +319,10 @@ func AttachCgroupDeviceFilter(prog *ebpf.Program, dirFd int) error {
 		Flags:   unix.BPF_F_ALLOW_MULTI,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, BPF_F_ALLOW_MULTI): %w", err)
+		return fmt.Errorf(
+			"failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, BPF_F_ALLOW_MULTI): %w",
+			err,
+		)
 	}
 	return nil
 }
