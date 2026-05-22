@@ -21,12 +21,62 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/mount"
 )
+
+// fakeInspector is a test double for containerInspector.
+type fakeInspector struct {
+	result dockertypes.ContainerJSON
+	err    error
+}
+
+func (f *fakeInspector) ContainerInspect(
+	_ context.Context,
+	_ string,
+) (dockertypes.ContainerJSON, error) {
+	return f.result, f.err
+}
+
+// buildProcRoot creates a minimal /proc/<pid>/{cgroup,mountinfo} structure
+// under a temp dir so processContainer can resolve the cgroup path without a
+// real /proc filesystem.
+func buildProcRoot(t *testing.T, pid int, cgroupContent, mountinfoContent string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	procDir := filepath.Join(root, "proc", fmt.Sprintf("%d", pid))
+
+	if err := os.MkdirAll(procDir, 0o755); err != nil {
+		t.Fatalf("mkdir proc: %v", err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(procDir, "cgroup"),
+		[]byte(cgroupContent),
+		0o644,
+	); err != nil {
+		t.Fatalf("write cgroup: %v", err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(procDir, "mountinfo"),
+		[]byte(mountinfoContent),
+		0o644,
+	); err != nil {
+		t.Fatalf("write mountinfo: %v", err)
+	}
+
+	return root
+}
 
 func TestNextBackoff_Doubles(t *testing.T) {
 	got := nextBackoff(1 * time.Second)
@@ -211,6 +261,99 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 
 	if _, stillPresent := processed["already-seen"]; stillPresent {
 		t.Error("processed map should have entry removed after deduplication")
+	}
+}
+
+// ---- processContainer tests ----
+
+func TestProcessContainer_InspectError(t *testing.T) {
+	insp := &fakeInspector{err: errors.New("daemon unavailable")}
+	err := processContainer(context.Background(), insp, "abc", "/")
+
+	if err == nil {
+		t.Fatal("expected error from inspect failure, got nil")
+	}
+}
+
+func TestProcessContainer_NilState(t *testing.T) {
+	insp := &fakeInspector{result: dockertypes.ContainerJSON{
+		ContainerJSONBase: &dockertypes.ContainerJSONBase{
+			State: nil,
+		},
+	}}
+
+	err := processContainer(context.Background(), insp, "abc", "/")
+	if err != nil {
+		t.Fatalf("expected nil error for nil state, got %v", err)
+	}
+}
+
+func TestProcessContainer_ZeroPid(t *testing.T) {
+	state := &dockertypes.ContainerState{Pid: 0}
+	insp := &fakeInspector{result: dockertypes.ContainerJSON{
+		ContainerJSONBase: &dockertypes.ContainerJSONBase{State: state},
+	}}
+
+	err := processContainer(context.Background(), insp, "abc", "/")
+	if err != nil {
+		t.Fatalf("expected nil error for pid=0, got %v", err)
+	}
+}
+
+func TestProcessContainer_NoDevMounts(t *testing.T) {
+	const pid = 42
+
+	// cgroup v2 fixture: unified hierarchy
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n"
+
+	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+	// Container has only non-/dev mounts — processContainer should return nil
+	// without attempting any cgroup writes (cgroup write would fail here since
+	// the path doesn't exist, but we never reach that code).
+	state := &dockertypes.ContainerState{Pid: pid}
+	insp := &fakeInspector{result: dockertypes.ContainerJSON{
+		ContainerJSONBase: &dockertypes.ContainerJSONBase{State: state},
+		Mounts: []dockertypes.MountPoint{
+			{Source: "/tmp/data", Destination: "/data", Type: mount.TypeBind},
+			{Source: "/var/log", Destination: "/logs", Type: mount.TypeBind},
+		},
+	}}
+
+	err := processContainer(context.Background(), insp, "abc", root)
+	if err != nil {
+		t.Fatalf("expected nil error for container with no /dev mounts, got %v", err)
+	}
+}
+
+func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
+	const pid = 43
+
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n"
+
+	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+	// Mixed mounts: one /dev, one not. The /dev mount will reach applyMount
+	// which will fail (stat on a fake path) but processContainer logs and
+	// continues — so the overall return is still nil.
+	state := &dockertypes.ContainerState{Pid: pid}
+	insp := &fakeInspector{result: dockertypes.ContainerJSON{
+		ContainerJSONBase: &dockertypes.ContainerJSONBase{State: state},
+		Mounts: []dockertypes.MountPoint{
+			{Source: "/tmp/data", Destination: "/data", Type: mount.TypeBind},
+			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+		},
+	}}
+
+	// processContainer returns nil even when applyMount fails (warns instead).
+	err := processContainer(context.Background(), insp, "abc", root)
+	if err != nil {
+		t.Fatalf(
+			"processContainer should not return error when applyMount fails (logs warning): %v",
+			err,
+		)
 	}
 }
 

@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -42,6 +43,13 @@ import (
 	"github.com/leinardi/device-mapping-manager/internal/systemd"
 	"golang.org/x/sys/unix"
 )
+
+// containerInspector is the subset of *client.Client used by processContainer.
+// It exists solely to allow unit tests to inject a fake without standing up a
+// real Docker daemon.
+type containerInspector interface {
+	ContainerInspect(ctx context.Context, id string) (dockertypes.ContainerJSON, error)
+}
 
 const (
 	// hostRootPath is where the host's "/" is expected to be mounted inside
@@ -118,7 +126,7 @@ func run() int {
 	// Track their IDs so the start-event handler can skip them on the brief
 	// window where both events and the initial enumeration overlap.
 	processed := make(map[string]struct{})
-	if processErr := processExistingContainers(rootCtx, cli, processed); processErr != nil {
+	if processErr := processExistingContainers(rootCtx, cli, processed, "/"); processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
 
@@ -138,6 +146,7 @@ func processExistingContainers(
 	ctx context.Context,
 	cli *client.Client,
 	processed map[string]struct{},
+	procRootPath string,
 ) error {
 	log := logger.L()
 
@@ -149,7 +158,7 @@ func processExistingContainers(
 	log.Debug("enumerating running containers", "count", len(containers))
 
 	for _, runningContainer := range containers {
-		processErr := processContainer(ctx, cli, runningContainer.ID)
+		processErr := processContainer(ctx, cli, runningContainer.ID, procRootPath)
 		if processErr != nil {
 			log.Warn("could not process running container",
 				"id", runningContainer.ID, "err", processErr)
@@ -186,7 +195,7 @@ func startReloadWatcher(ctx context.Context, cli *client.Client) {
 
 		watcher.Watch(ctx, func() {
 			fresh := make(map[string]struct{})
-			if processErr := processExistingContainers(ctx, cli, fresh); processErr != nil {
+			if processErr := processExistingContainers(ctx, cli, fresh, "/"); processErr != nil {
 				log.Warn("could not re-apply rules after systemd reload",
 					"err", processErr)
 			}
@@ -226,7 +235,7 @@ func listenEvents(
 
 		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff,
 			func(ctx context.Context, id string) error {
-				return processContainer(ctx, cli, id)
+				return processContainer(ctx, cli, id, "/")
 			})
 		if !disconnected {
 			return
@@ -316,7 +325,14 @@ func sleepCtx(ctx context.Context, duration time.Duration) {
 
 // processContainer inspects a container and applies cgroup BPF device-allow
 // rules for every bind mount sourced from /dev/...
-func processContainer(ctx context.Context, cli *client.Client, id string) error {
+// procRootPath is the root used for /proc lookups; it is "/" in production and
+// a temp-dir fixture root in tests.
+func processContainer(
+	ctx context.Context,
+	cli containerInspector,
+	id string,
+	procRootPath string,
+) error {
 	log := logger.L()
 
 	info, inspectErr := cli.ContainerInspect(ctx, id)
@@ -332,7 +348,7 @@ func processContainer(ctx context.Context, cli *client.Client, id string) error 
 
 	pid := info.State.Pid
 
-	cgroupVersion, versionErr := cgroup.GetDeviceCGroupVersion("/", pid)
+	cgroupVersion, versionErr := cgroup.GetDeviceCGroupVersion(procRootPath, pid)
 	if versionErr != nil {
 		return fmt.Errorf("detect cgroup version for pid %d: %w", pid, versionErr)
 	}
@@ -344,7 +360,7 @@ func processContainer(ctx context.Context, cli *client.Client, id string) error 
 		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
 	}
 
-	cgroupPath, sysfsPath, mountErr := api.GetDeviceCGroupMountPath("/", pid)
+	cgroupPath, sysfsPath, mountErr := api.GetDeviceCGroupMountPath(procRootPath, pid)
 	if mountErr != nil {
 		return fmt.Errorf("resolve cgroup mount path: %w", mountErr)
 	}
