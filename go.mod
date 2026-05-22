@@ -5,6 +5,7 @@ go 1.26.3
 require (
 	github.com/cilium/ebpf v0.19.0
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/godbus/dbus/v5 v5.1.0
 	golang.org/x/sys v0.42.0
 )
 

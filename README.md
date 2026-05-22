@@ -25,7 +25,8 @@ expected from the bind mount.
 
 ## 📦 What this daemon does
 
-- Subscribes to Docker's `start` event stream (with reconnect-with-backoff).
+- Subscribes to Docker's `start` and `unpause` event stream (with
+  reconnect-with-backoff).
 - At startup, enumerates already-running containers so a daemon restart does
   not leave them with missing device rules.
 - For each new container, inspects its mounts and applies a BPF
@@ -34,6 +35,10 @@ expected from the bind mount.
   file.
 - Supports both cgroup v1 (`devices.allow` write) and cgroup v2 (BPF program
   attach). Most modern hosts use v2.
+- Optionally watches systemd's DBus `Reloading` signal and re-applies device
+  rules after `systemctl daemon-reload` (which clears cgroup BPF programs).
+  Enabled when the host's DBus socket is bind-mounted into the daemon;
+  silently skipped otherwise.
 
 The cgroup/BPF code is the original NVIDIA implementation from
 [NVIDIA's container toolkit](https://github.com/NVIDIA/k8s-device-plugin)
@@ -42,23 +47,45 @@ The cgroup/BPF code is the original NVIDIA implementation from
 ## 🚀 Quick start
 
 The daemon must run on every Swarm node that hosts services needing device
-access. It requires `privileged: true`, `cgroup: host`, `pid: host`, and a
-bind mount of the host `/sys`.
+access. It requires `privileged: true`, `cgroupns: host`, `pid: host`,
+`userns: host`, and bind mounts of the host `/sys` and `/dev`.
+
+Swarm's compose schema rejects `privileged`, `cgroup`, `pid`, and
+`userns_mode` on service definitions. The workaround is a wrapper service
+that runs a `docker` CLI image and shells out to `docker run` against the
+host's Docker socket — that `docker run` invocation accepts every flag
+Swarm forbids.
 
 ### Docker Compose (Swarm)
 
 ```yaml
 services:
   device-mapping-manager:
-    image: ghcr.io/leinardi/device-mapping-manager:latest
-    privileged: true
-    cgroup: host
-    pid: host
-    userns_mode: host
-    restart: unless-stopped
+    image: docker:29
+    entrypoint: docker
+    # Run the actual daemon outside Swarm's purview via the host Docker socket.
+    # Swarm rejects privileged/cgroup/pid/userns on services, so this wrapper
+    # launches the privileged container with `docker run` instead.
+    command:
+      - run
+      - -i
+      - --rm
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
+      - /sys:/host/sys
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
+      # Optional: enables re-apply of device rules after systemctl daemon-reload.
+      # - -v
+      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - ghcr.io/leinardi/device-mapping-manager:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /sys:/host/sys
     deploy:
       mode: global
       restart_policy:

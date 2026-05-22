@@ -40,6 +40,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/leinardi/device-mapping-manager/internal/cgroup"
 	"github.com/leinardi/device-mapping-manager/internal/logger"
+	"github.com/leinardi/device-mapping-manager/internal/systemd"
 	"golang.org/x/sys/unix"
 )
 
@@ -120,6 +121,8 @@ func run() int {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
 
+	startReloadWatcher(rootCtx, cli)
+
 	listenEvents(rootCtx, cli, processed)
 
 	log.Info("device-mapping-manager shutting down")
@@ -159,9 +162,42 @@ func processExistingContainers(
 	return nil
 }
 
-// listenEvents subscribes to Docker "start" events and applies device rules.
-// On stream error it reconnects with exponential backoff (capped) rather than
-// terminating the daemon — replaces the upstream log.Fatal(err) pattern.
+// startReloadWatcher tries to subscribe to systemd's DBus Reloading signal so
+// that when daemon-reload wipes the cgroup BPF programs, we re-apply rules to
+// every running container. DBus is optional — on hosts without systemd or
+// without the DBus socket mounted, this logs a warning and returns.
+func startReloadWatcher(ctx context.Context, cli *client.Client) {
+	log := logger.L()
+
+	watcher, err := systemd.Open()
+	if err != nil {
+		log.Warn("systemd reload handling disabled", "err", err)
+
+		return
+	}
+
+	go func() {
+		defer func() {
+			if closeErr := watcher.Close(); closeErr != nil {
+				log.Warn("close systemd watcher", "err", closeErr)
+			}
+		}()
+
+		watcher.Watch(ctx, func() {
+			fresh := make(map[string]struct{})
+			if processErr := processExistingContainers(ctx, cli, fresh); processErr != nil {
+				log.Warn("could not re-apply rules after systemd reload",
+					"err", processErr)
+			}
+		})
+	}()
+}
+
+// listenEvents subscribes to Docker container events and applies device rules.
+// "start" covers fresh starts and restart's second phase; "unpause" covers
+// resume from a paused state if the cgroup state was cleared. On stream error
+// it reconnects with exponential backoff (capped) rather than terminating the
+// daemon — replaces the upstream log.Fatal(err) pattern.
 func listenEvents(
 	ctx context.Context,
 	cli *client.Client,
@@ -170,6 +206,11 @@ func listenEvents(
 	log := logger.L()
 	backoff := minBackoff
 
+	eventFilters := filters.NewArgs(
+		filters.Arg("event", "start"),
+		filters.Arg("event", "unpause"),
+	)
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -177,7 +218,7 @@ func listenEvents(
 
 		msgs, errs := cli.Events(
 			ctx,
-			events.ListOptions{Filters: filters.NewArgs(filters.Arg("event", "start"))},
+			events.ListOptions{Filters: eventFilters},
 		)
 
 		log.Debug("subscribed to docker events")
