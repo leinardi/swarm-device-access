@@ -36,6 +36,8 @@ The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on
 
 ## Architecture
 
+See [`docs/architecture.md`](docs/architecture.md) for the sequence diagram, BPF program structure, package layout, and troubleshooting guide.
+
 Three layers, all under `cmd/device-mapping-manager` + `internal/`:
 
 **1. Event loop (`cmd/device-mapping-manager/main.go`)**

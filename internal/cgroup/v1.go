@@ -158,7 +158,7 @@ func (c *cgroupv1) addDeviceRule(cgroupPath string, rule *DeviceRule) error {
 	} else {
 		path = filepath.Join(cgroupPath, "devices.deny")
 	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}

@@ -111,13 +111,14 @@ A copy of the daemon's compose file is in
 
 The binary is configured via CLI flags:
 
-| Flag             | Default                | Description                             |
-|------------------|------------------------|-----------------------------------------|
-| `-log-level`     | `info`                 | `debug`, `info`, `warn`, `error`        |
-| `-log-format`    | `text`                 | `text`, `json`, `plain`                 |
-| `-log-time`      | `false`                | Include timestamps in log lines         |
-| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
-| `-help`          |                        | Print this flag list and exit           |
+| Flag             | Default                | Description                                                          |
+|------------------|------------------------|----------------------------------------------------------------------|
+| `-log-level`     | `info`                 | `debug`, `info`, `warn`, `error`                                     |
+| `-log-format`    | `text`                 | `text`, `json`, `plain`                                              |
+| `-log-time`      | `false`                | Include timestamps in log lines                                      |
+| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket                              |
+| `-dry-run`       | `false`                | Log device rules that would be applied without writing to the cgroup |
+| `-help`          |                        | Print this flag list and exit                                        |
 
 ## 🛠️ Development
 

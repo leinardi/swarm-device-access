@@ -134,7 +134,7 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 // AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath
 func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// Open the cgroup path.
-	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0o600)
+	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0)
 	if err != nil {
 		return fmt.Errorf("unable to open the cgroup path: %v", err)
 	}

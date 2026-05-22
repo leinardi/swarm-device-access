@@ -268,7 +268,7 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 
 func TestProcessContainer_InspectError(t *testing.T) {
 	insp := &fakeInspector{err: errors.New("daemon unavailable")}
-	err := processContainer(context.Background(), insp, "abc", "/")
+	err := processContainer(context.Background(), insp, "abc", "/", false)
 
 	if err == nil {
 		t.Fatal("expected error from inspect failure, got nil")
@@ -282,7 +282,7 @@ func TestProcessContainer_NilState(t *testing.T) {
 		},
 	}}
 
-	err := processContainer(context.Background(), insp, "abc", "/")
+	err := processContainer(context.Background(), insp, "abc", "/", false)
 	if err != nil {
 		t.Fatalf("expected nil error for nil state, got %v", err)
 	}
@@ -294,7 +294,7 @@ func TestProcessContainer_ZeroPid(t *testing.T) {
 		ContainerJSONBase: &dockertypes.ContainerJSONBase{State: state},
 	}}
 
-	err := processContainer(context.Background(), insp, "abc", "/")
+	err := processContainer(context.Background(), insp, "abc", "/", false)
 	if err != nil {
 		t.Fatalf("expected nil error for pid=0, got %v", err)
 	}
@@ -321,7 +321,7 @@ func TestProcessContainer_NoDevMounts(t *testing.T) {
 		},
 	}}
 
-	err := processContainer(context.Background(), insp, "abc", root)
+	err := processContainer(context.Background(), insp, "abc", root, false)
 	if err != nil {
 		t.Fatalf("expected nil error for container with no /dev mounts, got %v", err)
 	}
@@ -348,7 +348,7 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 	}}
 
 	// processContainer returns nil even when applyMount fails (warns instead).
-	err := processContainer(context.Background(), insp, "abc", root)
+	err := processContainer(context.Background(), insp, "abc", root, false)
 	if err != nil {
 		t.Fatalf(
 			"processContainer should not return error when applyMount fails (logs warning): %v",

@@ -71,6 +71,9 @@ var (
 		"/var/run/docker.sock",
 		"Path to the Docker UNIX socket",
 	)
+	dryRun = flag.Bool("dry-run", false,
+		"Log device rules that would be applied without writing to the cgroup",
+	)
 	help = flag.Bool("help", false, "Display help message")
 )
 
@@ -102,6 +105,7 @@ func run() int {
 		"version", version,
 		"commit", commit,
 		"date", date,
+		"dry_run", *dryRun,
 	)
 
 	rootCtx, cancelRoot := signal.NotifyContext(
@@ -126,7 +130,13 @@ func run() int {
 	// Track their IDs so the start-event handler can skip them on the brief
 	// window where both events and the initial enumeration overlap.
 	processed := make(map[string]struct{})
-	if processErr := processExistingContainers(rootCtx, cli, processed, "/"); processErr != nil {
+	if processErr := processExistingContainers(
+		rootCtx,
+		cli,
+		processed,
+		"/",
+		*dryRun,
+	); processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
 
@@ -147,6 +157,7 @@ func processExistingContainers(
 	cli *client.Client,
 	processed map[string]struct{},
 	procRootPath string,
+	dryRun bool,
 ) error {
 	log := logger.L()
 
@@ -158,7 +169,7 @@ func processExistingContainers(
 	log.Debug("enumerating running containers", "count", len(containers))
 
 	for _, runningContainer := range containers {
-		processErr := processContainer(ctx, cli, runningContainer.ID, procRootPath)
+		processErr := processContainer(ctx, cli, runningContainer.ID, procRootPath, dryRun)
 		if processErr != nil {
 			log.Warn("could not process running container",
 				"id", runningContainer.ID, "err", processErr)
@@ -195,7 +206,13 @@ func startReloadWatcher(ctx context.Context, cli *client.Client) {
 
 		watcher.Watch(ctx, func() {
 			fresh := make(map[string]struct{})
-			if processErr := processExistingContainers(ctx, cli, fresh, "/"); processErr != nil {
+			if processErr := processExistingContainers(
+				ctx,
+				cli,
+				fresh,
+				"/",
+				*dryRun,
+			); processErr != nil {
 				log.Warn("could not re-apply rules after systemd reload",
 					"err", processErr)
 			}
@@ -235,7 +252,7 @@ func listenEvents(
 
 		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff,
 			func(ctx context.Context, id string) error {
-				return processContainer(ctx, cli, id, "/")
+				return processContainer(ctx, cli, id, "/", *dryRun)
 			})
 		if !disconnected {
 			return
@@ -325,13 +342,14 @@ func sleepCtx(ctx context.Context, duration time.Duration) {
 
 // processContainer inspects a container and applies cgroup BPF device-allow
 // rules for every bind mount sourced from /dev/...
-// procRootPath is the root used for /proc lookups; it is "/" in production and
-// a temp-dir fixture root in tests.
+// procRootPath is the root used for /proc lookups; "/" in production, temp dir in tests.
+// dryRun skips cgroup writes and logs intent at Info level instead.
 func processContainer(
 	ctx context.Context,
 	cli containerInspector,
 	id string,
 	procRootPath string,
+	dryRun bool,
 ) error {
 	log := logger.L()
 
@@ -380,7 +398,7 @@ func processContainer(
 			"destination", mount.Destination,
 		)
 
-		applyErr := applyMount(api, mount.Source, cgroupPath, pid)
+		applyErr := applyMount(api, mount.Source, cgroupPath, pid, dryRun)
 		if applyErr != nil {
 			log.Warn("could not apply device rule for mount",
 				"source", mount.Source,
@@ -394,14 +412,14 @@ func processContainer(
 
 // applyMount applies a device rule to a single file mount, or walks the
 // directory and applies rules to every contained device file.
-func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int) error {
+func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int, dryRun bool) error {
 	fileInfo, statErr := os.Stat(mountPath)
 	if statErr != nil {
 		return fmt.Errorf("stat %q: %w", mountPath, statErr)
 	}
 
 	if !fileInfo.IsDir() {
-		return applyDeviceRules(api, mountPath, cgroupPath, pid)
+		return applyDeviceRules(api, mountPath, cgroupPath, pid, dryRun)
 	}
 
 	walkErr := filepath.Walk(mountPath, func(walkedPath string, info os.FileInfo, err error) error {
@@ -413,7 +431,7 @@ func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int) err
 			return nil
 		}
 
-		ruleErr := applyDeviceRules(api, walkedPath, cgroupPath, pid)
+		ruleErr := applyDeviceRules(api, walkedPath, cgroupPath, pid, dryRun)
 		if ruleErr != nil {
 			logger.L().Warn("could not apply device rule",
 				"path", walkedPath,
@@ -430,12 +448,29 @@ func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int) err
 	return nil
 }
 
-func applyDeviceRules(api cgroup.Interface, mountPath, cgroupPath string, pid int) error {
+func applyDeviceRules(
+	api cgroup.Interface,
+	mountPath, cgroupPath string,
+	pid int,
+	dryRun bool,
+) error {
 	log := logger.L()
 
 	deviceType, major, minor, infoErr := getDeviceInfo(mountPath)
 	if infoErr != nil {
 		return infoErr
+	}
+
+	if dryRun {
+		log.Info("dry-run: would add device rule",
+			"pid", pid,
+			"cgroup", cgroupPath,
+			"type", deviceType,
+			"major", major,
+			"minor", minor,
+		)
+
+		return nil
 	}
 
 	log.Debug("adding device rule",
