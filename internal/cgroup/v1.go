@@ -64,6 +64,9 @@ func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		// the devices cgroup itself.
 		return parts[3], parts[4], nil
 	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return "", "", fmt.Errorf("read %q: %w", path, scanErr)
+	}
 
 	return "", "", fmt.Errorf(
 		"no cgroup filesystem mounted for the devices subsytem in mountinfo file",
@@ -105,6 +108,9 @@ func (c *cgroupv1) GetDeviceCGroupRootPath(
 			return parts[2], nil
 		}
 		return strings.TrimPrefix(parts[2], prefix), nil
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return "", fmt.Errorf("read %q: %w", path, scanErr)
 	}
 
 	return "", fmt.Errorf("no devices cgroup entries found")

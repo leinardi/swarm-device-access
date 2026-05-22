@@ -21,6 +21,7 @@ package cgroup
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,9 @@ func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		// the devices cgroup itself.
 		return parts[3], parts[4], nil
 	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return "", "", fmt.Errorf("read %q: %w", path, scanErr)
+	}
 
 	return "", "", fmt.Errorf("no cgroup2 filesystem in mountinfo file")
 }
@@ -107,6 +111,9 @@ func (c *cgroupv2) GetDeviceCGroupRootPath(
 			return parts[2], nil
 		}
 		return strings.TrimPrefix(parts[2], prefix), nil
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return "", fmt.Errorf("read %q: %w", path, scanErr)
 	}
 
 	return "", fmt.Errorf("no cgroupv2 entries in file")
@@ -181,7 +188,10 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 		Cur: unix.RLIM_INFINITY,
 		Max: unix.RLIM_INFINITY,
 	}
-	_ = unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
+	if rlimitErr := unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit); rlimitErr != nil {
+		slog.Default().Warn("setrlimit RLIMIT_MEMLOCK failed; BPF_PROG_LOAD may fail",
+			"err", rlimitErr)
+	}
 
 	// Replace the set of existing eBPF programs with the new ones.
 	// We don't have to worry about atomically replacing each program (i.e. by

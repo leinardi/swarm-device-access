@@ -50,7 +50,7 @@ func New(version int) (Interface, error) {
 	case 2:
 		return &cgroupv2{}, nil
 	default:
-		return nil, fmt.Errorf("invalid version")
+		return nil, fmt.Errorf("invalid cgroup version %d", version)
 	}
 }
 
@@ -86,6 +86,9 @@ func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
 			return -1, fmt.Errorf("malformed cgroup entry: %v", scanner.Text())
 		}
 		found[parts[1]] = true
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return -1, fmt.Errorf("read %q: %w", path, scanErr)
 	}
 
 	// If a 'devices' entry was found, return version 1.

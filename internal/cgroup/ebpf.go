@@ -107,7 +107,7 @@ func (p *program) appendDevice(dev DeviceRule, labelPrefix string) error {
 		return fmt.Errorf("invalid major %d", *dev.Major)
 	}
 	if *dev.Minor > math.MaxUint32 {
-		return fmt.Errorf("invalid minor %d", *dev.Major)
+		return fmt.Errorf("invalid minor %d", *dev.Minor)
 	}
 	hasMajor := *dev.Major >= 0 // if not specified in OCI json, major is set to -1
 	hasMinor := *dev.Minor >= 0
@@ -137,11 +137,17 @@ func (p *program) appendDevice(dev DeviceRule, labelPrefix string) error {
 		)
 	}
 	if hasAccess {
+		// R2 holds the device type loaded in init(); using it as a temp here
+		// would clobber it for subsequent block type checks. Use R6 and the
+		// containment check (R6 == R3) matching NVIDIA upstream
+		// src/nvcgo/internal/cgroup/ebpf.go appendDevice — the previous
+		// JEq.Imm(R2,0) overlap check would grant access for any rule whose
+		// Access is a non-trivial subset of the requested access bits.
 		p.insts = append(p.insts,
-			// if (R3 & bpfAccess == 0 /* use R2 as a temp var */) goto next
-			asm.Mov.Reg32(asm.R2, asm.R3),
-			asm.And.Imm32(asm.R2, bpfAccess),
-			asm.JEq.Imm(asm.R2, 0, nextBlockSym),
+			// if (R3 & bpfAccess != R3 /* use R6 as a temp var */) goto next
+			asm.Mov.Reg32(asm.R6, asm.R3),
+			asm.And.Imm32(asm.R6, bpfAccess),
+			asm.JNE.Reg(asm.R6, asm.R3, nextBlockSym),
 		)
 	}
 	if hasMajor {

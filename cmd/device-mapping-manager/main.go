@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -86,7 +85,9 @@ func run() int {
 		return 0
 	}
 
-	_ = logger.Configure(*logFormat, *logLevel, *logTime)
+	if logErr := logger.Configure(*logFormat, *logLevel, *logTime); logErr != nil {
+		fmt.Fprintf(os.Stderr, "logger setup failed, falling back to defaults: %v\n", logErr)
+	}
 	log := logger.L()
 
 	log.Info("device-mapping-manager starting",
@@ -342,7 +343,7 @@ func processContainer(ctx context.Context, cli *client.Client, id string) error 
 		return fmt.Errorf("resolve cgroup mount path: %w", mountErr)
 	}
 
-	cgroupPath = path.Join(hostRootPath, sysfsPath, cgroupPath)
+	cgroupPath = filepath.Join(hostRootPath, sysfsPath, cgroupPath)
 	log.Debug("cgroup path resolved", "pid", pid, "path", cgroupPath)
 
 	for _, mount := range info.Mounts {
