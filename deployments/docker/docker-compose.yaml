@@ -1,43 +1,42 @@
 services:
   device-mapping-manager:
-    image: ghcr.io/leinardi/device-mapping-manager:latest # dclint disable-line service-image-require-explicit-tag
+    image: docker:29 # dclint disable-line service-image-require-explicit-tag
 
     volumes:
-      # The daemon listens to Docker events and inspects containers to find
-      # /dev/... bind mounts.
+      # The wrapper only needs the host Docker socket to dispatch `docker run`.
       - /var/run/docker.sock:/var/run/docker.sock
 
-      # The daemon writes BPF programs into the host's cgroup v2 hierarchy.
-      # /host/sys/fs/cgroup must point at the host's real cgroup tree; the
-      # daemon resolves cgroup paths through /host (see hostRootPath in main.go).
+    command:
+      - run
+      - -i
+      - --rm
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
       - /sys:/host/sys
-
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
       # Optional: gives the daemon access to the host's system DBus so it can
       # detect systemctl daemon-reload (which wipes cgroup BPF programs) and
       # re-apply device rules. Without this mount, reload handling is skipped
       # and the daemon logs a warning at startup.
-      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
-
-    # Example flags. Override on a per-deployment basis as needed.
-    command:
+      # - -v
+      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - ghcr.io/leinardi/device-mapping-manager:latest
       - "-log-level"
       - "info"
       - "-log-format"
       - "text"
 
+    entrypoint: docker
+
     restart: unless-stopped
-    cgroup: host
 
     deploy:
       mode: global
       restart_policy:
         condition: any
-    pid: host
-
-    # The daemon manipulates cgroup v2 BPF programs on the host. That requires
-    # full host privileges and access to the host's cgroup namespace, pid
-    # namespace, and /sys filesystem. None of the hardening flags used by other
-    # services (no-new-privileges, read_only, USER nonroot, etc.) are
-    # compatible with this workload.
-    privileged: true
-    userns_mode: host
