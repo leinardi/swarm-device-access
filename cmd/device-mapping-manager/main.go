@@ -224,22 +224,29 @@ func listenEvents(
 
 		log.Debug("subscribed to docker events")
 
-		disconnected := consumeEvents(ctx, cli, msgs, errs, processed, &backoff)
+		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff,
+			func(ctx context.Context, id string) error {
+				return processContainer(ctx, cli, id)
+			})
 		if !disconnected {
 			return
 		}
 	}
 }
 
+// applyFn is the per-container rule-application callback injected into consumeEvents.
+// In production this wraps processContainer; in tests it is replaced by a fake.
+type applyFn func(ctx context.Context, id string) error
+
 // consumeEvents drains one events.Subscribe lifecycle. Returns true if the
 // caller should reconnect, false on context cancellation.
 func consumeEvents(
 	ctx context.Context,
-	cli *client.Client,
 	msgs <-chan events.Message,
 	errs <-chan error,
 	processed map[string]struct{},
 	backoff *time.Duration,
+	apply applyFn,
 ) bool {
 	log := logger.L()
 
@@ -283,10 +290,9 @@ func consumeEvents(
 				continue
 			}
 
-			processErr := processContainer(ctx, cli, msg.Actor.ID)
-			if processErr != nil {
+			if applyErr := apply(ctx, msg.Actor.ID); applyErr != nil {
 				log.Warn("could not process container",
-					"id", msg.Actor.ID, "err", processErr)
+					"id", msg.Actor.ID, "err", applyErr)
 			}
 		}
 	}

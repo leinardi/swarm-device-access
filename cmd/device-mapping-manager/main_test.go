@@ -20,8 +20,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/docker/docker/api/types/events"
 )
 
 func TestNextBackoff_Doubles(t *testing.T) {
@@ -79,5 +83,154 @@ func TestSleepCtx_WaitsForDuration(t *testing.T) {
 	elapsed := time.Since(start)
 	if elapsed < target {
 		t.Errorf("sleepCtx returned in %v; want at least %v", elapsed, target)
+	}
+}
+
+// makeChans returns buffered event/error channels for driving consumeEvents in tests.
+func makeChans(msgBuf, errBuf int) (chan events.Message, chan error) {
+	return make(chan events.Message, msgBuf), make(chan error, errBuf)
+}
+
+func noopApply(_ context.Context, _ string) error { return nil }
+
+func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	msgs, errs := makeChans(0, 0)
+	backoff := minBackoff
+
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	if got {
+		t.Error(
+			"consumeEvents should return false (no reconnect) when context is already cancelled",
+		)
+	}
+}
+
+func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
+	ctx := context.Background()
+	msgs, errs := makeChans(0, 1)
+	backoff := minBackoff
+
+	errs <- errors.New("transport EOF")
+
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	if !got {
+		t.Error("consumeEvents should return true (reconnect) on stream error")
+	}
+	if backoff != nextBackoff(minBackoff) {
+		t.Errorf("backoff = %v, want %v after one error", backoff, nextBackoff(minBackoff))
+	}
+}
+
+func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	msgs, errs := makeChans(0, 1)
+	backoff := minBackoff
+
+	errs <- context.Canceled
+	cancel()
+
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	if got {
+		t.Error("consumeEvents should return false when stream error is context.Canceled")
+	}
+}
+
+func TestConsumeEvents_ChannelCloseReturnsReconnect(t *testing.T) {
+	ctx := context.Background()
+	msgs, errs := makeChans(0, 0)
+	backoff := minBackoff
+
+	close(msgs)
+
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	if !got {
+		t.Error("consumeEvents should return true (reconnect) on channel close")
+	}
+}
+
+func TestConsumeEvents_EventCallsApply(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msgs, errs := makeChans(2, 0)
+	backoff := minBackoff
+
+	var called atomic.Int32
+	apply := func(_ context.Context, _ string) error {
+		called.Add(1)
+		return nil
+	}
+
+	msgs <- events.Message{Actor: events.Actor{ID: "container-1"}}
+	msgs <- events.Message{Actor: events.Actor{ID: "container-2"}}
+
+	// Cancel after a brief delay so consumeEvents exits cleanly.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, apply)
+
+	if called.Load() != 2 {
+		t.Errorf("apply called %d times, want 2", called.Load())
+	}
+}
+
+func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msgs, errs := makeChans(1, 0)
+	backoff := minBackoff
+	processed := map[string]struct{}{
+		"already-seen": {},
+	}
+
+	var called atomic.Int32
+	apply := func(_ context.Context, id string) error {
+		called.Add(1)
+		return nil
+	}
+
+	msgs <- events.Message{Actor: events.Actor{ID: "already-seen"}}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	consumeEvents(ctx, msgs, errs, processed, &backoff, apply)
+
+	if called.Load() != 0 {
+		t.Errorf("apply called %d times for deduplicated ID, want 0", called.Load())
+	}
+
+	if _, stillPresent := processed["already-seen"]; stillPresent {
+		t.Error("processed map should have entry removed after deduplication")
+	}
+}
+
+func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msgs, errs := makeChans(1, 0)
+	backoff := maxBackoff // start with a high backoff
+
+	msgs <- events.Message{Actor: events.Actor{ID: "c1"}}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+
+	if backoff != minBackoff {
+		t.Errorf("backoff = %v after successful event, want %v (reset)", backoff, minBackoff)
 	}
 }
