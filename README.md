@@ -121,6 +121,8 @@ The binary is configured via CLI flags:
 | `-require-label` | `""`                   | Only process containers with this label (`key=value`). Empty = all containers.  |
 | `-device-allow`  | `""`                   | Glob for `/dev/...` paths to allow (repeatable). Empty = allow all.             |
 | `-device-deny`   | `""`                   | Glob for `/dev/...` paths to deny (repeatable). Deny takes priority over allow. |
+| `-metrics-addr`  | `""`                   | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty = disabled. |
+| `-debug-addr`    | `""`                   | `host:port` for pprof `/debug/pprof/*`. Empty = disabled.                       |
 | `-help`          |                        | Print this flag list and exit                                                   |
 
 ## 🛠️ Development

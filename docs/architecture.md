@@ -114,6 +114,32 @@ The daemon **must** run as root with:
 
 The DBus socket (`/run/dbus/system_bus_socket`) is optional — enables systemd reload handling.
 
+## Observability
+
+### Prometheus metrics (`--metrics-addr`)
+
+When `-metrics-addr=:9090` is set, the daemon exposes:
+
+| Endpoint   | Description                                                                |
+|------------|----------------------------------------------------------------------------|
+| `/metrics` | Prometheus text format                                                     |
+| `/healthz` | Liveness probe — always `200 OK`                                           |
+| `/readyz`  | Readiness probe — `503` until startup enumeration completes, then `200 OK` |
+
+Metrics exposed:
+
+| Metric                        | Type      | Labels   | Description                                 |
+|-------------------------------|-----------|----------|---------------------------------------------|
+| `dmm_events_total`            | counter   | `event`  | Docker events received (`start`, `unpause`) |
+| `dmm_rules_applied_total`     | counter   | `result` | Rules applied (`ok`) or failed (`error`)    |
+| `dmm_reload_reapplies_total`  | counter   | —        | Re-applies after systemd daemon-reload      |
+| `dmm_docker_reconnects_total` | counter   | —        | Docker event stream reconnects              |
+| `dmm_apply_duration_seconds`  | histogram | —        | Wall-clock time per container apply         |
+
+### pprof debug server (`--debug-addr`)
+
+When `-debug-addr=:6060` is set, the standard Go pprof endpoints are available at `/debug/pprof/*`. Only bind to localhost in production.
+
 ## Dry-run mode
 
 `-dry-run` logs what rules _would_ be written (at `Info` level) without calling `bpf(2)` or writing to `devices.allow`. Useful for auditing policy and

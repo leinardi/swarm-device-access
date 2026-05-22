@@ -26,6 +26,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
+	"net/http/pprof" //nolint:gosec // pprof only exposed on --debug-addr, off by default
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -41,6 +43,9 @@ import (
 	"github.com/leinardi/device-mapping-manager/internal/cgroup"
 	"github.com/leinardi/device-mapping-manager/internal/logger"
 	"github.com/leinardi/device-mapping-manager/internal/systemd"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sys/unix"
 )
 
@@ -97,7 +102,42 @@ var (
 
 	deviceAllow stringSliceFlag
 	deviceDeny  stringSliceFlag
-	help        = flag.Bool("help", false, "Display help message")
+
+	metricsAddr = flag.String("metrics-addr", "",
+		"Address for the Prometheus metrics + health endpoints (e.g. :9090). Empty = disabled.")
+	debugAddr = flag.String("debug-addr", "",
+		"Address for the pprof debug endpoints (e.g. :6060). Empty = disabled.")
+
+	help = flag.Bool("help", false, "Display help message")
+)
+
+// Prometheus metrics — registered once at startup via promauto.
+var (
+	metricEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dmm_events_total",
+		Help: "Total Docker container events received.",
+	}, []string{"event"})
+
+	metricRulesApplied = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dmm_rules_applied_total",
+		Help: "Total device rules applied (or skipped in dry-run).",
+	}, []string{"result"})
+
+	metricReloadReapplies = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dmm_reload_reapplies_total",
+		Help: "Times device rules were re-applied after a systemd daemon-reload.",
+	})
+
+	metricDockerReconnects = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dmm_docker_reconnects_total",
+		Help: "Times the Docker event stream reconnected after an error.",
+	})
+
+	metricApplyDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "dmm_apply_duration_seconds",
+		Help:    "Time spent applying device rules per container.",
+		Buckets: prometheus.DefBuckets,
+	})
 )
 
 // ptr returns a pointer to v. Generic helper used to inline scalar pointers
@@ -159,6 +199,18 @@ func run() int {
 	}
 	defer cli.Close()
 
+	// Start optional observability servers before the main loop so they are
+	// reachable during startup enumeration.
+	readyCh := make(chan struct{})
+
+	if *metricsAddr != "" {
+		startMetricsServer(rootCtx, *metricsAddr, readyCh)
+	}
+
+	if *debugAddr != "" {
+		startDebugServer(rootCtx, *debugAddr)
+	}
+
 	// Apply rules to containers that are already running when we start up.
 	// Track their IDs so the start-event handler can skip them on the brief
 	// window where both events and the initial enumeration overlap.
@@ -172,6 +224,9 @@ func run() int {
 	); processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
+
+	// Signal readiness: startup enumeration complete, event loop about to start.
+	close(readyCh)
 
 	startReloadWatcher(rootCtx, cli)
 
@@ -238,7 +293,9 @@ func startReloadWatcher(ctx context.Context, cli *client.Client) {
 		}()
 
 		watcher.Watch(ctx, func() {
+			metricReloadReapplies.Inc()
 			fresh := make(map[string]struct{})
+
 			if processErr := processExistingContainers(
 				ctx,
 				cli,
@@ -266,6 +323,12 @@ func listenEvents(
 	log := logger.L()
 	backoff := minBackoff
 
+	// The processed map guards the overlap window between startup enumeration
+	// and the live event stream. After 2×maxBackoff (60s) the window has
+	// certainly passed; any remaining entries are from containers that exited
+	// before producing a start event and will never be drained normally.
+	clearProcessed := time.After(2 * maxBackoff)
+
 	eventFilters := filters.NewArgs(
 		filters.Arg("event", "start"),
 		filters.Arg("event", "unpause"),
@@ -283,7 +346,7 @@ func listenEvents(
 
 		log.Debug("subscribed to docker events")
 
-		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff,
+		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff, clearProcessed,
 			func(ctx context.Context, id string) error {
 				return processContainer(ctx, cli, id, "/", *dryRun)
 			})
@@ -305,6 +368,7 @@ func consumeEvents(
 	errs <-chan error,
 	processed map[string]struct{},
 	backoff *time.Duration,
+	clearProcessed <-chan time.Time,
 	apply applyFn,
 ) bool {
 	log := logger.L()
@@ -313,6 +377,15 @@ func consumeEvents(
 		select {
 		case <-ctx.Done():
 			return false
+
+		case <-clearProcessed:
+			// Overlap window expired; discard any startup entries that were
+			// never matched by a live event (containers that exited during the
+			// window). Reassign to a nil channel so the case never fires again.
+			for k := range processed {
+				delete(processed, k)
+			}
+			clearProcessed = nil
 
 		case streamErr := <-errs:
 			if streamErr == nil {
@@ -326,6 +399,7 @@ func consumeEvents(
 
 			log.Error("docker events stream error, reconnecting",
 				"err", streamErr, "backoff", *backoff)
+			metricDockerReconnects.Inc()
 			sleepCtx(ctx, *backoff)
 			*backoff = nextBackoff(*backoff)
 
@@ -335,6 +409,7 @@ func consumeEvents(
 			if !ok {
 				log.Warn("docker events channel closed, reconnecting",
 					"backoff", *backoff)
+				metricDockerReconnects.Inc()
 				sleepCtx(ctx, *backoff)
 				*backoff = nextBackoff(*backoff)
 
@@ -342,6 +417,7 @@ func consumeEvents(
 			}
 
 			*backoff = minBackoff
+			metricEventsTotal.WithLabelValues(string(msg.Action)).Inc()
 
 			if _, alreadyProcessed := processed[msg.Actor.ID]; alreadyProcessed {
 				delete(processed, msg.Actor.ID)
@@ -349,10 +425,17 @@ func consumeEvents(
 				continue
 			}
 
+			start := time.Now()
+
 			if applyErr := apply(ctx, msg.Actor.ID); applyErr != nil {
 				log.Warn("could not process container",
 					"id", msg.Actor.ID, "err", applyErr)
+				metricRulesApplied.WithLabelValues("error").Inc()
+			} else {
+				metricRulesApplied.WithLabelValues("ok").Inc()
 			}
+
+			metricApplyDuration.Observe(time.Since(start).Seconds())
 		}
 	}
 }
@@ -371,6 +454,92 @@ func sleepCtx(ctx context.Context, duration time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(duration):
 	}
+}
+
+// startMetricsServer starts an HTTP server on addr exposing:
+//
+//	/metrics  — Prometheus text format
+//	/healthz  — 200 OK always (liveness)
+//	/readyz   — 200 OK once ready is closed (readiness)
+func startMetricsServer(ctx context.Context, addr string, ready <-chan struct{}) {
+	log := logger.L()
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case <-ready:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("starting"))
+		}
+	})
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		log.Info("metrics server listening", "addr", addr)
+
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("metrics server error", "err", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutCtx); err != nil {
+			log.Warn("metrics server shutdown error", "err", err)
+		}
+	}()
+}
+
+// startDebugServer starts an HTTP server on addr exposing pprof endpoints.
+func startDebugServer(ctx context.Context, addr string) {
+	log := logger.L()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		log.Info("debug server listening", "addr", addr)
+
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("debug server error", "err", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutCtx); err != nil {
+			log.Warn("debug server shutdown error", "err", err)
+		}
+	}()
 }
 
 // containerMatchesLabelPolicy returns true if the container should be processed.

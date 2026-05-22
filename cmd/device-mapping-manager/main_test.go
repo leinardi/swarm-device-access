@@ -150,7 +150,7 @@ func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
 	msgs, errs := makeChans(0, 0)
 	backoff := minBackoff
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
 	if got {
 		t.Error(
 			"consumeEvents should return false (no reconnect) when context is already cancelled",
@@ -165,7 +165,7 @@ func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
 
 	errs <- errors.New("transport EOF")
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on stream error")
 	}
@@ -182,7 +182,7 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 	errs <- context.Canceled
 	cancel()
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
 	if got {
 		t.Error("consumeEvents should return false when stream error is context.Canceled")
 	}
@@ -195,7 +195,7 @@ func TestConsumeEvents_ChannelCloseReturnsReconnect(t *testing.T) {
 
 	close(msgs)
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on channel close")
 	}
@@ -223,7 +223,7 @@ func TestConsumeEvents_EventCallsApply(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, apply)
+	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, apply)
 
 	if called.Load() != 2 {
 		t.Errorf("apply called %d times, want 2", called.Load())
@@ -253,7 +253,7 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, processed, &backoff, apply)
+	consumeEvents(ctx, msgs, errs, processed, &backoff, nil, apply)
 
 	if called.Load() != 0 {
 		t.Errorf("apply called %d times for deduplicated ID, want 0", called.Load())
@@ -407,6 +407,33 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 	}
 }
 
+func TestConsumeEvents_ClearProcessedOnTTL(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msgs, errs := makeChans(0, 0)
+	backoff := minBackoff
+	processed := map[string]struct{}{
+		"stale-a": {},
+		"stale-b": {},
+	}
+
+	// Fire the TTL immediately via a closed channel.
+	clearCh := make(chan time.Time)
+	close(clearCh)
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	consumeEvents(ctx, msgs, errs, processed, &backoff, clearCh, noopApply)
+
+	if len(processed) != 0 {
+		t.Errorf("processed map has %d entries after TTL, want 0", len(processed))
+	}
+}
+
 func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -421,7 +448,7 @@ func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, noopApply)
+	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
 
 	if backoff != minBackoff {
 		t.Errorf("backoff = %v after successful event, want %v (reset)", backoff, minBackoff)
