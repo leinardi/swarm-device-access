@@ -8,6 +8,7 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/sys v0.42.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

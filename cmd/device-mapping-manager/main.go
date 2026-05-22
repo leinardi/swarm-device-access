@@ -32,6 +32,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -47,6 +48,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sys/unix"
+	"gopkg.in/yaml.v3"
 )
 
 // containerInspector is the subset of *client.Client used by processContainer.
@@ -108,8 +110,59 @@ var (
 	debugAddr = flag.String("debug-addr", "",
 		"Address for the pprof debug endpoints (e.g. :6060). Empty = disabled.")
 
+	configFile = flag.String("config", "",
+		"Path to a YAML config file. CLI flags override file values. Reload with SIGHUP.")
+
 	help = flag.Bool("help", false, "Display help message")
 )
+
+// configFileSchema mirrors the CLI flags that can be set via the config file.
+// All fields are optional; zero values mean "not set in file".
+type configFileSchema struct {
+	LogFormat    string   `yaml:"log-format"`
+	LogLevel     string   `yaml:"log-level"`
+	LogTime      *bool    `yaml:"log-time"`
+	DockerSocket string   `yaml:"docker-socket"`
+	DryRun       *bool    `yaml:"dry-run"`
+	RequireLabel string   `yaml:"require-label"`
+	DeviceAllow  []string `yaml:"device-allow"`
+	DeviceDeny   []string `yaml:"device-deny"`
+	MetricsAddr  string   `yaml:"metrics-addr"`
+	DebugAddr    string   `yaml:"debug-addr"`
+}
+
+// hotConfig holds the settings that can be changed without restarting the daemon.
+// Readers call activeCfg.Load(); the SIGHUP handler calls activeCfg.Store().
+type hotConfig struct {
+	dryRun       bool
+	requireLabel string
+	deviceAllow  stringSliceFlag
+	deviceDeny   stringSliceFlag
+}
+
+// activeCfg is the live, hot-reloadable configuration snapshot.
+// Written once at startup and again on each SIGHUP.
+var activeCfg atomic.Pointer[hotConfig]
+
+// loadConfigFile parses the YAML config file at path and returns its contents.
+// Returns a zero-value schema (no error) if path is empty.
+func loadConfigFile(path string) (configFileSchema, error) {
+	if path == "" {
+		return configFileSchema{}, nil
+	}
+
+	data, err := os.ReadFile(path) //nolint:gosec // operator-controlled path
+	if err != nil {
+		return configFileSchema{}, fmt.Errorf("read config file %q: %w", path, err)
+	}
+
+	var cfg configFileSchema
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return configFileSchema{}, fmt.Errorf("parse config file %q: %w", path, err)
+	}
+
+	return cfg, nil
+}
 
 // Prometheus metrics — registered once at startup via promauto.
 var (
@@ -166,19 +219,31 @@ func run() int {
 		return 0
 	}
 
+	// Load config file; CLI flags override file values.
+	fileCfg, fileErr := loadConfigFile(*configFile)
+	if fileErr != nil {
+		fmt.Fprintf(os.Stderr, "config file error: %v\n", fileErr)
+
+		return 1
+	}
+
+	applyFileConfig(&fileCfg)
+
 	if logErr := logger.Configure(*logFormat, *logLevel, *logTime); logErr != nil {
 		fmt.Fprintf(os.Stderr, "logger setup failed, falling back to defaults: %v\n", logErr)
 	}
+
 	log := logger.L()
 
 	log.Info("device-mapping-manager starting",
 		"version", version,
 		"commit", commit,
 		"date", date,
-		"dry_run", *dryRun,
-		"require_label", *requireLabel,
-		"device_allow", []string(deviceAllow),
-		"device_deny", []string(deviceDeny),
+		"config_file", *configFile,
+		"dry_run", activeCfg.Load().dryRun,
+		"require_label", activeCfg.Load().requireLabel,
+		"device_allow", []string(activeCfg.Load().deviceAllow),
+		"device_deny", []string(activeCfg.Load().deviceDeny),
 	)
 
 	rootCtx, cancelRoot := signal.NotifyContext(
@@ -187,6 +252,9 @@ func run() int {
 		syscall.SIGTERM,
 	)
 	defer cancelRoot()
+
+	// SIGHUP: reload the config file and update hot settings + logger.
+	go watchSIGHUP(rootCtx)
 
 	cli, err := client.NewClientWithOpts(
 		client.WithHost("unix://"+*dockerSocket),
@@ -220,7 +288,7 @@ func run() int {
 		cli,
 		processed,
 		"/",
-		*dryRun,
+		activeCfg.Load().dryRun,
 	); processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
@@ -301,7 +369,7 @@ func startReloadWatcher(ctx context.Context, cli *client.Client) {
 				cli,
 				fresh,
 				"/",
-				*dryRun,
+				activeCfg.Load().dryRun,
 			); processErr != nil {
 				log.Warn("could not re-apply rules after systemd reload",
 					"err", processErr)
@@ -348,7 +416,7 @@ func listenEvents(
 
 		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff, clearProcessed,
 			func(ctx context.Context, id string) error {
-				return processContainer(ctx, cli, id, "/", *dryRun)
+				return processContainer(ctx, cli, id, "/", activeCfg.Load().dryRun)
 			})
 		if !disconnected {
 			return
@@ -453,6 +521,150 @@ func sleepCtx(ctx context.Context, duration time.Duration) {
 	select {
 	case <-ctx.Done():
 	case <-time.After(duration):
+	}
+}
+
+// applyFileConfig merges the file config into the CLI flags (for flags not
+// explicitly set by the user) and stores the result in activeCfg.
+// Must be called after flag.Parse().
+func applyFileConfig(fileCfg *configFileSchema) {
+	cliSet := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { cliSet[f.Name] = true })
+
+	if !cliSet["log-format"] && fileCfg.LogFormat != "" {
+		*logFormat = fileCfg.LogFormat
+	}
+
+	if !cliSet["log-level"] && fileCfg.LogLevel != "" {
+		*logLevel = fileCfg.LogLevel
+	}
+
+	if !cliSet["log-time"] && fileCfg.LogTime != nil {
+		*logTime = *fileCfg.LogTime
+	}
+
+	if !cliSet["docker-socket"] && fileCfg.DockerSocket != "" {
+		*dockerSocket = fileCfg.DockerSocket
+	}
+
+	if !cliSet["metrics-addr"] && fileCfg.MetricsAddr != "" {
+		*metricsAddr = fileCfg.MetricsAddr
+	}
+
+	if !cliSet["debug-addr"] && fileCfg.DebugAddr != "" {
+		*debugAddr = fileCfg.DebugAddr
+	}
+
+	if !cliSet["dry-run"] && fileCfg.DryRun != nil {
+		*dryRun = *fileCfg.DryRun
+	}
+
+	if !cliSet["require-label"] && fileCfg.RequireLabel != "" {
+		*requireLabel = fileCfg.RequireLabel
+	}
+
+	if !cliSet["device-allow"] && len(fileCfg.DeviceAllow) > 0 {
+		deviceAllow = fileCfg.DeviceAllow
+	}
+
+	if !cliSet["device-deny"] && len(fileCfg.DeviceDeny) > 0 {
+		deviceDeny = fileCfg.DeviceDeny
+	}
+
+	activeCfg.Store(&hotConfig{
+		dryRun:       *dryRun,
+		requireLabel: *requireLabel,
+		deviceAllow:  append(stringSliceFlag(nil), deviceAllow...),
+		deviceDeny:   append(stringSliceFlag(nil), deviceDeny...),
+	})
+}
+
+// watchSIGHUP blocks until ctx is done, reloading the config file and
+// updating activeCfg + logger on each SIGHUP. Settings that require a
+// restart (docker-socket, metrics-addr, debug-addr) are not reloaded.
+func watchSIGHUP(ctx context.Context) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGHUP)
+	defer signal.Stop(ch)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-ch:
+			log := logger.L()
+			log.Info("SIGHUP received; reloading config", "config_file", *configFile)
+
+			fileCfg, err := loadConfigFile(*configFile)
+			if err != nil {
+				log.Error("config reload failed", "err", err)
+
+				continue
+			}
+
+			cliSet := make(map[string]bool)
+			flag.Visit(func(f *flag.Flag) { cliSet[f.Name] = true })
+
+			effectiveLogFormat := *logFormat
+			effectiveLogLevel := *logLevel
+			effectiveLogTime := *logTime
+
+			if !cliSet["log-format"] && fileCfg.LogFormat != "" {
+				effectiveLogFormat = fileCfg.LogFormat
+			}
+
+			if !cliSet["log-level"] && fileCfg.LogLevel != "" {
+				effectiveLogLevel = fileCfg.LogLevel
+			}
+
+			if !cliSet["log-time"] && fileCfg.LogTime != nil {
+				effectiveLogTime = *fileCfg.LogTime
+			}
+
+			if logErr := logger.Configure(
+				effectiveLogFormat,
+				effectiveLogLevel,
+				effectiveLogTime,
+			); logErr != nil {
+				log.Error("logger reconfigure failed", "err", logErr)
+			}
+
+			newDryRun := *dryRun
+			newRequireLabel := *requireLabel
+			newDeviceAllow := append(stringSliceFlag(nil), deviceAllow...)
+			newDeviceDeny := append(stringSliceFlag(nil), deviceDeny...)
+
+			if !cliSet["dry-run"] && fileCfg.DryRun != nil {
+				newDryRun = *fileCfg.DryRun
+			}
+
+			if !cliSet["require-label"] && fileCfg.RequireLabel != "" {
+				newRequireLabel = fileCfg.RequireLabel
+			}
+
+			if !cliSet["device-allow"] && len(fileCfg.DeviceAllow) > 0 {
+				newDeviceAllow = fileCfg.DeviceAllow
+			}
+
+			if !cliSet["device-deny"] && len(fileCfg.DeviceDeny) > 0 {
+				newDeviceDeny = fileCfg.DeviceDeny
+			}
+
+			activeCfg.Store(&hotConfig{
+				dryRun:       newDryRun,
+				requireLabel: newRequireLabel,
+				deviceAllow:  newDeviceAllow,
+				deviceDeny:   newDeviceDeny,
+			})
+
+			logger.L().Info("config reloaded",
+				"dry_run", newDryRun,
+				"require_label", newRequireLabel,
+				"device_allow", []string(newDeviceAllow),
+				"device_deny", []string(newDeviceDeny),
+			)
+		}
 	}
 }
 
@@ -600,10 +812,12 @@ func processContainer(
 		labels = info.Config.Labels
 	}
 
-	if !containerMatchesLabelPolicy(labels, *requireLabel) {
+	cfg := activeCfg.Load()
+
+	if !containerMatchesLabelPolicy(labels, cfg.requireLabel) {
 		log.Debug("container skipped by label policy",
 			"id", id,
-			"require_label", *requireLabel,
+			"require_label", cfg.requireLabel,
 		)
 
 		return nil
@@ -658,7 +872,8 @@ func processContainer(
 // applyMount applies a device rule to a single file mount, or walks the
 // directory and applies rules to every contained device file.
 func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int, dryRun bool) error {
-	if !devicePathAllowed(mountPath, deviceAllow, deviceDeny) {
+	cfg := activeCfg.Load()
+	if !devicePathAllowed(mountPath, cfg.deviceAllow, cfg.deviceDeny) {
 		logger.L().Debug("device mount excluded by policy", "path", mountPath)
 
 		return nil
@@ -682,7 +897,7 @@ func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int, dry
 			return nil
 		}
 
-		if !devicePathAllowed(walkedPath, deviceAllow, deviceDeny) {
+		if !devicePathAllowed(walkedPath, cfg.deviceAllow, cfg.deviceDeny) {
 			logger.L().Debug("device file excluded by policy", "path", walkedPath)
 
 			return nil

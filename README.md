@@ -123,7 +123,20 @@ The binary is configured via CLI flags:
 | `-device-deny`   | `""`                   | Glob for `/dev/...` paths to deny (repeatable). Deny takes priority over allow. |
 | `-metrics-addr`  | `""`                   | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty = disabled. |
 | `-debug-addr`    | `""`                   | `host:port` for pprof `/debug/pprof/*`. Empty = disabled.                       |
+| `-config`        | `""`                   | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |
 | `-help`          |                        | Print this flag list and exit                                                   |
+
+### Config file
+
+All CLI flags can be set via a YAML config file (`-config /path/to/config.yaml`). CLI flags always take priority. An example config is at [`deployments/docker/config.yaml`](deployments/docker/config.yaml).
+
+Send `SIGHUP` to reload the config file without restarting:
+
+```bash
+kill -HUP $(docker inspect --format '{{.State.Pid}}' device-mapping-manager)
+```
+
+Settings that require a restart: `docker-socket`, `metrics-addr`, `debug-addr`.
 
 ## 🛠️ Development
 
