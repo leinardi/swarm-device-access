@@ -38,9 +38,9 @@ The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on
 
 See [`docs/architecture.md`](docs/architecture.md) for the sequence diagram, BPF program structure, package layout, and troubleshooting guide.
 
-Three layers, all under `cmd/device-mapping-manager` + `internal/`:
+Three layers, all under `cmd/swarm-device-access` + `internal/`:
 
-**1. Event loop (`cmd/device-mapping-manager/main.go`)**
+**1. Event loop (`cmd/swarm-device-access/main.go`)**
 
 `run()` performs:
 
@@ -79,7 +79,7 @@ it. The DBus socket mount (`/run/dbus/system_bus_socket`) is optional — enable
 
 - Every file under `cmd/` and most of `internal/` has `//go:build linux`. New code that touches devices, cgroups, or `unix.*` should keep that tag.
   Cross-platform helpers (e.g. logger) do not need it.
-- Version strings (`version`, `commit`, `date`) live in `cmd/device-mapping-manager/version.go` and are filled by `-ldflags -X main.version=...` from
+- Version strings (`version`, `commit`, `date`) live in `cmd/swarm-device-access/version.go` and are filled by `-ldflags -X main.version=...` from
   `GO_LDFLAGS` in `.mk/go.mk`.
 - `internal/cgroup/` retains NVIDIA's original copyright header (Apache 2.0). Don't relicense or reformat that block.
 - The README is the source of truth for the user-facing story; keep flag tables and the docker-compose snippet in sync if you change flags or mounts.

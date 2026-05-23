@@ -1,5 +1,5 @@
 services:
-  device-mapping-manager:
+  swarm-device-access:
     image: docker:29 # dclint disable-line service-image-require-explicit-tag
 
     volumes:
@@ -26,7 +26,7 @@ services:
       # and the daemon logs a warning at startup.
       # - -v
       # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
-      - ghcr.io/leinardi/device-mapping-manager:latest
+      - ghcr.io/leinardi/swarm-device-access:latest
       - "-log-level"
       - "info"
       - "-log-format"

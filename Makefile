@@ -24,8 +24,8 @@ MK_COMMON_BOOTSTRAP := $(shell "$(MK_COMMON_BOOTSTRAP_SCRIPT)" \
 # -----------------------------------------------------------------------------
 # Project-specific config
 # -----------------------------------------------------------------------------
-BIN_NAME     ?= device-mapping-manager
-GO_CMD       ?= ./cmd/device-mapping-manager
+BIN_NAME     ?= swarm-device-access
+GO_CMD       ?= ./cmd/swarm-device-access
 GO_PKG       ?= ./...
 DIST_DIR     ?= dist
 
@@ -62,7 +62,7 @@ mk-common-update: ## Check for remote updates of shared .mk files
 # -----------------------------------------------------------------------------
 # Project overrides
 # -----------------------------------------------------------------------------
-# device-mapping-manager is Linux-only: all files in cmd/ and most of internal/
+# swarm-device-access is Linux-only: all files in cmd/ and most of internal/
 # have //go:build linux. Override the shared go-build target to cross-compile
 # so `make go-build` works on macOS / Windows dev machines without needing the
 # caller to set GOOS by hand.

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-// Package integration tests the device-mapping-manager daemon end-to-end.
+// Package integration tests the swarm-device-access daemon end-to-end.
 //
 // Tests start the daemon binary as a subprocess with -dry-run (no BPF/root
 // required) and verify that the event → inspect → device-detect → apply
@@ -24,7 +24,7 @@
 //
 // Prerequisites:
 //   - A Linux host with a running Docker daemon.
-//   - The daemon binary built at $DMM_TEST_BINARY or ../../dist/device-mapping-manager.
+//   - The daemon binary built at $SDA_TEST_BINARY or ../../dist/swarm-device-access.
 //
 // Run:
 //
@@ -51,9 +51,9 @@ import (
 
 const (
 	// envBinary overrides the daemon binary path. Defaults to defaultBinary.
-	envBinary = "DMM_TEST_BINARY"
+	envBinary = "SDA_TEST_BINARY"
 	// defaultBinary is the path produced by `make go-build`.
-	defaultBinary = "../../dist/device-mapping-manager"
+	defaultBinary = "../../dist/swarm-device-access"
 
 	// startupTimeout is how long to wait for the daemon to subscribe to events.
 	startupTimeout = 15 * time.Second
@@ -153,7 +153,7 @@ func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
 		"-dry-run",
 		"-log-level=debug",
 		"-log-format=text",
-		"-require-label=dmm.enable=true",
+		"-require-label=sda.enable=true",
 	)
 
 	stdout, err := cmd.StdoutPipe()

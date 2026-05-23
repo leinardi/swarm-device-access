@@ -10,7 +10,7 @@
 #   docker stack deploy -c docker-compose.yaml v4l2-example
 
 services:
-  device-mapping-manager:
+  swarm-device-access:
     image: docker:29
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -18,7 +18,7 @@ services:
       - run
       - -i
       - --rm
-      - --name=device-mapping-manager
+      - --name=swarm-device-access
       - --privileged
       - --cgroupns=host
       - --pid=host
@@ -31,7 +31,7 @@ services:
       - /dev:/dev
       # Restrict to V4L2 devices only:
       # - -device-allow=/dev/video*
-      - ghcr.io/leinardi/device-mapping-manager:latest
+      - ghcr.io/leinardi/swarm-device-access:latest
     entrypoint: docker
     deploy:
       mode: global

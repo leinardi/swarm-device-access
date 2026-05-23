@@ -293,11 +293,11 @@ func TestContainerMatchesLabelPolicy(t *testing.T) {
 	}{
 		{nil, "", true},
 		{map[string]string{"foo": "bar"}, "", true},
-		{map[string]string{"dmm.enable": "true"}, "dmm.enable=true", true},
-		{map[string]string{"dmm.enable": "false"}, "dmm.enable=true", false},
-		{map[string]string{}, "dmm.enable=true", false},
-		{nil, "dmm.enable=true", false},
-		{map[string]string{"dmm.enable": ""}, "dmm.enable=", true},
+		{map[string]string{"sda.enable": "true"}, "sda.enable=true", true},
+		{map[string]string{"sda.enable": "false"}, "sda.enable=true", false},
+		{map[string]string{}, "sda.enable=true", false},
+		{nil, "sda.enable=true", false},
+		{map[string]string{"sda.enable": ""}, "sda.enable=", true},
 	}
 
 	for _, tc := range cases {

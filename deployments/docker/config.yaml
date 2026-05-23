@@ -1,4 +1,4 @@
-# device-mapping-manager config file
+# swarm-device-access config file
 # All settings are optional. CLI flags override file values.
 # Send SIGHUP to reload this file without restarting the daemon.
 # Settings marked [restart required] take effect only at startup.
@@ -14,7 +14,7 @@
 # dry-run: false         # log rules without writing to cgroup
 
 # Only process containers that carry this label (key=value).
-# require-label: "dmm.enable=true"
+# require-label: "sda.enable=true"
 
 # Glob patterns for /dev/... paths to allow (empty = allow all).
 # device-allow:

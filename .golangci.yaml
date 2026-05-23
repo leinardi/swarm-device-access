@@ -158,4 +158,4 @@ formatters:
           replacement: "any"
     goimports:
       local-prefixes:
-        - github.com/leinardi/device-mapping-manager
+        - github.com/leinardi/swarm-device-access

@@ -25,7 +25,7 @@ import (
 	"fmt"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/leinardi/device-mapping-manager/internal/logger"
+	"github.com/leinardi/swarm-device-access/internal/logger"
 )
 
 const (

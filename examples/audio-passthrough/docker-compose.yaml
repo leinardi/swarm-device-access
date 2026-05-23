@@ -18,7 +18,7 @@ services:
     deploy:
       mode: replicated
       replicas: 1
-  device-mapping-manager:
+  swarm-device-access:
     image: docker:29
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -26,7 +26,7 @@ services:
       - run
       - -i
       - --rm
-      - --name=device-mapping-manager
+      - --name=swarm-device-access
       - --privileged
       - --cgroupns=host
       - --pid=host
@@ -39,7 +39,7 @@ services:
       - /dev:/dev
       # Restrict to ALSA sound devices only:
       # - -device-allow=/dev/snd/*
-      - ghcr.io/leinardi/device-mapping-manager:latest
+      - ghcr.io/leinardi/swarm-device-access:latest
     entrypoint: docker
     deploy:
       mode: global

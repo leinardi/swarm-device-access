@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
 	--mount=type=cache,target=/root/.cache/go-build \
 	go build -trimpath -buildvcs=false \
 		-ldflags="-s -w -X 'main.version=${VERSION}' -X 'main.commit=${COMMIT}' -X 'main.date=${DATE}'" \
-		-o /out/device-mapping-manager ./cmd/device-mapping-manager
+		-o /out/swarm-device-access ./cmd/swarm-device-access
 
 ########################
 # runtime: alpine (root by default, required for cgroup BPF syscalls;
@@ -49,13 +49,13 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
 FROM alpine:3.23.4
 
 # hadolint ignore=DL3050
-LABEL org.opencontainers.image.title="device-mapping-manager" \
+LABEL org.opencontainers.image.title="swarm-device-access" \
 	org.opencontainers.image.description="Listens to Docker container-start events and injects cgroup v2 BPF device-allow rules for containers that bind-mount /dev/... paths" \
-	org.opencontainers.image.source="https://github.com/leinardi/device-mapping-manager" \
+	org.opencontainers.image.source="https://github.com/leinardi/swarm-device-access" \
 	org.opencontainers.image.licenses="Apache-2.0"
 
 # Copy the binary
-COPY --from=build /out/device-mapping-manager /usr/local/bin/device-mapping-manager
+COPY --from=build /out/swarm-device-access /usr/local/bin/swarm-device-access
 
 # NOTE: the daemon must run as root and with elevated privileges. It writes
 # eBPF programs into the host's cgroup v2 hierarchy via /sys/fs/cgroup and
@@ -68,4 +68,4 @@ COPY --from=build /out/device-mapping-manager /usr/local/bin/device-mapping-mana
 # the container is started with --pid=host (which would place an init shim
 # outside PID 1 of its own pid namespace and prevent it from working anyway).
 
-ENTRYPOINT ["/usr/local/bin/device-mapping-manager"]
+ENTRYPOINT ["/usr/local/bin/swarm-device-access"]

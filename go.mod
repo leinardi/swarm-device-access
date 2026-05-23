@@ -1,4 +1,4 @@
-module github.com/leinardi/device-mapping-manager
+module github.com/leinardi/swarm-device-access
 
 go 1.26.3
 

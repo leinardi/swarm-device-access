@@ -1,4 +1,4 @@
-name: Release device-mapping-manager
+name: Release swarm-device-access
 
 on:
   workflow_dispatch:
@@ -14,8 +14,8 @@ permissions:
   attestations: write # provenance attestation upload
 
 env:
-  APP_NAME: device-mapping-manager
-  IMAGE_REPO: ghcr.io/leinardi/device-mapping-manager
+  APP_NAME: swarm-device-access
+  IMAGE_REPO: ghcr.io/leinardi/swarm-device-access
 
 jobs:
   release:

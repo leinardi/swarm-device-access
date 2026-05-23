@@ -1,4 +1,4 @@
-# Local snippet (NOT part of make-common): runs the device-mapping-manager
+# Local snippet (NOT part of make-common): runs the swarm-device-access
 # container locally with the host bind mounts and namespaces it needs to
 # manipulate the host's cgroup v2 / BPF state.
 #

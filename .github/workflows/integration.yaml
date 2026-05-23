@@ -31,5 +31,5 @@ jobs:
 
       - name: Run integration tests
         env:
-          DMM_TEST_BINARY: ${{ github.workspace }}/dist/device-mapping-manager
+          SDA_TEST_BINARY: ${{ github.workspace }}/dist/swarm-device-access
         run: go test -tags=integration -timeout=60s -v ./test/integration/...

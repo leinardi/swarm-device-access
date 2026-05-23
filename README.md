@@ -1,4 +1,4 @@
-# device-mapping-manager
+# swarm-device-access
 
 A small Linux daemon that listens to Docker container-start events and injects
 cgroup v2 BPF device-allow rules for any container that bind-mounts a `/dev/...`
@@ -6,7 +6,7 @@ path. It enables GPU, USB, and other device passthrough for Docker Swarm
 services, which reject `devices:` and `device_cgroup_rules:` in their compose
 schema.
 
-This is a fork of the upstream
+`swarm-device-access` is a fork of the upstream
 [`allfro/device-mapping-manager`](https://github.com/allfro/device-mapping-manager).
 
 ## 💡 What problem this solves
@@ -17,7 +17,7 @@ container, so a Swarm task that bind-mounts a `/dev/...` path can see the
 device file but cannot read or write to it (EACCES on open). The only
 supported escape hatch is to write directly to the cgroup's BPF device filter.
 
-`device-mapping-manager` watches the Docker daemon for container starts and,
+`swarm-device-access` watches the Docker daemon for container starts and,
 for each container that bind-mounts something under `/dev`, attaches an extra
 BPF program to the container's cgroup that allows read/write/mknod on the
 mounted device's major/minor pair. The container then has the access it
@@ -60,7 +60,7 @@ Swarm forbids.
 
 ```yaml
 services:
-  device-mapping-manager:
+  swarm-device-access:
     image: docker:29
     entrypoint: docker
     # Run the actual daemon outside Swarm's purview via the host Docker socket.
@@ -83,7 +83,7 @@ services:
       # Optional: enables re-apply of device rules after systemctl daemon-reload.
       # - -v
       # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
-      - ghcr.io/leinardi/device-mapping-manager:latest
+      - ghcr.io/leinardi/swarm-device-access:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
@@ -133,7 +133,7 @@ All CLI flags can be set via a YAML config file (`-config /path/to/config.yaml`)
 Send `SIGHUP` to reload the config file without restarting:
 
 ```bash
-kill -HUP $(docker inspect --format '{{.State.Pid}}' device-mapping-manager)
+kill -HUP $(docker inspect --format '{{.State.Pid}}' swarm-device-access)
 ```
 
 Settings that require a restart: `docker-socket`, `metrics-addr`, `debug-addr`.
@@ -153,7 +153,7 @@ Settings that require a restart: `docker-socket`, `metrics-addr`, `debug-addr`.
 ```bash
 make help              # list all available targets
 make check             # run pre-commit + golangci-lint
-make go-build          # build the binary into ./dist/device-mapping-manager
+make go-build          # build the binary into ./dist/swarm-device-access
 make go-test           # run unit tests
 make docker-build      # build the container image
 ```
@@ -172,7 +172,7 @@ docker buildx build \
   --build-arg VERSION=dev \
   --build-arg COMMIT=$(git rev-parse --short HEAD) \
   --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  -t ghcr.io/leinardi/device-mapping-manager:dev .
+  -t ghcr.io/leinardi/swarm-device-access:dev .
 ```
 
 ## 🧪 Verifying device passthrough

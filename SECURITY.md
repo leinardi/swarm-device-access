@@ -2,7 +2,7 @@
 
 ## Threat model
 
-`device-mapping-manager` is a privileged Linux daemon that:
+`swarm-device-access` is a privileged Linux daemon that:
 
 - Connects to the host Docker socket (`/var/run/docker.sock`) and subscribes to container events.
 - Reads `/proc/<pid>/{cgroup,mountinfo}` for every starting container.
@@ -22,7 +22,7 @@ Older releases are not patched.
 
 Use GitHub's private vulnerability reporting:
 
-1. Go to the [Security Advisories](https://github.com/leinardi/device-mapping-manager/security/advisories) page.
+1. Go to the [Security Advisories](https://github.com/leinardi/swarm-device-access/security/advisories) page.
 2. Click **Report a vulnerability**.
 3. Fill in the description, affected versions, and reproduction steps.
 

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-// Package main wires and runs the device-mapping-manager daemon.
+// Package main wires and runs the swarm-device-access daemon.
 // It listens to Docker container-start events and injects cgroup v2 BPF
 // device-allow rules for any container that bind-mounts a /dev/... path.
 package main
@@ -40,9 +40,9 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	"github.com/leinardi/device-mapping-manager/internal/cgroup"
-	"github.com/leinardi/device-mapping-manager/internal/logger"
-	"github.com/leinardi/device-mapping-manager/internal/systemd"
+	"github.com/leinardi/swarm-device-access/internal/cgroup"
+	"github.com/leinardi/swarm-device-access/internal/logger"
+	"github.com/leinardi/swarm-device-access/internal/systemd"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -177,27 +177,27 @@ func loadConfigFile(path string) (configFileSchema, error) {
 // Prometheus metrics — registered once at startup via promauto.
 var (
 	metricEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "dmm_events_total",
+		Name: "sda_events_total",
 		Help: "Total Docker container events received.",
 	}, []string{"event"})
 
 	metricRulesApplied = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "dmm_rules_applied_total",
+		Name: "sda_rules_applied_total",
 		Help: "Total device rules applied (or skipped in dry-run).",
 	}, []string{"result"})
 
 	metricReloadReapplies = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "dmm_reload_reapplies_total",
+		Name: "sda_reload_reapplies_total",
 		Help: "Times device rules were re-applied after a systemd daemon-reload.",
 	})
 
 	metricDockerReconnects = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "dmm_docker_reconnects_total",
+		Name: "sda_docker_reconnects_total",
 		Help: "Times the Docker event stream reconnected after an error.",
 	})
 
 	metricApplyDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "dmm_apply_duration_seconds",
+		Name:    "sda_apply_duration_seconds",
 		Help:    "Time spent applying device rules per container.",
 		Buckets: prometheus.DefBuckets,
 	})
@@ -246,7 +246,7 @@ func run() int {
 
 	log := logger.L()
 
-	log.Info("device-mapping-manager starting",
+	log.Info("swarm-device-access starting",
 		"version", version,
 		"commit", commit,
 		"date", date,
@@ -313,7 +313,7 @@ func run() int {
 
 	listenEvents(rootCtx, cli, processed)
 
-	log.Info("device-mapping-manager shutting down")
+	log.Info("swarm-device-access shutting down")
 
 	return 0
 }

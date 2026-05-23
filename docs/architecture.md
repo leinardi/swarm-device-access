@@ -2,7 +2,7 @@
 
 ## What it does
 
-`device-mapping-manager` is a privileged Linux daemon that fills a gap in Docker Swarm: Swarm services silently ignore `devices:` and
+`swarm-device-access` is a privileged Linux daemon that fills a gap in Docker Swarm: Swarm services silently ignore `devices:` and
 `device_cgroup_rules:` in compose specs, yet the kernel still enforces cgroup device controls. A container that bind-mounts `/dev/nvidia0` can _see_
 the device file but cannot open it (`EACCES`).
 
@@ -17,7 +17,7 @@ Docker daemon
     | container start / unpause events (Unix socket)
     v
 +---------------------------------------------------+
-|  cmd/device-mapping-manager/main.go               |
+|  cmd/swarm-device-access/main.go                  |
 |                                                   |
 |  run()                                            |
 |   ├─ processExistingContainers()  ← startup       |
@@ -97,7 +97,7 @@ rather than replacing it.
 
 | Package                      | Responsibility                                                                                                                                    |
 |------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cmd/device-mapping-manager` | Daemon entrypoint, event loop, Docker client, apply pipeline                                                                                      |
+| `cmd/swarm-device-access`    | Daemon entrypoint, event loop, Docker client, apply pipeline                                                                                      |
 | `internal/cgroup`            | Device-rule application: cgroup v1 (`devices.allow` write) and v2 (BPF attach). Cgroup version + path detection via `/proc`. NVIDIA-derived code. |
 | `internal/logger`            | `slog`-based singleton with `text`, `json`, `plain` handlers                                                                                      |
 | `internal/systemd`           | DBus watcher for systemd `Reloading` signal                                                                                                       |
@@ -130,11 +130,11 @@ Metrics exposed:
 
 | Metric                        | Type      | Labels   | Description                                 |
 |-------------------------------|-----------|----------|---------------------------------------------|
-| `dmm_events_total`            | counter   | `event`  | Docker events received (`start`, `unpause`) |
-| `dmm_rules_applied_total`     | counter   | `result` | Rules applied (`ok`) or failed (`error`)    |
-| `dmm_reload_reapplies_total`  | counter   | —        | Re-applies after systemd daemon-reload      |
-| `dmm_docker_reconnects_total` | counter   | —        | Docker event stream reconnects              |
-| `dmm_apply_duration_seconds`  | histogram | —        | Wall-clock time per container apply         |
+| `sda_events_total`            | counter   | `event`  | Docker events received (`start`, `unpause`) |
+| `sda_rules_applied_total`     | counter   | `result` | Rules applied (`ok`) or failed (`error`)    |
+| `sda_reload_reapplies_total`  | counter   | —        | Re-applies after systemd daemon-reload      |
+| `sda_docker_reconnects_total` | counter   | —        | Docker event stream reconnects              |
+| `sda_apply_duration_seconds`  | histogram | —        | Wall-clock time per container apply         |
 
 ### pprof debug server (`--debug-addr`)
 
