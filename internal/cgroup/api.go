@@ -20,6 +20,7 @@ package cgroup
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,6 +46,7 @@ type Interface interface {
 	AddDeviceRules(cgroupPath string, devices []DeviceRule) error
 }
 
+//nolint:ireturn // intentional: callers use the interface
 func New(version int) (Interface, error) {
 	switch version {
 	case 1:
@@ -52,9 +54,14 @@ func New(version int) (Interface, error) {
 	case 2:
 		return &cgroupv2{}, nil
 	default:
-		return nil, fmt.Errorf("invalid cgroup version %d", version)
+		return nil, fmt.Errorf( //nolint:err113 // dynamic content
+			"invalid cgroup version %d",
+			version,
+		)
 	}
 }
+
+var errNoDeviceOrUnifiedCgroup = errors.New("no devices or unified cgroup entries found")
 
 type (
 	cgroupv1 struct{}
@@ -66,7 +73,7 @@ var (
 	_ Interface = (*cgroupv2)(nil)
 )
 
-// GetDeviceCGroupVersion returns the version of linux cgroups in use
+// GetDeviceCGroupVersion returns the version of linux cgroups in use.
 func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
 	path := filepath.Join(rootPath, "proc", strconv.Itoa(pid), "cgroup")
 
@@ -87,14 +94,21 @@ func scanCGroupVersion(r io.Reader, path string) (int, error) {
 
 	// Loop through the file looking for either a 'devices' or a '' (i.e. unified) entry
 	found := make(map[string]bool)
+
 	for scanner.Scan() {
 		parts := strings.SplitN(scanner.Text(), ":", 3)
 		if len(parts) != 3 {
-			return -1, fmt.Errorf("malformed cgroup entry: %v", scanner.Text())
+			return -1, fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed cgroup entry: %v",
+				scanner.Text(),
+			)
 		}
+
 		found[parts[1]] = true
 	}
-	if scanErr := scanner.Err(); scanErr != nil {
+
+	scanErr := scanner.Err()
+	if scanErr != nil {
 		return -1, fmt.Errorf("read %q: %w", path, scanErr)
 	}
 
@@ -108,5 +122,5 @@ func scanCGroupVersion(r io.Reader, path string) (int, error) {
 		return 2, nil
 	}
 
-	return -1, fmt.Errorf("no devices or unified cgroup entries found")
+	return -1, errNoDeviceOrUnifiedCgroup
 }

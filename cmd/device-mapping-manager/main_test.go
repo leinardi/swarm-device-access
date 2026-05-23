@@ -21,28 +21,28 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	dockertypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/mount"
 )
 
 // fakeInspector is a test double for containerInspector.
 type fakeInspector struct {
-	result dockertypes.ContainerJSON
+	result container.InspectResponse
 	err    error
 }
 
 func (f *fakeInspector) ContainerInspect(
 	_ context.Context,
 	_ string,
-) (dockertypes.ContainerJSON, error) {
+) (container.InspectResponse, error) {
 	return f.result, f.err
 }
 
@@ -53,29 +53,42 @@ func buildProcRoot(t *testing.T, pid int, cgroupContent, mountinfoContent string
 	t.Helper()
 
 	root := t.TempDir()
-	procDir := filepath.Join(root, "proc", fmt.Sprintf("%d", pid))
+	procDir := filepath.Join(root, "proc", strconv.Itoa(pid))
 
-	if err := os.MkdirAll(procDir, 0o755); err != nil {
+	err := os.MkdirAll(procDir, 0o755)
+	if err != nil {
 		t.Fatalf("mkdir proc: %v", err)
 	}
 
-	if err := os.WriteFile(
+	err = os.WriteFile(
 		filepath.Join(procDir, "cgroup"),
 		[]byte(cgroupContent),
-		0o644,
-	); err != nil {
+		0o600,
+	)
+	if err != nil {
 		t.Fatalf("write cgroup: %v", err)
 	}
 
-	if err := os.WriteFile(
+	err = os.WriteFile(
 		filepath.Join(procDir, "mountinfo"),
 		[]byte(mountinfoContent),
-		0o644,
-	); err != nil {
+		0o600,
+	)
+	if err != nil {
 		t.Fatalf("write mountinfo: %v", err)
 	}
 
 	return root
+}
+
+var (
+	errTransportEOF  = errors.New("transport EOF")
+	errDaemonUnavail = errors.New("daemon unavailable")
+)
+
+func TestMain(m *testing.M) {
+	activeCfg.Store(&hotConfig{})
+	os.Exit(m.Run())
 }
 
 func TestNextBackoff_Doubles(t *testing.T) {
@@ -99,11 +112,8 @@ func TestNextBackoff_Caps(t *testing.T) {
 
 func TestPtr_ReturnsAddressOfValue(t *testing.T) {
 	v := int64(42)
+	//nolint:modernize // ptr takes address of v; new(int64) returns zero-value pointer, not &v
 	p := ptr(v)
-
-	if p == nil {
-		t.Fatal("ptr returned nil")
-	}
 
 	if *p != 42 {
 		t.Errorf("*ptr = %d, want 42", *p)
@@ -115,11 +125,12 @@ func TestSleepCtx_RespectsCancellation(t *testing.T) {
 	cancel()
 
 	start := time.Now()
+
 	sleepCtx(ctx, 5*time.Second)
 
 	elapsed := time.Since(start)
 	if elapsed > 100*time.Millisecond {
-		t.Errorf("sleepCtx took %v with cancelled ctx; want immediate return", elapsed)
+		t.Errorf("sleepCtx took %v with canceled ctx; want immediate return", elapsed)
 	}
 }
 
@@ -128,6 +139,7 @@ func TestSleepCtx_WaitsForDuration(t *testing.T) {
 	target := 50 * time.Millisecond
 
 	start := time.Now()
+
 	sleepCtx(ctx, target)
 
 	elapsed := time.Since(start)
@@ -137,7 +149,7 @@ func TestSleepCtx_WaitsForDuration(t *testing.T) {
 }
 
 // makeChans returns buffered event/error channels for driving consumeEvents in tests.
-func makeChans(msgBuf, errBuf int) (chan events.Message, chan error) {
+func makeChans(msgBuf, errBuf int) (msgs chan events.Message, errs chan error) {
 	return make(chan events.Message, msgBuf), make(chan error, errBuf)
 }
 
@@ -153,7 +165,7 @@ func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
 	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
 	if got {
 		t.Error(
-			"consumeEvents should return false (no reconnect) when context is already cancelled",
+			"consumeEvents should return false (no reconnect) when context is already canceled",
 		)
 	}
 }
@@ -163,12 +175,13 @@ func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
 	msgs, errs := makeChans(0, 1)
 	backoff := minBackoff
 
-	errs <- errors.New("transport EOF")
+	errs <- errTransportEOF
 
 	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on stream error")
 	}
+
 	if backoff != nextBackoff(minBackoff) {
 		t.Errorf("backoff = %v, want %v after one error", backoff, nextBackoff(minBackoff))
 	}
@@ -180,6 +193,7 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 	backoff := minBackoff
 
 	errs <- context.Canceled
+
 	cancel()
 
 	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, noopApply)
@@ -209,12 +223,15 @@ func TestConsumeEvents_EventCallsApply(t *testing.T) {
 	backoff := minBackoff
 
 	var called atomic.Int32
+
 	apply := func(_ context.Context, _ string) error {
 		called.Add(1)
+
 		return nil
 	}
 
 	msgs <- events.Message{Actor: events.Actor{ID: "container-1"}}
+
 	msgs <- events.Message{Actor: events.Actor{ID: "container-2"}}
 
 	// Cancel after a brief delay so consumeEvents exits cleanly.
@@ -241,8 +258,10 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 	}
 
 	var called atomic.Int32
-	apply := func(_ context.Context, id string) error {
+
+	apply := func(_ context.Context, _ string) error {
 		called.Add(1)
+
 		return nil
 	}
 
@@ -317,17 +336,17 @@ func TestDevicePathAllowed(t *testing.T) {
 // ---- processContainer tests ----
 
 func TestProcessContainer_InspectError(t *testing.T) {
-	insp := &fakeInspector{err: errors.New("daemon unavailable")}
-	err := processContainer(context.Background(), insp, "abc", "/", false)
+	insp := &fakeInspector{err: errDaemonUnavail}
 
+	err := processContainer(context.Background(), insp, "abc", "/", false)
 	if err == nil {
 		t.Fatal("expected error from inspect failure, got nil")
 	}
 }
 
 func TestProcessContainer_NilState(t *testing.T) {
-	insp := &fakeInspector{result: dockertypes.ContainerJSON{
-		ContainerJSONBase: &dockertypes.ContainerJSONBase{
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{
 			State: nil,
 		},
 	}}
@@ -339,9 +358,9 @@ func TestProcessContainer_NilState(t *testing.T) {
 }
 
 func TestProcessContainer_ZeroPid(t *testing.T) {
-	state := &dockertypes.ContainerState{Pid: 0}
-	insp := &fakeInspector{result: dockertypes.ContainerJSON{
-		ContainerJSONBase: &dockertypes.ContainerJSONBase{State: state},
+	state := &container.State{Pid: 0}
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
 	}}
 
 	err := processContainer(context.Background(), insp, "abc", "/", false)
@@ -355,17 +374,17 @@ func TestProcessContainer_NoDevMounts(t *testing.T) {
 
 	// cgroup v2 fixture: unified hierarchy
 	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
 
 	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
 
 	// Container has only non-/dev mounts — processContainer should return nil
 	// without attempting any cgroup writes (cgroup write would fail here since
 	// the path doesn't exist, but we never reach that code).
-	state := &dockertypes.ContainerState{Pid: pid}
-	insp := &fakeInspector{result: dockertypes.ContainerJSON{
-		ContainerJSONBase: &dockertypes.ContainerJSONBase{State: state},
-		Mounts: []dockertypes.MountPoint{
+	state := &container.State{Pid: pid}
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		Mounts: []container.MountPoint{
 			{Source: "/tmp/data", Destination: "/data", Type: mount.TypeBind},
 			{Source: "/var/log", Destination: "/logs", Type: mount.TypeBind},
 		},
@@ -381,17 +400,17 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 	const pid = 43
 
 	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
 
 	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
 
 	// Mixed mounts: one /dev, one not. The /dev mount will reach applyMount
 	// which will fail (stat on a fake path) but processContainer logs and
 	// continues — so the overall return is still nil.
-	state := &dockertypes.ContainerState{Pid: pid}
-	insp := &fakeInspector{result: dockertypes.ContainerJSON{
-		ContainerJSONBase: &dockertypes.ContainerJSONBase{State: state},
-		Mounts: []dockertypes.MountPoint{
+	state := &container.State{Pid: pid}
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		Mounts: []container.MountPoint{
 			{Source: "/tmp/data", Destination: "/data", Type: mount.TypeBind},
 			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
 		},

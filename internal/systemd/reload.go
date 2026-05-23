@@ -59,7 +59,8 @@ func Open() (*Watcher, error) {
 		dbus.WithMatchMember(reloadingMember),
 	)
 	if matchErr != nil {
-		if closeErr := conn.Close(); closeErr != nil {
+		closeErr := conn.Close()
+		if closeErr != nil {
 			logger.L().Warn("close dbus conn after AddMatchSignal failure", "err", closeErr)
 		}
 
@@ -75,7 +76,8 @@ func (w *Watcher) Close() error {
 		return nil
 	}
 
-	if err := w.conn.Close(); err != nil {
+	err := w.conn.Close()
+	if err != nil {
 		return fmt.Errorf("close dbus conn: %w", err)
 	}
 
@@ -89,9 +91,10 @@ func (w *Watcher) Close() error {
 // the cgroup wipe.
 func (w *Watcher) Watch(ctx context.Context, onReload func()) {
 	log := logger.L()
-	ch := make(chan *dbus.Signal, signalChanBuffer)
-	w.conn.Signal(ch)
-	defer w.conn.RemoveSignal(ch)
+	sigCh := make(chan *dbus.Signal, signalChanBuffer)
+
+	w.conn.Signal(sigCh)
+	defer w.conn.RemoveSignal(sigCh)
 
 	log.Debug("systemd reload watcher started")
 
@@ -100,7 +103,7 @@ func (w *Watcher) Watch(ctx context.Context, onReload func()) {
 		case <-ctx.Done():
 			return
 
-		case sig, ok := <-ch:
+		case sig, ok := <-sigCh:
 			if !ok {
 				log.Warn("systemd signal channel closed; reload watcher exiting")
 

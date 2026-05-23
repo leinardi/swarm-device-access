@@ -69,17 +69,22 @@ func TestScanMountInfoV1(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErrSub)
 				}
+
 				if !strings.Contains(err.Error(), tc.wantErrSub) {
 					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrSub)
 				}
+
 				return
 			}
+
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
+
 			if gotPrefix != tc.wantPrefix {
 				t.Errorf("prefix = %q, want %q", gotPrefix, tc.wantPrefix)
 			}
+
 			if gotMount != tc.wantMount {
 				t.Errorf("mount = %q, want %q", gotMount, tc.wantMount)
 			}
@@ -135,14 +140,18 @@ func TestScanProcCgroupV1(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErrSub)
 				}
+
 				if !strings.Contains(err.Error(), tc.wantErrSub) {
 					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrSub)
 				}
+
 				return
 			}
+
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
+
 			if got != tc.wantRoot {
 				t.Errorf("root = %q, want %q", got, tc.wantRoot)
 			}

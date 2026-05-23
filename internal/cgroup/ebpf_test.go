@@ -22,14 +22,19 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/cilium/ebpf/asm"
 )
 
+//nolint:modernize // ptr64 takes address of value; new(int64) would return zero-value
 func ptr64(v int64) *int64 { return &v }
 
 func newProgram(t *testing.T) *program {
 	t.Helper()
+
 	p := &program{}
 	p.init()
+
 	return p
 }
 
@@ -43,7 +48,8 @@ func TestAppendDevice_CharDevice_RWM(t *testing.T) {
 		Access: "rwm",
 	}
 
-	if err := p.appendDevice(rule, "pfx"); err != nil {
+	err := p.appendDevice(rule, "pfx")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -64,7 +70,8 @@ func TestAppendDevice_BlockDevice_ReadOnly(t *testing.T) {
 		Access: "r",
 	}
 
-	if err := p.appendDevice(rule, "pfx"); err != nil {
+	err := p.appendDevice(rule, "pfx")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -85,7 +92,8 @@ func TestAppendDevice_Wildcard_SetsFlag(t *testing.T) {
 		Access: "rwm",
 	}
 
-	if err := p.appendDevice(wildcard, "pfx"); err != nil {
+	err := p.appendDevice(wildcard, "pfx")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -95,8 +103,11 @@ func TestAppendDevice_Wildcard_SetsFlag(t *testing.T) {
 
 	// Subsequent appends are no-ops when hasWildCard is set.
 	before := len(p.insts)
+
 	rule := DeviceRule{Allow: true, Type: "c", Major: ptr64(1), Minor: ptr64(0), Access: "rwm"}
-	if err := p.appendDevice(rule, "pfx"); err != nil {
+
+	err = p.appendDevice(rule, "pfx")
+	if err != nil {
 		t.Fatalf("unexpected error after wildcard: %v", err)
 	}
 
@@ -115,7 +126,8 @@ func TestAppendDevice_NoMajorNoMinor(t *testing.T) {
 		Access: "rwm",
 	}
 
-	if err := p.appendDevice(rule, "pfx"); err != nil {
+	err := p.appendDevice(rule, "pfx")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -136,7 +148,8 @@ func TestAppendDevice_Deny(t *testing.T) {
 		Access: "rwm",
 	}
 
-	if err := p.appendDevice(rule, "pfx"); err != nil {
+	err := p.appendDevice(rule, "pfx")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -217,16 +230,18 @@ func TestAppendDevice_AfterFinalize(t *testing.T) {
 	p := newProgram(t)
 	rule := DeviceRule{Allow: true, Type: "c", Major: ptr64(1), Minor: ptr64(0), Access: "rwm"}
 
-	if err := p.appendDevice(rule, "pfx"); err != nil {
+	err := p.appendDevice(rule, "pfx")
+	if err != nil {
 		t.Fatalf("first append: %v", err)
 	}
 
-	if _, err := p.finalize(nil, "pfx"); err != nil {
+	_, err = p.finalize(asm.Instructions{asm.Return()}, "pfx")
+	if err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
 
 	// appendDevice after finalize must return an error.
-	err := p.appendDevice(rule, "pfx")
+	err = p.appendDevice(rule, "pfx")
 	if err == nil {
 		t.Fatal("expected error after finalize, got nil")
 	}

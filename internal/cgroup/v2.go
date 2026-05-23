@@ -20,6 +20,7 @@ package cgroup
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -37,7 +38,12 @@ const (
 	bpfProgramLicense = "Apache"
 )
 
-// GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid
+var (
+	errNoCgroup2Fs     = errors.New("no cgroup2 filesystem in mountinfo file")
+	errNoCgroupV2Entry = errors.New("no cgroupv2 entries in file")
+)
+
+// GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid.
 func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error) {
 	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "mountinfo")
 
@@ -61,7 +67,10 @@ func scanMountInfoV2(r io.Reader, path string) (string, string, error) {
 		// Split each entry by '[space]'
 		parts := strings.Split(scanner.Text(), " ")
 		if len(parts) < 5 {
-			return "", "", fmt.Errorf("malformed mountinfo entry: %v", scanner.Text())
+			return "", "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed mountinfo entry: %v",
+				scanner.Text(),
+			)
 		}
 		// Look for an entry with cgroup2 as the mount type.
 		if parts[len(parts)-3] != "cgroup2" {
@@ -69,21 +78,26 @@ func scanMountInfoV2(r io.Reader, path string) (string, string, error) {
 		}
 		// Make sure the mount prefix is not a relative path.
 		if strings.HasPrefix(parts[3], "/..") {
-			return "", "", fmt.Errorf("relative path in mount prefix: %v", parts[3])
+			return "", "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"relative path in mount prefix: %v",
+				parts[3],
+			)
 		}
 		// Return the 3rd element as the prefix of the mount point for
 		// the devices cgroup and the 4th element as the mount point of
 		// the devices cgroup itself.
 		return parts[3], parts[4], nil
 	}
-	if scanErr := scanner.Err(); scanErr != nil {
+
+	scanErr := scanner.Err()
+	if scanErr != nil {
 		return "", "", fmt.Errorf("read %q: %w", path, scanErr)
 	}
 
-	return "", "", fmt.Errorf("no cgroup2 filesystem in mountinfo file")
+	return "", "", errNoCgroup2Fs
 }
 
-// GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid
+// GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid.
 func (c *cgroupv2) GetDeviceCGroupRootPath(
 	procRootPath string,
 	prefix string,
@@ -111,7 +125,10 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 		// Split each entry by ':'
 		parts := strings.SplitN(scanner.Text(), ":", 3)
 		if len(parts) != 3 {
-			return "", fmt.Errorf("malformed cgroup entry: %v", scanner.Text())
+			return "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed cgroup entry: %v",
+				scanner.Text(),
+			)
 		}
 		// Look for the (empty) subsystem in the 1st element.
 		if parts[1] != "" {
@@ -122,16 +139,19 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 		if prefix == "/" {
 			return parts[2], nil
 		}
+
 		return strings.TrimPrefix(parts[2], prefix), nil
 	}
-	if scanErr := scanner.Err(); scanErr != nil {
+
+	scanErr := scanner.Err()
+	if scanErr != nil {
 		return "", fmt.Errorf("read %q: %w", path, scanErr)
 	}
 
-	return "", fmt.Errorf("no cgroupv2 entries in file")
+	return "", errNoCgroupV2Entry
 }
 
-// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath
+// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath.
 func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// Open the cgroup path.
 	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0)
@@ -158,10 +178,13 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 			p.Close()
 		}
 	}()
+
 	if len(oldProgs) == 0 {
 		oldInsts := asm.Instructions{asm.Return()}
 
-		newProg, err := generateNewProgram(rules, oldInsts)
+		var newProg *ebpf.Program
+
+		newProg, err = generateNewProgram(rules, oldInsts)
 		if err != nil {
 			return fmt.Errorf(
 				"unable to generate new device filter program with no existing programs: %w",
@@ -171,8 +194,15 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 
 		newProgs = append(newProgs, newProg)
 	}
+
 	for _, oldProg := range oldProgs {
-		oldInfo, err := oldProg.Info()
+		var (
+			oldInfo  *ebpf.ProgramInfo
+			oldInsts asm.Instructions
+			newProg  *ebpf.Program
+		)
+
+		oldInfo, err = oldProg.Info()
 		if err != nil {
 			return fmt.Errorf(
 				"unable to get Info() of the original device filters program: %w",
@@ -180,7 +210,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 			)
 		}
 
-		oldInsts, err := oldInfo.Instructions()
+		oldInsts, err = oldInfo.Instructions()
 		if err != nil {
 			return fmt.Errorf(
 				"unable to get the instructions of the original device filters program: %w",
@@ -188,7 +218,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 			)
 		}
 
-		newProg, err := generateNewProgram(rules, oldInsts)
+		newProg, err = generateNewProgram(rules, oldInsts)
 		if err != nil {
 			return fmt.Errorf(
 				"unable to generate new device filter program from existing programs: %w",
@@ -205,7 +235,9 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 		Cur: unix.RLIM_INFINITY,
 		Max: unix.RLIM_INFINITY,
 	}
-	if rlimitErr := unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit); rlimitErr != nil {
+
+	rlimitErr := unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
+	if rlimitErr != nil {
 		slog.Default().Warn("setrlimit RLIMIT_MEMLOCK failed; BPF_PROG_LOAD may fail",
 			"err", rlimitErr)
 	}
@@ -220,6 +252,7 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 			return fmt.Errorf("unable to detach original device filters program: %w", err)
 		}
 	}
+
 	for _, newProg := range newProgs {
 		err = AttachCgroupDeviceFilter(newProg, dirFD)
 		if err != nil {
@@ -246,6 +279,7 @@ func generateNewProgram(rules []DeviceRule, oldInsts asm.Instructions) (*ebpf.Pr
 		Instructions: newInsts,
 		License:      bpfProgramLicense,
 	}
+
 	newProg, err := ebpf.NewProgram(spec)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new device filters program: %w", err)

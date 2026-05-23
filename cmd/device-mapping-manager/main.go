@@ -27,7 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	"net/http/pprof" //nolint:gosec // pprof only exposed on --debug-addr, off by default
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -36,7 +36,6 @@ import (
 	"syscall"
 	"time"
 
-	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -55,7 +54,7 @@ import (
 // It exists solely to allow unit tests to inject a fake without standing up a
 // real Docker daemon.
 type containerInspector interface {
-	ContainerInspect(ctx context.Context, id string) (dockertypes.ContainerJSON, error)
+	ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error)
 }
 
 const (
@@ -65,17 +64,23 @@ const (
 	// to it. See the example docker-compose for the bind mount layout.
 	hostRootPath = "/host"
 
-	minBackoff = 1 * time.Second
-	maxBackoff = 30 * time.Second
+	minBackoff      = 1 * time.Second
+	maxBackoff      = 30 * time.Second
+	shutdownTimeout = 5 * time.Second
 )
 
-// stringSliceFlag is a repeatable flag: -device-allow /dev/nvidia* -device-allow /dev/dri/*
+// stringSliceFlag is a repeatable flag: -device-allow /dev/nvidia* -device-allow /dev/dri/*.
 type stringSliceFlag []string
 
-func (f *stringSliceFlag) String() string     { return strings.Join(*f, ",") }
-func (f *stringSliceFlag) Set(v string) error { *f = append(*f, v); return nil }
-func (f stringSliceFlag) contains(path string) bool {
-	for _, pattern := range f {
+func (f *stringSliceFlag) String() string { return strings.Join(*f, ",") }
+func (f *stringSliceFlag) Set(v string) error {
+	*f = append(*f, v)
+
+	return nil
+}
+
+func (f *stringSliceFlag) contains(path string) bool {
+	for _, pattern := range *f {
 		if ok, _ := filepath.Match(pattern, path); ok {
 			return true
 		}
@@ -118,6 +123,9 @@ var (
 
 // configFileSchema mirrors the CLI flags that can be set via the config file.
 // All fields are optional; zero values mean "not set in file".
+// YAML tag names match the CLI flag names (kebab-case) for user-facing consistency.
+//
+//nolint:tagliatelle // kebab-case tags match CLI flag names intentionally for user-facing consistency
 type configFileSchema struct {
 	LogFormat    string   `yaml:"log-format"`
 	LogLevel     string   `yaml:"log-level"`
@@ -151,13 +159,15 @@ func loadConfigFile(path string) (configFileSchema, error) {
 		return configFileSchema{}, nil
 	}
 
-	data, err := os.ReadFile(path) //nolint:gosec // operator-controlled path
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return configFileSchema{}, fmt.Errorf("read config file %q: %w", path, err)
 	}
 
 	var cfg configFileSchema
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+
+	err = yaml.Unmarshal(data, &cfg)
+	if err != nil {
 		return configFileSchema{}, fmt.Errorf("parse config file %q: %w", path, err)
 	}
 
@@ -195,10 +205,13 @@ var (
 
 // ptr returns a pointer to v. Generic helper used to inline scalar pointers
 // for cgroup.DeviceRule fields.
+//
+//nolint:modernize // ptr takes address of value; new(T) allocates zero-value
 func ptr[T any](v T) *T {
 	return &v
 }
 
+//nolint:gochecknoinits // flag registration requires init
 func init() {
 	flag.Var(&deviceAllow, "device-allow",
 		"Glob pattern for /dev/... paths to allow (repeatable). Empty means allow all.")
@@ -281,13 +294,15 @@ func run() int {
 	// Track their IDs so the start-event handler can skip them on the brief
 	// window where both events and the initial enumeration overlap.
 	processed := make(map[string]struct{})
-	if processErr := processExistingContainers(
+
+	processErr := processExistingContainers(
 		rootCtx,
 		cli,
 		processed,
 		"/",
 		activeCfg.Load().dryRun,
-	); processErr != nil {
+	)
+	if processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
 
@@ -322,16 +337,16 @@ func processExistingContainers(
 
 	log.Debug("enumerating running containers", "count", len(containers))
 
-	for _, runningContainer := range containers {
-		processErr := processContainer(ctx, cli, runningContainer.ID, procRootPath, dryRun)
+	for idx := range containers {
+		processErr := processContainer(ctx, cli, containers[idx].ID, procRootPath, dryRun)
 		if processErr != nil {
 			log.Warn("could not process running container",
-				"id", runningContainer.ID, "err", processErr)
+				"id", containers[idx].ID, "err", processErr)
 
 			continue
 		}
 
-		processed[runningContainer.ID] = struct{}{}
+		processed[containers[idx].ID] = struct{}{}
 	}
 
 	return nil
@@ -353,22 +368,25 @@ func startReloadWatcher(ctx context.Context, cli *client.Client) {
 
 	go func() {
 		defer func() {
-			if closeErr := watcher.Close(); closeErr != nil {
+			closeErr := watcher.Close()
+			if closeErr != nil {
 				log.Warn("close systemd watcher", "err", closeErr)
 			}
 		}()
 
 		watcher.Watch(ctx, func() {
 			metricReloadReapplies.Inc()
+
 			fresh := make(map[string]struct{})
 
-			if processErr := processExistingContainers(
+			processErr := processExistingContainers(
 				ctx,
 				cli,
 				fresh,
 				"/",
 				activeCfg.Load().dryRun,
-			); processErr != nil {
+			)
+			if processErr != nil {
 				log.Warn("could not re-apply rules after systemd reload",
 					"err", processErr)
 			}
@@ -451,6 +469,7 @@ func consumeEvents(
 			for k := range processed {
 				delete(processed, k)
 			}
+
 			clearProcessed = nil
 
 		case streamErr := <-errs:
@@ -483,6 +502,7 @@ func consumeEvents(
 			}
 
 			*backoff = minBackoff
+
 			metricEventsTotal.WithLabelValues(string(msg.Action)).Inc()
 
 			if _, alreadyProcessed := processed[msg.Actor.ID]; alreadyProcessed {
@@ -493,7 +513,8 @@ func consumeEvents(
 
 			start := time.Now()
 
-			if applyErr := apply(ctx, msg.Actor.ID); applyErr != nil {
+			applyErr := apply(ctx, msg.Actor.ID)
+			if applyErr != nil {
 				log.Warn("could not process container",
 					"id", msg.Actor.ID, "err", applyErr)
 				metricRulesApplied.WithLabelValues("error").Inc()
@@ -525,8 +546,11 @@ func sleepCtx(ctx context.Context, duration time.Duration) {
 // applyFileConfig merges the file config into the CLI flags (for flags not
 // explicitly set by the user) and stores the result in activeCfg.
 // Must be called after flag.Parse().
+//
+//nolint:gocyclo,cyclop // complexity is inherent: merges many independent optional config fields
 func applyFileConfig(fileCfg *configFileSchema) {
 	cliSet := make(map[string]bool)
+
 	flag.Visit(func(f *flag.Flag) { cliSet[f.Name] = true })
 
 	if !cliSet["log-format"] && fileCfg.LogFormat != "" {
@@ -580,17 +604,20 @@ func applyFileConfig(fileCfg *configFileSchema) {
 // watchSIGHUP blocks until ctx is done, reloading the config file and
 // updating activeCfg + logger on each SIGHUP. Settings that require a
 // restart (docker-socket, metrics-addr, debug-addr) are not reloaded.
+//
+//nolint:gocyclo,cyclop // complexity is inherent: handles SIGHUP, config reload, logger update, and reload actions
 func watchSIGHUP(ctx context.Context) {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGHUP)
-	defer signal.Stop(ch)
+	sigCh := make(chan os.Signal, 1)
+
+	signal.Notify(sigCh, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case <-ch:
+		case <-sigCh:
 			log := logger.L()
 			log.Info("SIGHUP received; reloading config", "config_file", *configFile)
 
@@ -602,6 +629,7 @@ func watchSIGHUP(ctx context.Context) {
 			}
 
 			cliSet := make(map[string]bool)
+
 			flag.Visit(func(f *flag.Flag) { cliSet[f.Name] = true })
 
 			effectiveLogFormat := *logFormat
@@ -624,6 +652,7 @@ func watchSIGHUP(ctx context.Context) {
 
 			newDryRun := *dryRun
 			newRequireLabel := *requireLabel
+
 			newDeviceAllow := append(stringSliceFlag(nil), deviceAllow...)
 			newDeviceDeny := append(stringSliceFlag(nil), deviceDeny...)
 
@@ -673,14 +702,14 @@ func startMetricsServer(ctx context.Context, addr string, ready <-chan struct{})
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/readyz", func(resp http.ResponseWriter, _ *http.Request) {
 		select {
 		case <-ready:
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok"))
+			resp.WriteHeader(http.StatusOK)
+			_, _ = resp.Write([]byte("ok"))
 		default:
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("starting"))
+			resp.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = resp.Write([]byte("starting"))
 		}
 	})
 
@@ -693,7 +722,8 @@ func startMetricsServer(ctx context.Context, addr string, ready <-chan struct{})
 	go func() {
 		log.Info("metrics server listening", "addr", addr)
 
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("metrics server error", "err", err)
 		}
 	}()
@@ -701,10 +731,13 @@ func startMetricsServer(ctx context.Context, addr string, ready <-chan struct{})
 	go func() {
 		<-ctx.Done()
 
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 		defer cancel()
 
-		if err := srv.Shutdown(shutCtx); err != nil {
+		err := srv.Shutdown(
+			shutCtx,
+		)
+		if err != nil {
 			log.Warn("metrics server shutdown error", "err", err)
 		}
 	}()
@@ -729,7 +762,8 @@ func startDebugServer(ctx context.Context, addr string) {
 	go func() {
 		log.Info("debug server listening", "addr", addr)
 
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("debug server error", "err", err)
 		}
 	}()
@@ -737,10 +771,13 @@ func startDebugServer(ctx context.Context, addr string) {
 	go func() {
 		<-ctx.Done()
 
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 		defer cancel()
 
-		if err := srv.Shutdown(shutCtx); err != nil {
+		err := srv.Shutdown(
+			shutCtx,
+		)
+		if err != nil {
 			log.Warn("debug server shutdown error", "err", err)
 		}
 	}()
@@ -781,19 +818,19 @@ func devicePathAllowed(path string, allow, deny stringSliceFlag) bool {
 func processContainer(
 	ctx context.Context,
 	cli containerInspector,
-	id string,
+	containerID string,
 	procRootPath string,
 	dryRun bool,
 ) error {
 	log := logger.L()
 
-	info, inspectErr := cli.ContainerInspect(ctx, id)
+	info, inspectErr := cli.ContainerInspect(ctx, containerID)
 	if inspectErr != nil {
-		return fmt.Errorf("inspect container %q: %w", id, inspectErr)
+		return fmt.Errorf("inspect container %q: %w", containerID, inspectErr)
 	}
 
 	if info.State == nil || info.State.Pid == 0 {
-		log.Debug("container has no live pid; skipping", "id", id)
+		log.Debug("container has no live pid; skipping", "id", containerID)
 
 		return nil
 	}
@@ -808,7 +845,7 @@ func processContainer(
 
 	if !containerMatchesLabelPolicy(labels, cfg.requireLabel) {
 		log.Debug("container skipped by label policy",
-			"id", id,
+			"id", containerID,
 			"require_label", cfg.requireLabel,
 		)
 
@@ -843,7 +880,7 @@ func processContainer(
 		}
 
 		log.Debug("device mount detected",
-			"id", id,
+			"id", containerID,
 			"pid", pid,
 			"source", mount.Source,
 			"destination", mount.Destination,
@@ -948,8 +985,8 @@ func applyDeviceRules(
 	ruleErr := api.AddDeviceRules(cgroupPath, []cgroup.DeviceRule{
 		{
 			Access: "rwm",
-			Major:  ptr(major),
-			Minor:  ptr(minor),
+			Major:  &major,
+			Minor:  &minor,
 			Type:   deviceType,
 			Allow:  true,
 		},
@@ -961,14 +998,13 @@ func applyDeviceRules(
 	return nil
 }
 
-func getDeviceInfo(devicePath string) (string, int64, int64, error) {
+func getDeviceInfo(devicePath string) (deviceType string, major, minor int64, statErr error) {
 	var stat unix.Stat_t
 
-	if statErr := unix.Stat(devicePath, &stat); statErr != nil {
+	statErr = unix.Stat(devicePath, &stat)
+	if statErr != nil {
 		return "", -1, -1, fmt.Errorf("stat %q: %w", devicePath, statErr)
 	}
-
-	var deviceType string
 
 	switch stat.Mode & unix.S_IFMT {
 	case unix.S_IFBLK:
@@ -976,11 +1012,14 @@ func getDeviceInfo(devicePath string) (string, int64, int64, error) {
 	case unix.S_IFCHR:
 		deviceType = "c"
 	default:
-		return "", -1, -1, fmt.Errorf("device %q is neither character nor block device", devicePath)
+		return "", -1, -1, fmt.Errorf( //nolint:err113 // dynamic content includes device path
+			"device %q is neither character nor block device",
+			devicePath,
+		)
 	}
 
-	major := int64(unix.Major(stat.Rdev))
-	minor := int64(unix.Minor(stat.Rdev))
+	major = int64(unix.Major(stat.Rdev))
+	minor = int64(unix.Minor(stat.Rdev))
 
 	return deviceType, major, minor, nil
 }

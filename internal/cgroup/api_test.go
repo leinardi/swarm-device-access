@@ -76,7 +76,9 @@ func TestDeviceRule_JSON_RoundTrip(t *testing.T) {
 			}
 
 			var unmarshaled DeviceRule
-			if err := json.Unmarshal(marshaled, &unmarshaled); err != nil {
+
+			err = json.Unmarshal(marshaled, &unmarshaled)
+			if err != nil {
 				t.Fatalf("unmarshal: %v", err)
 			}
 
@@ -160,14 +162,18 @@ func TestScanCGroupVersion(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErrSub)
 				}
+
 				if !strings.Contains(err.Error(), tc.wantErrSub) {
 					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrSub)
 				}
+
 				return
 			}
+
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
+
 			if got != tc.wantVer {
 				t.Errorf("got version %d, want %d", got, tc.wantVer)
 			}
