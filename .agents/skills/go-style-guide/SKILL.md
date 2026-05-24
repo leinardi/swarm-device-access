@@ -263,16 +263,83 @@ Short variable names are fine in tight scopes (loop indices `i`, `k`, map
 values `v`, single-letter receivers). In broader scopes, use names long enough
 to be readable. Test files are exempt.
 
+**Specific rules that bite most often:**
+
+- **Receivers are exempt**: `(g Global)`, `(c Container)`, `(s *server)` — all fine.
+- **Non-receiver function parameters are NOT exempt**, even in short functions.
+  Use ≥ 3-char descriptive names:
+
+  ```go
+  // Wrong — 's', 'c', 'b' are too short for params
+  func ParseMode(s string) (Mode, error)
+  func (g Global) Enabled(c Container) bool
+  func parseGlobList(raw, l string) ([]string, error)
+  val, err := strconv.ParseBool(b)
+
+  // Right
+  func ParseMode(modeStr string) (Mode, error)
+  func (g Global) Enabled(cpol Container) bool
+  func parseGlobList(raw, labelName string) ([]string, error)
+  val, err := strconv.ParseBool(raw)
+  ```
+
+- **Local variables that span multiple statements** are also checked. A variable
+  named `c` that lives across 5+ lines will be flagged; rename to reflect its type
+  or role (`cont`, `cfg`, `cpol`).
+
+Rule of thumb: if the name alone doesn't tell you what the variable holds,
+make it longer.
+
 ---
 
-## 15. Constant strings (`goconst`)
+## 15. `modernize` — no pointer-boxing helpers
+
+The `modernize` linter (`newexpr` check) flags helper functions whose sole
+purpose is to return a pointer to a typed value:
+
+```go
+// Wrong — the linter flags both the declaration AND every call site
+func boolPtr(b bool) *bool { return &b }
+use: boolPtr(true), boolPtr(false)
+
+// Also wrong (same pattern with other types)
+func strPtr(s string) *string { return &s }
+```
+
+Fix: declare a local variable and take its address:
+
+```go
+// Right — in test tables
+trueVal := true
+falseVal := false
+cases := []struct{ enable *bool }{
+    {enable: &trueVal},
+    {enable: &falseVal},
+    {enable: nil},
+}
+```
+
+For production code needing `*T` from a literal, assign then address:
+
+```go
+val := computeSomething()
+cfg.Field = &val
+```
+
+A generic `func ptr[T any](v T) *T { return &v }` avoids the per-type helpers
+but still fires `newexpr` in some linter versions — prefer the local-variable
+pattern.
+
+---
+
+## 16. Constant strings (`goconst`)
 
 String literals appearing 3+ times with length ≥ 2 should be extracted to a
 named constant. Test files are exempt.
 
 ---
 
-## 16. `internal/cgroup/` exemptions
+## 17. `internal/cgroup/` exemptions
 
 Files matching `internal/cgroup/*.go` are NVIDIA-derived code kept close to
 upstream. These files are exempt from: `cyclop`, `dupl`, `errcheck`,

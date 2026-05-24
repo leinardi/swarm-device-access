@@ -100,7 +100,40 @@ rather than replacing it.
 | `cmd/swarm-device-access`    | Daemon entrypoint, event loop, Docker client, apply pipeline                                                                                      |
 | `internal/cgroup`            | Device-rule application: cgroup v1 (`devices.allow` write) and v2 (BPF attach). Cgroup version + path detection via `/proc`. NVIDIA-derived code. |
 | `internal/logger`            | `slog`-based singleton with `text`, `json`, `plain` handlers                                                                                      |
+| `internal/policy`            | Cross-platform policy evaluation: mode (opt-in/all), label parsing, glob allow/deny logic                                                         |
 | `internal/systemd`           | DBus watcher for systemd `Reloading` signal                                                                                                       |
+
+## Policy model
+
+The daemon uses a two-level policy:
+
+**Global policy** (flags / config file):
+
+- `-policy-mode` (`opt-in` or `all`): controls which containers are processed.
+    - `opt-in`: only containers with label `swarm-device-access.enable=true`.
+    - `all`: all containers unless `swarm-device-access.enable=false`.
+- `-device-allow`: repeatable glob — defines the maximum allowed set of `/dev/...` paths. Empty = all.
+- `-device-deny`: repeatable glob — paths always excluded. Takes priority over allow.
+
+**Per-container policy** (Docker labels):
+
+| Label                              | Description                                                    |
+|------------------------------------|----------------------------------------------------------------|
+| `swarm-device-access.enable`       | `true` to opt in, `false` to explicitly opt out.               |
+| `swarm-device-access.device-allow` | Comma-separated globs narrowing global allow. Empty = inherit. |
+| `swarm-device-access.device-deny`  | Comma-separated globs added on top of global deny.             |
+
+**Decision rule** for a given container and device path:
+
+```
+enabled = (enable != false) AND (mode=all OR enable=true)
+allowed = NOT global-denied
+       AND NOT container-denied
+       AND (global-allow empty OR path matches global-allow)
+       AND (container-allow empty OR path matches container-allow)
+```
+
+Global is the maximum allowed access; per-container labels can only narrow it. Deny always wins over allow. Invalid label values cause the container to be skipped (fail-closed).
 
 ## Runtime contract
 
@@ -124,17 +157,23 @@ When `-metrics-addr=:9090` is set, the daemon exposes:
 |------------|----------------------------------------------------------------------------|
 | `/metrics` | Prometheus text format                                                     |
 | `/healthz` | Liveness probe — always `200 OK`                                           |
-| `/readyz`  | Readiness probe — `503` until startup enumeration completes, then `200 OK` |
+| `/readyz`  | `200 OK` when subscribed to Docker events; `503` on startup or reconnect   |
 
 Metrics exposed:
 
-| Metric                        | Type      | Labels   | Description                                 |
-|-------------------------------|-----------|----------|---------------------------------------------|
-| `sda_events_total`            | counter   | `event`  | Docker events received (`start`, `unpause`) |
-| `sda_rules_applied_total`     | counter   | `result` | Rules applied (`ok`) or failed (`error`)    |
-| `sda_reload_reapplies_total`  | counter   | —        | Re-applies after systemd daemon-reload      |
-| `sda_docker_reconnects_total` | counter   | —        | Docker event stream reconnects              |
-| `sda_apply_duration_seconds`  | histogram | —        | Wall-clock time per container apply         |
+| Metric                               | Type      | Labels   | Description                                                  |
+|--------------------------------------|-----------|----------|--------------------------------------------------------------|
+| `sda_events_total`                   | counter   | `event`  | Docker events received (`start`, `unpause`)                  |
+| `sda_rules_applied_total`            | counter   | `result` | Rules applied (`ok`) or failed (`error`)                     |
+| `sda_reload_reapplies_total`         | counter   | —        | Re-applies after systemd daemon-reload                       |
+| `sda_docker_reconnects_total`        | counter   | —        | Docker event stream reconnects                               |
+| `sda_apply_duration_seconds`         | histogram | —        | Wall-clock time per container apply                          |
+| `sda_containers_scanned_total`       | counter   | —        | Containers that passed policy and were processed             |
+| `sda_containers_skipped_total`       | counter   | `reason` | Containers skipped (`policy`, `invalid_labels`, `no_pid`)    |
+| `sda_device_files_discovered_total`  | counter   | —        | Device files found across all processed containers           |
+| `sda_rule_failures_total`            | counter   | —        | Errors from collect or apply operations                      |
+| `sda_dry_run_skips_total`            | counter   | —        | Rules skipped in dry-run mode                                |
+| `sda_last_event_timestamp_seconds`   | gauge     | —        | Unix timestamp of last successfully applied event            |
 
 ### pprof debug server (`--debug-addr`)
 

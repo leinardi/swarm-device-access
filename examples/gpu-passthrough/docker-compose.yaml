@@ -14,6 +14,9 @@
 services:
   cuda-worker:
     image: nvidia/cuda:12.4.0-base-ubuntu22.04
+    # Required when daemon runs in opt-in mode (the default).
+    labels:
+      swarm-device-access.enable: "true"
     volumes:
       - /dev/nvidia0:/dev/nvidia0
       - /dev/nvidiactl:/dev/nvidiactl
@@ -44,9 +47,9 @@ services:
       # Enable reload-after-daemon-reload (optional):
       # - -v
       # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
-      # Only apply rules to containers with this label (optional):
-      # - ghcr.io/leinardi/swarm-device-access:latest
-      # - -require-label=sda.enable=true
+      # Policy mode: opt-in (default) processes only labelled containers.
+      # Use -policy-mode=all to process every container on the node.
+      # - -policy-mode=opt-in
       # Limit scope to NVIDIA devices only (optional):
       # - -device-allow=/dev/nvidia*
       - ghcr.io/leinardi/swarm-device-access:latest

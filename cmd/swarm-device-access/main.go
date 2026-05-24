@@ -48,6 +48,7 @@ import (
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
 	"github.com/leinardi/swarm-device-access/internal/logger"
+	"github.com/leinardi/swarm-device-access/internal/policy"
 	"github.com/leinardi/swarm-device-access/internal/systemd"
 )
 
@@ -80,16 +81,6 @@ func (f *stringSliceFlag) Set(v string) error {
 	return nil
 }
 
-func (f *stringSliceFlag) contains(path string) bool {
-	for _, pattern := range *f {
-		if ok, _ := filepath.Match(pattern, path); ok {
-			return true
-		}
-	}
-
-	return false
-}
-
 var (
 	logFormat    = flag.String("log-format", "text", "Either json, text or plain")
 	logLevel     = flag.String("log-level", "info", "Either debug, info, warn, error, fatal, panic")
@@ -102,10 +93,12 @@ var (
 	dryRun = flag.Bool("dry-run", false,
 		"Log device rules that would be applied without writing to the cgroup",
 	)
-	requireLabel = flag.String(
-		"require-label",
-		"",
-		"Only process containers that have this label (format: key=value). Empty means all containers.",
+	policyMode = flag.String(
+		"policy-mode",
+		string(policy.ModeOptIn),
+		`Container processing mode: "opt-in" processes only containers with label `+
+			`swarm-device-access.enable=true; "all" processes all containers unless `+
+			`label swarm-device-access.enable=false.`,
 	)
 
 	deviceAllow stringSliceFlag
@@ -133,7 +126,7 @@ type configFileSchema struct {
 	LogTime      *bool    `yaml:"log-time"`
 	DockerSocket string   `yaml:"docker-socket"`
 	DryRun       *bool    `yaml:"dry-run"`
-	RequireLabel *string  `yaml:"require-label"`
+	PolicyMode   string   `yaml:"policy-mode"`
 	DeviceAllow  []string `yaml:"device-allow"`
 	DeviceDeny   []string `yaml:"device-deny"`
 	MetricsAddr  string   `yaml:"metrics-addr"`
@@ -151,15 +144,17 @@ type deviceRuleKey struct {
 // hotConfig holds the settings that can be changed without restarting the daemon.
 // Readers call activeCfg.Load(); the SIGHUP handler calls activeCfg.Store().
 type hotConfig struct {
-	dryRun       bool
-	requireLabel string
-	deviceAllow  stringSliceFlag
-	deviceDeny   stringSliceFlag
+	dryRun bool
+	policy policy.Global
 }
 
 // activeCfg is the live, hot-reloadable configuration snapshot.
 // Written once at startup and again on each SIGHUP.
 var activeCfg atomic.Pointer[hotConfig]
+
+// ready tracks whether the daemon is subscribed to the Docker event stream.
+// Flips true after the first successful subscribe; false during reconnect backoff.
+var ready atomic.Bool
 
 // loadConfigFile parses the YAML config file at path and returns its contents.
 // Returns a zero-value schema (no error) if path is empty.
@@ -210,6 +205,36 @@ var (
 		Help:    "Time spent applying device rules per container.",
 		Buckets: prometheus.DefBuckets,
 	})
+
+	metricContainersScanned = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sda_containers_scanned_total",
+		Help: "Containers that passed policy and entered the device-rule pipeline.",
+	})
+
+	metricContainersSkipped = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "sda_containers_skipped_total",
+		Help: "Containers skipped before rule collection.",
+	}, []string{"reason"})
+
+	metricDeviceFilesDiscovered = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sda_device_files_discovered_total",
+		Help: "Device files for which rules were collected.",
+	})
+
+	metricRuleFailures = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sda_rule_failures_total",
+		Help: "Errors during device rule collection or application.",
+	})
+
+	metricDryRunSkips = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sda_dry_run_skips_total",
+		Help: "Rules logged but not written due to dry-run mode.",
+	})
+
+	metricLastEventTimestamp = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "sda_last_event_timestamp_seconds",
+		Help: "Unix timestamp of the last successfully processed Docker event.",
+	})
 )
 
 // ptr returns a pointer to v. Generic helper used to inline scalar pointers
@@ -251,23 +276,9 @@ func run() int {
 
 	applyFileConfig(&fileCfg)
 
-	startupValidationErr := validateRequireLabel(*requireLabel)
+	startupValidationErr := activeCfg.Load().policy.Validate()
 	if startupValidationErr != nil {
-		fmt.Fprintf(os.Stderr, "invalid -require-label: %v\n", startupValidationErr)
-
-		return 1
-	}
-
-	startupValidationErr = validatePatterns(deviceAllow)
-	if startupValidationErr != nil {
-		fmt.Fprintf(os.Stderr, "invalid -device-allow: %v\n", startupValidationErr)
-
-		return 1
-	}
-
-	startupValidationErr = validatePatterns(deviceDeny)
-	if startupValidationErr != nil {
-		fmt.Fprintf(os.Stderr, "invalid -device-deny: %v\n", startupValidationErr)
+		fmt.Fprintf(os.Stderr, "invalid config: %v\n", startupValidationErr)
 
 		return 1
 	}
@@ -282,9 +293,9 @@ func run() int {
 		"date", date,
 		"config_file", *configFile,
 		"dry_run", activeCfg.Load().dryRun,
-		"require_label", activeCfg.Load().requireLabel,
-		"device_allow", []string(activeCfg.Load().deviceAllow),
-		"device_deny", []string(activeCfg.Load().deviceDeny),
+		"policy_mode", activeCfg.Load().policy.Mode,
+		"device_allow", activeCfg.Load().policy.DeviceAllow,
+		"device_deny", activeCfg.Load().policy.DeviceDeny,
 	)
 
 	rootCtx, cancelRoot := signal.NotifyContext(
@@ -310,10 +321,8 @@ func run() int {
 
 	// Start optional observability servers before the main loop so they are
 	// reachable during startup enumeration.
-	readyCh := make(chan struct{})
-
 	if *metricsAddr != "" {
-		startMetricsServer(rootCtx, *metricsAddr, readyCh)
+		startMetricsServer(rootCtx, *metricsAddr)
 	}
 
 	if *debugAddr != "" {
@@ -335,9 +344,6 @@ func run() int {
 	if processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
-
-	// Signal readiness: startup enumeration complete, event loop about to start.
-	close(readyCh)
 
 	startReloadWatcher(rootCtx, cli)
 
@@ -429,6 +435,9 @@ func startReloadWatcher(ctx context.Context, cli *client.Client) {
 // resume from a paused state if the cgroup state was cleared. On stream error
 // it reconnects with exponential backoff (capped) rather than terminating the
 // daemon — replaces the upstream log.Fatal(err) pattern.
+//
+// ready is set true after each successful subscribe and false during reconnect
+// backoff, so /readyz reflects live Docker event-stream health.
 func listenEvents(
 	ctx context.Context,
 	cli *client.Client,
@@ -458,6 +467,7 @@ func listenEvents(
 			events.ListOptions{Filters: eventFilters},
 		)
 
+		ready.Store(true)
 		log.Debug("subscribed to docker events")
 
 		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff, clearProcessed,
@@ -467,6 +477,8 @@ func listenEvents(
 		if !disconnected {
 			return
 		}
+
+		ready.Store(false)
 	}
 }
 
@@ -515,6 +527,7 @@ func consumeEvents(
 			log.Error("docker events stream error, reconnecting",
 				"err", streamErr, "backoff", *backoff)
 			metricDockerReconnects.Inc()
+			ready.Store(false)
 			sleepCtx(ctx, *backoff)
 			*backoff = nextBackoff(*backoff)
 
@@ -525,6 +538,7 @@ func consumeEvents(
 				log.Warn("docker events channel closed, reconnecting",
 					"backoff", *backoff)
 				metricDockerReconnects.Inc()
+				ready.Store(false)
 				sleepCtx(ctx, *backoff)
 				*backoff = nextBackoff(*backoff)
 
@@ -550,6 +564,7 @@ func consumeEvents(
 				metricRulesApplied.WithLabelValues("error").Inc()
 			} else {
 				metricRulesApplied.WithLabelValues("ok").Inc()
+				metricLastEventTimestamp.Set(float64(time.Now().Unix()))
 			}
 
 			metricApplyDuration.Observe(time.Since(start).Seconds())
@@ -611,8 +626,8 @@ func applyFileConfig(fileCfg *configFileSchema) {
 		*dryRun = *fileCfg.DryRun
 	}
 
-	if !cliSet["require-label"] && fileCfg.RequireLabel != nil {
-		*requireLabel = *fileCfg.RequireLabel
+	if !cliSet["policy-mode"] && fileCfg.PolicyMode != "" {
+		*policyMode = fileCfg.PolicyMode
 	}
 
 	if !cliSet["device-allow"] && fileCfg.DeviceAllow != nil {
@@ -624,10 +639,12 @@ func applyFileConfig(fileCfg *configFileSchema) {
 	}
 
 	activeCfg.Store(&hotConfig{
-		dryRun:       *dryRun,
-		requireLabel: *requireLabel,
-		deviceAllow:  append(stringSliceFlag(nil), deviceAllow...),
-		deviceDeny:   append(stringSliceFlag(nil), deviceDeny...),
+		dryRun: *dryRun,
+		policy: policy.Global{
+			Mode:        policy.Mode(*policyMode),
+			DeviceAllow: append([]string(nil), deviceAllow...),
+			DeviceDeny:  append([]string(nil), deviceDeny...),
+		},
 	})
 }
 
@@ -681,17 +698,17 @@ func watchSIGHUP(ctx context.Context) {
 			logger.Configure(effectiveLogFormat, effectiveLogLevel, effectiveLogTime)
 
 			newDryRun := *dryRun
-			newRequireLabel := *requireLabel
+			newPolicyMode := *policyMode
 
-			newDeviceAllow := append(stringSliceFlag(nil), deviceAllow...)
-			newDeviceDeny := append(stringSliceFlag(nil), deviceDeny...)
+			newDeviceAllow := append([]string(nil), deviceAllow...)
+			newDeviceDeny := append([]string(nil), deviceDeny...)
 
 			if !cliSet["dry-run"] && fileCfg.DryRun != nil {
 				newDryRun = *fileCfg.DryRun
 			}
 
-			if !cliSet["require-label"] && fileCfg.RequireLabel != nil {
-				newRequireLabel = *fileCfg.RequireLabel
+			if !cliSet["policy-mode"] && fileCfg.PolicyMode != "" {
+				newPolicyMode = fileCfg.PolicyMode
 			}
 
 			if !cliSet["device-allow"] && fileCfg.DeviceAllow != nil {
@@ -702,51 +719,32 @@ func watchSIGHUP(ctx context.Context) {
 				newDeviceDeny = fileCfg.DeviceDeny
 			}
 
-			valErr := validateRequireLabel(newRequireLabel)
-			if valErr != nil {
-				log.Error(
-					"config reload: invalid require-label; keeping previous config",
-					"err",
-					valErr,
-				)
-
-				continue
+			newPolicy := policy.Global{
+				Mode:        policy.Mode(newPolicyMode),
+				DeviceAllow: newDeviceAllow,
+				DeviceDeny:  newDeviceDeny,
 			}
 
-			valErr = validatePatterns(newDeviceAllow)
+			valErr := newPolicy.Validate()
 			if valErr != nil {
 				log.Error(
-					"config reload: invalid device-allow; keeping previous config",
-					"err",
-					valErr,
-				)
-
-				continue
-			}
-
-			valErr = validatePatterns(newDeviceDeny)
-			if valErr != nil {
-				log.Error(
-					"config reload: invalid device-deny; keeping previous config",
-					"err",
-					valErr,
+					"config reload: invalid policy; keeping previous config",
+					"err", valErr,
 				)
 
 				continue
 			}
 
 			activeCfg.Store(&hotConfig{
-				dryRun:       newDryRun,
-				requireLabel: newRequireLabel,
-				deviceAllow:  newDeviceAllow,
-				deviceDeny:   newDeviceDeny,
+				dryRun: newDryRun,
+				policy: newPolicy,
 			})
 
 			logger.L().Info("config reloaded",
 				"dry_run", newDryRun,
-				"require_label", newRequireLabel,
-				"device_allow", []string(newDeviceAllow),
-				"device_deny", []string(newDeviceDeny),
+				"policy_mode", newPolicy.Mode,
+				"device_allow", newPolicy.DeviceAllow,
+				"device_deny", newPolicy.DeviceDeny,
 			)
 		}
 	}
@@ -756,8 +754,8 @@ func watchSIGHUP(ctx context.Context) {
 //
 //	/metrics  — Prometheus text format
 //	/healthz  — 200 OK always (liveness)
-//	/readyz   — 200 OK once ready is closed (readiness)
-func startMetricsServer(ctx context.Context, addr string, ready <-chan struct{}) {
+//	/readyz   — 200 OK once subscribed to Docker events (readiness)
+func startMetricsServer(ctx context.Context, addr string) {
 	log := logger.L()
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
@@ -766,13 +764,12 @@ func startMetricsServer(ctx context.Context, addr string, ready <-chan struct{})
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/readyz", func(resp http.ResponseWriter, _ *http.Request) {
-		select {
-		case <-ready:
+		if ready.Load() {
 			resp.WriteHeader(http.StatusOK)
 			_, _ = resp.Write([]byte("ok"))
-		default:
+		} else {
 			resp.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = resp.Write([]byte("starting"))
+			_, _ = resp.Write([]byte("not ready"))
 		}
 	})
 
@@ -846,79 +843,12 @@ func startDebugServer(ctx context.Context, addr string) {
 	}()
 }
 
-// containerMatchesLabelPolicy returns true if the container should be processed.
-// When requireLabel is empty every container passes. Otherwise the container
-// must have a label matching "key=value".
-func containerMatchesLabelPolicy(labels map[string]string, policy string) bool {
-	if policy == "" {
-		return true
-	}
-
-	key, value, _ := strings.Cut(policy, "=")
-
-	return labels[key] == value
-}
-
-// devicePathAllowed returns true when the /dev/... path is permitted by the
-// global allow/deny lists. Deny takes priority over allow. An empty allow list
-// means "allow everything".
-func devicePathAllowed(path string, allow, deny stringSliceFlag) bool {
-	if deny.contains(path) {
-		return false
-	}
-
-	if len(allow) == 0 {
-		return true
-	}
-
-	return allow.contains(path)
-}
-
-// validatePatterns returns an error if any glob pattern in patterns is syntactically invalid.
-// Malformed patterns (e.g. /dev/nvidia[) silently never match; failing fast here prevents
-// silent policy misconfiguration.
-func validatePatterns(patterns stringSliceFlag) error {
-	for _, p := range patterns {
-		_, matchErr := filepath.Match(p, "")
-		if matchErr != nil {
-			return fmt.Errorf("invalid glob pattern %q: %w", p, matchErr)
-		}
-	}
-
-	return nil
-}
-
-// validateRequireLabel returns an error if policy is non-empty but malformed.
-// A valid non-empty policy must be "key=value" with a non-empty key.
-func validateRequireLabel(policy string) error {
-	if policy == "" {
-		return nil
-	}
-
-	key, _, ok := strings.Cut(policy, "=")
-	if !ok {
-		return fmt.Errorf( //nolint:err113 // dynamic content includes the policy value
-			"require-label %q: must be in key=value format",
-			policy,
-		)
-	}
-
-	if key == "" {
-		return fmt.Errorf( //nolint:err113 // dynamic content includes the policy value
-			"require-label %q: key must not be empty",
-			policy,
-		)
-	}
-
-	return nil
-}
-
 // processContainer inspects a container and applies cgroup BPF device-allow
 // rules for every bind mount sourced from /dev/...
 // procRootPath is the root used for /proc lookups; "/" in production, temp dir in tests.
 // dryRun skips cgroup writes and logs intent at Info level instead.
 //
-//nolint:cyclop,gocyclo // inherent: inspect + version-detect + path-resolve + mount-filter + collect + apply
+//nolint:cyclop,gocyclo,funlen // inherent: policy-check + inspect + version-detect + path-resolve + mount-filter + collect + apply
 func processContainer(
 	ctx context.Context,
 	cli containerInspector,
@@ -935,11 +865,11 @@ func processContainer(
 
 	if info.State == nil || info.State.Pid == 0 {
 		log.Debug("container has no live pid; skipping", "id", containerID)
+		metricContainersSkipped.WithLabelValues("no_pid").Inc()
 
 		return nil
 	}
 
-	// Label policy check: skip containers that don't carry the required label.
 	var labels map[string]string
 	if info.Config != nil {
 		labels = info.Config.Labels
@@ -947,14 +877,26 @@ func processContainer(
 
 	cfg := activeCfg.Load()
 
-	if !containerMatchesLabelPolicy(labels, cfg.requireLabel) {
-		log.Debug("container skipped by label policy",
-			"id", containerID,
-			"require_label", cfg.requireLabel,
-		)
+	cpol, parseErr := policy.ParseContainer(labels)
+	if parseErr != nil {
+		log.Warn("container skipped: invalid policy labels",
+			"id", containerID, "err", parseErr)
+		metricContainersSkipped.WithLabelValues("invalid_labels").Inc()
 
 		return nil
 	}
+
+	if !cfg.policy.Enabled(cpol) {
+		log.Debug("container skipped by policy",
+			"id", containerID,
+			"mode", cfg.policy.Mode,
+		)
+		metricContainersSkipped.WithLabelValues("policy").Inc()
+
+		return nil
+	}
+
+	metricContainersScanned.Inc()
 
 	pid := info.State.Pid
 
@@ -1002,7 +944,7 @@ func processContainer(
 			"destination", mnt.Destination,
 		)
 
-		rules, errs := collectMountRules(mnt.Source, cfg)
+		rules, errs := collectMountRules(mnt.Source, cfg.policy, cpol)
 		allErrs = append(allErrs, errs...)
 
 		for _, rule := range rules {
@@ -1015,13 +957,17 @@ func processContainer(
 		}
 	}
 
-	if len(allRules) == 0 {
-		return errors.Join(allErrs...)
+	metricDeviceFilesDiscovered.Add(float64(len(allRules)))
+
+	if len(allRules) > 0 {
+		applyErr := applyRulesToCgroup(api, allRules, cgroupPath, pid, dryRun)
+		if applyErr != nil {
+			allErrs = append(allErrs, applyErr)
+		}
 	}
 
-	applyErr := applyRulesToCgroup(api, allRules, cgroupPath, pid, dryRun)
-	if applyErr != nil {
-		allErrs = append(allErrs, applyErr)
+	if len(allErrs) > 0 {
+		metricRuleFailures.Add(float64(len(allErrs)))
 	}
 
 	return errors.Join(allErrs...)
@@ -1059,6 +1005,8 @@ func applyRulesToCgroup(
 	}
 
 	if dryRun {
+		metricDryRunSkips.Add(float64(len(rules)))
+
 		return nil
 	}
 
@@ -1080,8 +1028,12 @@ func hostCGroupPath(sysfsPath, cgroupPrefix, cgroupRoot string) string {
 
 // collectMountRules returns the DeviceRules and any errors for a mount source.
 // Directory mounts are walked; per-file policy checks apply.
-func collectMountRules(mountPath string, cfg *hotConfig) ([]cgroup.DeviceRule, []error) {
-	if !devicePathAllowed(mountPath, cfg.deviceAllow, cfg.deviceDeny) {
+func collectMountRules(
+	mountPath string,
+	gpol policy.Global,
+	cpol policy.Container,
+) ([]cgroup.DeviceRule, []error) {
+	if !gpol.DeviceAllowed(cpol, mountPath) {
 		logger.L().Debug("device mount excluded by policy", "path", mountPath)
 
 		return nil, nil
@@ -1117,7 +1069,7 @@ func collectMountRules(mountPath string, cfg *hotConfig) ([]cgroup.DeviceRule, [
 			return nil
 		}
 
-		if !devicePathAllowed(walkedPath, cfg.deviceAllow, cfg.deviceDeny) {
+		if !gpol.DeviceAllowed(cpol, walkedPath) {
 			logger.L().Debug("device file excluded by policy", "path", walkedPath)
 
 			return nil

@@ -31,6 +31,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/mount"
+
+	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
 // fakeInspector is a test double for containerInspector.
@@ -93,7 +95,9 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	activeCfg.Store(&hotConfig{})
+	// ModeAll so device-pipeline tests exercise mounts without requiring
+	// swarm-device-access.enable=true on every fake container.
+	activeCfg.Store(&hotConfig{policy: policy.Global{Mode: policy.ModeAll}})
 	os.Exit(m.Run())
 }
 
@@ -289,55 +293,7 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 	}
 }
 
-// ---- policy helper tests ----
-
-func TestContainerMatchesLabelPolicy(t *testing.T) {
-	cases := []struct {
-		labels map[string]string
-		policy string
-		want   bool
-	}{
-		{nil, "", true},
-		{map[string]string{"foo": "bar"}, "", true},
-		{map[string]string{"sda.enable": "true"}, "sda.enable=true", true},
-		{map[string]string{"sda.enable": "false"}, "sda.enable=true", false},
-		{map[string]string{}, "sda.enable=true", false},
-		{nil, "sda.enable=true", false},
-		{map[string]string{"sda.enable": ""}, "sda.enable=", true},
-	}
-
-	for _, tc := range cases {
-		got := containerMatchesLabelPolicy(tc.labels, tc.policy)
-		if got != tc.want {
-			t.Errorf("policy=%q labels=%v → got %v, want %v", tc.policy, tc.labels, got, tc.want)
-		}
-	}
-}
-
-func TestDevicePathAllowed(t *testing.T) {
-	cases := []struct {
-		path  string
-		allow stringSliceFlag
-		deny  stringSliceFlag
-		want  bool
-	}{
-		{"/dev/nvidia0", nil, nil, true},
-		{"/dev/nvidia0", stringSliceFlag{"/dev/nvidia*"}, nil, true},
-		{"/dev/sda", stringSliceFlag{"/dev/nvidia*"}, nil, false},
-		{"/dev/sda", nil, stringSliceFlag{"/dev/sd*"}, false},
-		// deny takes priority over allow
-		{"/dev/nvidia0", stringSliceFlag{"/dev/nvidia*"}, stringSliceFlag{"/dev/nvidia*"}, false},
-		{"/dev/nvidia0", nil, stringSliceFlag{"/dev/sd*"}, true},
-	}
-
-	for _, tc := range cases {
-		got := devicePathAllowed(tc.path, tc.allow, tc.deny)
-		if got != tc.want {
-			t.Errorf("path=%q allow=%v deny=%v → got %v, want %v",
-				tc.path, tc.allow, tc.deny, got, tc.want)
-		}
-	}
-}
+// ---- policy helper tests (see internal/policy/policy_test.go for full coverage) ----
 
 func TestIsDeviceMountSource(t *testing.T) {
 	t.Parallel()
@@ -552,54 +508,11 @@ func TestProcessContainer_DeduplicatesDuplicateMounts(t *testing.T) {
 	}
 }
 
-func TestValidatePatterns(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		patterns stringSliceFlag
-		wantErr  bool
-	}{
-		{patterns: nil, wantErr: false},
-		{patterns: stringSliceFlag{"/dev/nvidia*", "/dev/dri/*"}, wantErr: false},
-		{patterns: stringSliceFlag{"/dev/nvidia["}, wantErr: true},
-		{patterns: stringSliceFlag{"/dev/valid", "/dev/bad["}, wantErr: true},
-	}
-
-	for _, tc := range cases {
-		err := validatePatterns(tc.patterns)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("validatePatterns(%v) err=%v, wantErr=%v", tc.patterns, err, tc.wantErr)
-		}
-	}
-}
-
-func TestValidateRequireLabel(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		policy  string
-		wantErr bool
-	}{
-		{policy: "", wantErr: false},
-		{policy: "foo=bar", wantErr: false},
-		{policy: "foo=", wantErr: false},
-		{policy: "foo", wantErr: true},
-		{policy: "=bar", wantErr: true},
-	}
-
-	for _, tc := range cases {
-		err := validateRequireLabel(tc.policy)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("validateRequireLabel(%q) err=%v, wantErr=%v", tc.policy, err, tc.wantErr)
-		}
-	}
-}
-
 func TestCollectMountRules_ExcludedByPolicy(t *testing.T) {
 	t.Parallel()
 
-	cfg := &hotConfig{deviceDeny: stringSliceFlag{"/dev/null"}}
-	rules, errs := collectMountRules("/dev/null", cfg)
+	gpol := policy.Global{Mode: policy.ModeAll, DeviceDeny: []string{"/dev/null"}}
+	rules, errs := collectMountRules("/dev/null", gpol, policy.Container{})
 
 	if len(rules) != 0 || len(errs) != 0 {
 		t.Errorf("expected no rules/errors for denied path, got rules=%v errs=%v", rules, errs)
@@ -609,8 +522,8 @@ func TestCollectMountRules_ExcludedByPolicy(t *testing.T) {
 func TestCollectMountRules_File(t *testing.T) {
 	t.Parallel()
 
-	cfg := &hotConfig{}
-	rules, errs := collectMountRules("/dev/null", cfg)
+	gpol := policy.Global{Mode: policy.ModeAll}
+	rules, errs := collectMountRules("/dev/null", gpol, policy.Container{})
 
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -628,8 +541,8 @@ func TestCollectMountRules_File(t *testing.T) {
 func TestCollectMountRules_BadPath(t *testing.T) {
 	t.Parallel()
 
-	cfg := &hotConfig{}
-	rules, errs := collectMountRules("/dev/nonexistent-device-xyzzy", cfg)
+	gpol := policy.Global{Mode: policy.ModeAll}
+	rules, errs := collectMountRules("/dev/nonexistent-device-xyzzy", gpol, policy.Container{})
 
 	if len(rules) != 0 {
 		t.Errorf("expected no rules for bad path, got %v", rules)
@@ -637,6 +550,65 @@ func TestCollectMountRules_BadPath(t *testing.T) {
 
 	if len(errs) == 0 {
 		t.Error("expected errors for bad path, got none")
+	}
+}
+
+func TestProcessContainer_OptInSkipsUnlabelled(t *testing.T) {
+	const pid = 50
+
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+
+	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+	prev := activeCfg.Load()
+
+	t.Cleanup(func() { activeCfg.Store(prev) })
+	activeCfg.Store(&hotConfig{policy: policy.Global{Mode: policy.ModeOptIn}})
+
+	// No enable label → opt-in mode skips the container (no error, no cgroup write).
+	state := &container.State{Pid: pid}
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		Mounts: []container.MountPoint{
+			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+		},
+	}}
+
+	err := processContainer(context.Background(), insp, "abc", root, false)
+	if err != nil {
+		t.Fatalf("opt-in skip should return nil, got: %v", err)
+	}
+}
+
+func TestProcessContainer_OptInProcessesEnabled(t *testing.T) {
+	const pid = 51
+
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+
+	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+	prev := activeCfg.Load()
+
+	t.Cleanup(func() { activeCfg.Store(prev) })
+	activeCfg.Store(&hotConfig{policy: policy.Global{Mode: policy.ModeOptIn}})
+
+	// enable=true label → opt-in processes the container (dry-run skips cgroup write).
+	state := &container.State{Pid: pid}
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		Config: &container.Config{
+			Labels: map[string]string{policy.LabelEnable: "true"},
+		},
+		Mounts: []container.MountPoint{
+			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+		},
+	}}
+
+	err := processContainer(context.Background(), insp, "abc", root, true)
+	if err != nil {
+		t.Fatalf("opt-in dry-run with enable=true should not error: %v", err)
 	}
 }
 

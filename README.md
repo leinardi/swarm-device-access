@@ -95,6 +95,8 @@ services:
   cuda-worker:
     image: nvidia/cuda:12.4.0-base-ubuntu22.04
     command: ["nvidia-smi"]
+    labels:
+      swarm-device-access.enable: "true"
     volumes:
       - /dev/nvidia0:/dev/nvidia0
       - /dev/nvidiactl:/dev/nvidiactl
@@ -118,7 +120,7 @@ The binary is configured via CLI flags:
 | `-log-time`      | `false`                | Include timestamps in log lines                                                 |
 | `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket                                         |
 | `-dry-run`       | `false`                | Log device rules that would be applied without writing to the cgroup            |
-| `-require-label` | `""`                   | Only process containers with this label (`key=value`). Empty = all containers.  |
+| `-policy-mode`   | `opt-in`               | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`.          |
 | `-device-allow`  | `""`                   | Glob for `/dev/...` paths to allow (repeatable). Empty = allow all.             |
 | `-device-deny`   | `""`                   | Glob for `/dev/...` paths to deny (repeatable). Deny takes priority over allow. |
 | `-metrics-addr`  | `""`                   | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty = disabled. |
@@ -137,6 +139,34 @@ kill -HUP $(docker inspect --format '{{.State.Pid}}' swarm-device-access)
 ```
 
 Settings that require a restart: `docker-socket`, `metrics-addr`, `debug-addr`.
+
+### Container labels
+
+Per-container policy is controlled via Docker labels on the consumer service:
+
+| Label                                  | Values                      | Description                                                    |
+|----------------------------------------|-----------------------------|----------------------------------------------------------------|
+| `swarm-device-access.enable`           | `true` / `false`            | Opt in (`true`) or explicitly opt out (`false`) of processing. |
+| `swarm-device-access.device-allow`     | Comma-separated globs       | Allow only matching `/dev/...` paths. Empty = inherit global.  |
+| `swarm-device-access.device-deny`      | Comma-separated globs       | Deny matching `/dev/...` paths. Overrides allow. Empty = none. |
+
+The global `-device-allow` / `-device-deny` flags set the maximum allowed access.
+Per-container labels can only narrow it further. Deny always wins over allow.
+
+## 🔒 Security
+
+`swarm-device-access` runs with `privileged: true`, mounts the host `/dev` tree,
+and has read/write access to the Docker socket. Together these grant host-root–
+equivalent capabilities: a compromised or misconfigured daemon can affect every
+container on the node.
+
+The default `-policy-mode=opt-in` is intentional: the daemon processes only
+containers that carry `swarm-device-access.enable: "true"`. This minimises
+blast radius — an unrelated container that happens to bind-mount a `/dev/...`
+path is not silently granted device access. Operators who trust every
+container on the Swarm node can switch to `-policy-mode=all`.
+
+See [SECURITY.md](SECURITY.md) for the threat model and disclosure policy.
 
 ## 🛠️ Development
 

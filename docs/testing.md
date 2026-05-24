@@ -29,7 +29,8 @@ The default integration tests cover:
 - Host cgroup path resolution for private Docker cgroup namespaces.
 - `/dev/...` bind mount detection.
 - Dry-run device rule generation for `/dev/null`.
-- `-require-label` filtering.
+- `-policy-mode=opt-in` filtering: containers without `swarm-device-access.enable=true` are skipped.
+- Per-container `swarm-device-access.enable` label opt-in.
 
 ## Native Privileged Checklist
 
@@ -49,8 +50,9 @@ or deployment behavior:
    docker inspect swarm-device-access
    ```
 
-3. Start a consumer container with a real `/dev/...` bind mount and confirm the
-   daemon logs `device mount detected` and `adding device rule`.
+3. Start a consumer container with `--label swarm-device-access.enable=true` and
+   a real `/dev/...` bind mount and confirm the daemon logs `device mount detected`
+   and `adding device rule`.
 
 4. If the host uses cgroup v2, confirm a `BPF_CGROUP_DEVICE` program is attached
    to the consumer cgroup with `bpftool`.

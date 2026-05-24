@@ -13,13 +13,17 @@
 
 # dry-run: false         # log rules without writing to cgroup
 
-# Only process containers that carry this label (key=value).
-# require-label: "sda.enable=true"
+# Policy mode: opt-in (default) or all.
+# opt-in: process only containers with label swarm-device-access.enable=true
+# all:    process all containers unless swarm-device-access.enable=false
+# policy-mode: opt-in
 
 # Glob patterns for /dev/... paths to allow (empty = allow all).
+# Per-container labels (swarm-device-access.device-allow) can narrow this further.
 # device-allow:
 #   - /dev/nvidia*
 #   - /dev/dri/*
 
 # Glob patterns for /dev/... paths to deny (deny takes priority over allow).
+# Per-container labels (swarm-device-access.device-deny) add to this list.
 # device-deny: []

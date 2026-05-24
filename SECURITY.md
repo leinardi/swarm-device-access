@@ -9,7 +9,19 @@
 - Writes eBPF `BPF_CGROUP_DEVICE` programs into the host cgroup v2 hierarchy, or writes to `devices.allow` on cgroup v1 hosts.
 - Requires `privileged: true`, `cgroupns: host`, `pid: host`, `userns: host`, and bind mounts of the host `/sys` and `/dev`.
 
-The security boundary is the host Docker socket: any process that can create containers with `/dev/...` bind mounts can influence which device-allow rules this daemon applies. Do not expose the daemon's host socket to untrusted callers.
+The combination of `privileged: true`, host `/dev` bind mount, and host Docker
+socket is functionally equivalent to host-root access on the node. A compromised
+or misconfigured daemon can read or write any host device and affect any container
+running on the same machine.
+
+The security boundary is the host Docker socket: any process that can create
+containers with `/dev/...` bind mounts can influence which device-allow rules
+this daemon applies. Do not expose the daemon's host socket to untrusted callers.
+
+**Opt-in default.** The daemon defaults to `-policy-mode=opt-in`, processing only
+containers that carry `swarm-device-access.enable: "true"`. This minimises blast
+radius — containers that happen to bind-mount `/dev/...` paths are not silently
+granted extra device access unless an operator explicitly opts them in.
 
 ## Supported versions
 

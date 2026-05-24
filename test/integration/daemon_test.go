@@ -49,6 +49,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	dockerclient "github.com/docker/docker/client"
+
+	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
 const (
@@ -75,22 +77,17 @@ var (
 	pullTestImageErr  error
 )
 
-// TestDaemon_DryRun_DetectsDeviceMount starts the daemon with -dry-run,
-// creates a container that bind-mounts /dev/null, and asserts the daemon logs
-// that it would apply a device rule for that mount.
+// TestDaemon_DryRun_DetectsDeviceMount starts the daemon with -dry-run and
+// -policy-mode=opt-in, creates a container with swarm-device-access.enable=true
+// that bind-mounts /dev/null, and asserts the daemon logs that it would apply
+// a device rule for that mount.
 //
 // No BPF syscalls or elevated privileges are required: -dry-run skips
 // AddDeviceRules and logs intent instead.
 func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
-	t.Parallel()
-
 	binary := findBinary(t)
 	cli := requireDocker(t)
 	ensureTestImage(t, cli)
-
-	labelKey := "sda.integration.test"
-	labelValue := labelValueForTest(t)
-	requireLabel := labelKey + "=" + labelValue
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
@@ -101,9 +98,9 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 	// ---- start daemon ----
 	cmd := exec.CommandContext(ctx, binary,
 		"-dry-run",
+		"-policy-mode=opt-in",
 		"-log-level=debug",
 		"-log-format=text",
-		"-require-label="+requireLabel,
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -137,8 +134,10 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 		t.Fatal("timeout waiting for daemon to subscribe to events")
 	}
 
-	// ---- create container with /dev/null bind mount ----
-	containerID := startTestContainer(t, ctx, cli, map[string]string{labelKey: labelValue})
+	// ---- create container with /dev/null bind mount and opt-in label ----
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable: "true",
+	})
 	t.Cleanup(func() { removeContainer(t, cli, containerID) })
 
 	// ---- assert dry-run log appears ----
@@ -150,16 +149,13 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 	}
 }
 
-// TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer verifies that
-// -require-label causes the daemon to skip containers without the label.
-func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
-	t.Parallel()
-
+// TestDaemon_DryRun_PolicyMode_SkipsUnlabelledContainer verifies that
+// -policy-mode=opt-in causes the daemon to skip containers without
+// swarm-device-access.enable=true.
+func TestDaemon_DryRun_PolicyMode_SkipsUnlabelledContainer(t *testing.T) {
 	binary := findBinary(t)
 	cli := requireDocker(t)
 	ensureTestImage(t, cli)
-
-	requireLabel := "sda.integration.test=" + labelValueForTest(t)
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
@@ -169,9 +165,9 @@ func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
 
 	cmd := exec.CommandContext(ctx, binary,
 		"-dry-run",
+		"-policy-mode=opt-in",
 		"-log-level=debug",
 		"-log-format=text",
-		"-require-label="+requireLabel,
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -192,9 +188,9 @@ func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
 	detected := make(chan struct{}, 1)
 
 	go scanOutput(t, stdout, map[string]chan struct{}{
-		logReady:       ready,
-		logDetected:    detected,
-		"label policy": nil, // just log, don't signal
+		logReady:            ready,
+		logDetected:         detected,
+		"skipped by policy": nil, // just log, don't signal
 	})
 
 	select {
@@ -203,7 +199,7 @@ func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
 		t.Fatal("timeout waiting for daemon ready")
 	}
 
-	// Container without the required label — daemon should skip it.
+	// Container without the enable label — opt-in mode should skip it.
 	containerID := startTestContainer(t, ctx, cli, nil)
 	t.Cleanup(func() { removeContainer(t, cli, containerID) })
 
@@ -291,15 +287,6 @@ func ensureTestImage(t *testing.T, cli *dockerclient.Client) {
 	if pullTestImageErr != nil {
 		t.Fatalf("pull test image %s: %v", testImage, pullTestImageErr)
 	}
-}
-
-func labelValueForTest(t *testing.T) string {
-	t.Helper()
-
-	value := strings.ToLower(t.Name())
-	value = strings.NewReplacer("/", "-", "_", "-", " ", "-").Replace(value)
-
-	return value
 }
 
 func startTestContainer(
