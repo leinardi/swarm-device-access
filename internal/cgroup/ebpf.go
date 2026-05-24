@@ -28,25 +28,27 @@
 package cgroup
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"runtime"
+	"slices"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/link"
-	"github.com/google/uuid"
-	"github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
-func nilCloser() error {
-	return nil
-}
+var (
+	errProgramFinalized   = errors.New("the program is finalized")
+	errIncompleteProgList = errors.New("could not get complete list of CGROUP_DEVICE programs")
+)
 
 type program struct {
 	insts       asm.Instructions
@@ -81,10 +83,11 @@ func (p *program) init() {
 }
 
 // appendDevice needs to be called from the last element of OCI linux.resources.devices to the head element.
-func (p *program) appendDevice(dev specs.LinuxDeviceCgroup, labelPrefix string) error {
+func (p *program) appendDevice(dev DeviceRule, labelPrefix string) error {
 	if p.blockID < 0 {
-		return errors.New("the program is finalized")
+		return errProgramFinalized
 	}
+
 	if p.hasWildCard {
 		// All entries after wildcard entry are ignored
 		return nil
@@ -92,6 +95,7 @@ func (p *program) appendDevice(dev specs.LinuxDeviceCgroup, labelPrefix string) 
 
 	bpfType := int32(-1)
 	hasType := true
+
 	switch dev.Type {
 	case string('c'):
 		bpfType = int32(unix.BPF_DEVCG_DEV_CHAR)
@@ -101,17 +105,38 @@ func (p *program) appendDevice(dev specs.LinuxDeviceCgroup, labelPrefix string) 
 		hasType = false
 	default:
 		// if not specified in OCI json, typ is set to DeviceTypeAll
-		return fmt.Errorf("invalid DeviceType %q", dev.Type)
+		return fmt.Errorf( //nolint:err113 // dynamic content
+			"invalid DeviceType %q",
+			dev.Type,
+		)
 	}
+
+	if dev.Major == nil {
+		return errNoMajor
+	}
+
+	if dev.Minor == nil {
+		return errNoMinor
+	}
+
 	if *dev.Major > math.MaxUint32 {
-		return fmt.Errorf("invalid major %d", *dev.Major)
+		return fmt.Errorf( //nolint:err113 // dynamic content
+			"invalid major %d",
+			*dev.Major,
+		)
 	}
+
 	if *dev.Minor > math.MaxUint32 {
-		return fmt.Errorf("invalid minor %d", *dev.Major)
+		return fmt.Errorf( //nolint:err113 // dynamic content
+			"invalid minor %d",
+			*dev.Minor,
+		)
 	}
+
 	hasMajor := *dev.Major >= 0 // if not specified in OCI json, major is set to -1
 	hasMinor := *dev.Minor >= 0
 	bpfAccess := int32(0)
+
 	for _, r := range dev.Access {
 		switch r {
 		case 'r':
@@ -121,7 +146,10 @@ func (p *program) appendDevice(dev specs.LinuxDeviceCgroup, labelPrefix string) 
 		case 'm':
 			bpfAccess |= unix.BPF_DEVCG_ACC_MKNOD
 		default:
-			return fmt.Errorf("unknown device access %v", r)
+			return fmt.Errorf( //nolint:err113 // dynamic content
+				"unknown device access %v",
+				r,
+			)
 		}
 	}
 	// If the access is rwm, skip the check.
@@ -129,6 +157,7 @@ func (p *program) appendDevice(dev specs.LinuxDeviceCgroup, labelPrefix string) 
 
 	blockSym := fmt.Sprintf("%s-block-%d", labelPrefix, p.blockID)
 	nextBlockSym := fmt.Sprintf("%s-block-%d", labelPrefix, p.blockID+1)
+
 	prevBlockLastIdx := len(p.insts) - 1
 	if hasType {
 		p.insts = append(p.insts,
@@ -136,33 +165,45 @@ func (p *program) appendDevice(dev specs.LinuxDeviceCgroup, labelPrefix string) 
 			asm.JNE.Imm(asm.R2, bpfType, nextBlockSym),
 		)
 	}
+
 	if hasAccess {
+		// R2 holds the device type loaded in init(); using it as a temp here
+		// would clobber it for subsequent block type checks. Use R6 and the
+		// containment check (R6 == R3) matching NVIDIA upstream
+		// src/nvcgo/internal/cgroup/ebpf.go appendDevice — the previous
+		// JEq.Imm(R2,0) overlap check would grant access for any rule whose
+		// Access is a non-trivial subset of the requested access bits.
 		p.insts = append(p.insts,
-			// if (R3 & bpfAccess == 0 /* use R2 as a temp var */) goto next
-			asm.Mov.Reg32(asm.R2, asm.R3),
-			asm.And.Imm32(asm.R2, bpfAccess),
-			asm.JEq.Imm(asm.R2, 0, nextBlockSym),
+			// if (R3 & bpfAccess != R3 /* use R6 as a temp var */) goto next
+			asm.Mov.Reg32(asm.R6, asm.R3),
+			asm.And.Imm32(asm.R6, bpfAccess),
+			asm.JNE.Reg(asm.R6, asm.R3, nextBlockSym),
 		)
 	}
+
 	if hasMajor {
 		p.insts = append(p.insts,
 			// if (R4 != major) goto next
 			asm.JNE.Imm(asm.R4, int32(*dev.Major), nextBlockSym),
 		)
 	}
+
 	if hasMinor {
 		p.insts = append(p.insts,
 			// if (R5 != minor) goto next
 			asm.JNE.Imm(asm.R5, int32(*dev.Minor), nextBlockSym),
 		)
 	}
+
 	if !hasType && !hasAccess && !hasMajor && !hasMinor {
 		p.hasWildCard = true
 	}
+
 	p.insts = append(p.insts, p.acceptBlock(dev.Allow)...)
 	// set blockSym to the first instruction we added in this iteration
-	p.insts[prevBlockLastIdx+1] = p.insts[prevBlockLastIdx+1].Sym(blockSym)
+	p.insts[prevBlockLastIdx+1] = p.insts[prevBlockLastIdx+1].WithSymbol(blockSym)
 	p.blockID++
+
 	return nil
 }
 
@@ -171,6 +212,7 @@ func (p *program) acceptBlock(accept bool) asm.Instructions {
 	if accept {
 		v = 1
 	}
+
 	return []asm.Instruction{
 		// R0 <- v
 		asm.Mov.Imm32(asm.R0, v),
@@ -178,17 +220,21 @@ func (p *program) acceptBlock(accept bool) asm.Instructions {
 	}
 }
 
-func (p *program) finalize(origInsts asm.Instructions, labelPrefix string) (asm.Instructions, error) {
+func (p *program) finalize(
+	origInsts asm.Instructions,
+	labelPrefix string,
+) (asm.Instructions, error) {
 	lenInsts := len(p.insts)
 	// set blockSym to the first instruction of origInsts so we are able to jump to it properly
 	blockSym := fmt.Sprintf("%s-block-%d", labelPrefix, p.blockID)
 	p.insts = append(p.insts, origInsts...)
-	p.insts[lenInsts] = p.insts[lenInsts].Sym(blockSym)
+	p.insts[lenInsts] = p.insts[lenInsts].WithSymbol(blockSym)
 	p.blockID = -1
+
 	return p.insts, nil
 }
 
-// FindAttachedCgroupDeviceFilters finds all ebpf prgrams associated with 'dirFd' that control device access
+// FindAttachedCgroupDeviceFilters finds all ebpf prgrams associated with 'dirFd' that control device access.
 func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 	type bpfAttrQuery struct {
 		TargetFd    uint32
@@ -201,6 +247,7 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 
 	// Currently you can only have 64 eBPF programs attached to a cgroup.
 	size := 64
+
 	retries := 0
 	for retries < 10 {
 		progIds := make([]uint32, size)
@@ -218,17 +265,20 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 			unsafe.Sizeof(query))
 		size = int(query.ProgCnt)
 		runtime.KeepAlive(query)
+
 		if errno != 0 {
 			// On ENOSPC we get the correct number of programs.
 			if errno == unix.ENOSPC {
 				retries++
 				continue
 			}
+
 			return nil, fmt.Errorf("bpf_prog_query(BPF_CGROUP_DEVICE) failed: %w", errno)
 		}
 
 		// Convert the ids to program handles.
 		progIds = progIds[:size]
+
 		programs := make([]*ebpf.Program, 0, len(progIds))
 		for _, progId := range progIds {
 			program, err := ebpf.NewProgramFromID(ebpf.ProgramID(progId))
@@ -243,32 +293,72 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 				// programs (and stops runc from breaking on distributions with
 				// very strict SELinux policies).
 				if errors.Is(err, os.ErrPermission) {
-					logrus.Debugf("ignoring existing CGROUP_DEVICE program (prog_id=%v) which cannot be accessed by runc -- likely due to LSM policy: %v", progId, err)
+					slog.Debug(
+						"ignoring existing CGROUP_DEVICE program (cannot be accessed -- likely LSM policy)",
+						"prog_id",
+						progId,
+						"err",
+						err,
+					)
+
 					continue
 				}
+
 				return nil, fmt.Errorf("cannot fetch program from id: %w", err)
 			}
+
 			programs = append(programs, program)
 		}
+
 		runtime.KeepAlive(progIds)
+
 		return programs, nil
 	}
 
-	return nil, errors.New("could not get complete list of CGROUP_DEVICE programs")
+	return nil, errIncompleteProgList
 }
 
-// PrependDeviceFilter prepends a set of instructions for further device filtering to an existing device filtering ebpf program
-func PrependDeviceFilter(devices []specs.LinuxDeviceCgroup, origInsts asm.Instructions) (asm.Instructions, error) {
-	labelPrefix := uuid.New().String()
+// PrependDeviceFilter prepends a set of instructions for further device filtering to an existing device filtering ebpf program.
+func PrependDeviceFilter(
+	devices []DeviceRule,
+	origInsts asm.Instructions,
+) (asm.Instructions, error) {
+	if len(origInsts) == 0 {
+		origInsts = asm.Instructions{asm.Return()}
+	}
+
+	labelPrefix, err := randomLabelPrefix()
+	if err != nil {
+		return nil, fmt.Errorf("generate label prefix: %w", err)
+	}
+
 	p := &program{}
 	p.init()
-	for i := len(devices) - 1; i >= 0; i-- {
-		if err := p.appendDevice(devices[i], labelPrefix); err != nil {
+
+	for _, dev := range slices.Backward(devices) {
+		err = p.appendDevice(dev, labelPrefix)
+		if err != nil {
 			return nil, err
 		}
 	}
+
 	insts, err := p.finalize(origInsts, labelPrefix)
+
 	return insts, err
+}
+
+// randomLabelPrefix returns a hex-encoded random string for use as a unique
+// label prefix in generated BPF instructions. Replaces the previous uuid.New()
+// dependency with stdlib crypto/rand.
+func randomLabelPrefix() (string, error) {
+	var b [16]byte
+
+	_, err := rand.Read(b[:])
+	if err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+
+	return hex.EncodeToString(b[:]), nil
 }
 
 // DetachCgroupDeviceFilter detaches an existing device filter ebpf program from a cgroup.
@@ -281,6 +371,7 @@ func DetachCgroupDeviceFilter(prog *ebpf.Program, dirFd int) error {
 	if err != nil {
 		return fmt.Errorf("failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): %w", err)
 	}
+
 	return nil
 }
 
@@ -293,7 +384,11 @@ func AttachCgroupDeviceFilter(prog *ebpf.Program, dirFd int) error {
 		Flags:   unix.BPF_F_ALLOW_MULTI,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, BPF_F_ALLOW_MULTI): %w", err)
+		return fmt.Errorf(
+			"failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, BPF_F_ALLOW_MULTI): %w",
+			err,
+		)
 	}
+
 	return nil
 }

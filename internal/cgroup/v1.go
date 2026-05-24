@@ -20,24 +20,41 @@ package cgroup
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
-// GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid
+var (
+	errNoMajor      = errors.New("no major set in device rule")
+	errNoMinor      = errors.New("no minor set in device rule")
+	errNoCgroupV1Fs = errors.New(
+		"no cgroup filesystem mounted for the devices subsytem in mountinfo file",
+	)
+	errNoDevicesCgroup = errors.New("no devices cgroup entries found")
+)
+
+// GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid.
 func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error) {
-	// Open the pid's mountinfo file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "mountinfo"), pid)
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "mountinfo")
+
 	file, err := os.Open(path)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanMountInfoV1(file, path)
+}
+
+// scanMountInfoV1 parses a mountinfo reader for the cgroup v1 devices subsystem entry.
+// Extracted from GetDeviceCGroupMountPath to allow unit testing without a real /proc.
+func scanMountInfoV1(r io.Reader, path string) (string, string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for a subsystem of 'devices' entry.
@@ -45,7 +62,10 @@ func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		// Split each entry by '[space]'
 		parts := strings.Split(scanner.Text(), " ")
 		if len(parts) < 5 {
-			return "", "", fmt.Errorf("malformed mountinfo entry: %v", scanner.Text())
+			return "", "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed mountinfo entry: %v",
+				scanner.Text(),
+			)
 		}
 		// Look for an entry with cgroup as the mount type.
 		if parts[len(parts)-3] != "cgroup" {
@@ -57,7 +77,10 @@ func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		}
 		// Make sure the mount prefix is not a relative path.
 		if strings.HasPrefix(parts[3], "/..") {
-			return "", "", fmt.Errorf("relative path in mount prefix: %v", parts[3])
+			return "", "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"relative path in mount prefix: %v",
+				parts[3],
+			)
 		}
 		// Return the 3rd element as the prefix of the mount point for
 		// the devices cgroup and the 4th element as the mount point of
@@ -65,21 +88,35 @@ func (c *cgroupv1) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		return parts[3], parts[4], nil
 	}
 
-	return "", "", fmt.Errorf("no cgroup filesystem mounted for the devices subsytem in mountinfo file")
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		return "", "", fmt.Errorf("read %q: %w", path, scanErr)
+	}
+
+	return "", "", errNoCgroupV1Fs
 }
 
-// GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid
-func (c *cgroupv1) GetDeviceCGroupRootPath(procRootPath string, prefix string, pid int) (string, error) {
-	// Open the pid's cgroup file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "cgroup"), pid)
+// GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid.
+func (c *cgroupv1) GetDeviceCGroupRootPath(
+	procRootPath string,
+	prefix string,
+	pid int,
+) (string, error) {
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "cgroup")
+
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanProcCgroupV1(file, path, prefix)
+}
+
+// scanProcCgroupV1 parses a /proc/<pid>/cgroup reader for the cgroup v1 devices root path.
+// Extracted from GetDeviceCGroupRootPath to allow unit testing without a real /proc.
+func scanProcCgroupV1(r io.Reader, path string, prefix string) (string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for either a subsystem of 'devices' entry.
@@ -87,7 +124,10 @@ func (c *cgroupv1) GetDeviceCGroupRootPath(procRootPath string, prefix string, p
 		// Split each entry by ':'
 		parts := strings.SplitN(scanner.Text(), ":", 3)
 		if len(parts) != 3 {
-			return "", fmt.Errorf("malformed cgroup entry: %v", scanner.Text())
+			return "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed cgroup entry: %v",
+				scanner.Text(),
+			)
 		}
 		// Look for the devices subsystem in the 1st element.
 		if parts[1] != "devices" {
@@ -98,13 +138,19 @@ func (c *cgroupv1) GetDeviceCGroupRootPath(procRootPath string, prefix string, p
 		if prefix == "/" {
 			return parts[2], nil
 		}
+
 		return strings.TrimPrefix(parts[2], prefix), nil
 	}
 
-	return "", fmt.Errorf("no devices cgroup entries found")
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		return "", fmt.Errorf("read %q: %w", path, scanErr)
+	}
+
+	return "", errNoDevicesCgroup
 }
 
-// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath
+// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath.
 func (c *cgroupv1) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// Loop through all rules in the set of device rules and add that rule to the device.
 	for _, rule := range rules {
@@ -120,11 +166,11 @@ func (c *cgroupv1) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 func (c *cgroupv1) addDeviceRule(cgroupPath string, rule *DeviceRule) error {
 	// Check the major/minor numbers of the device in the device rule.
 	if rule.Major == nil {
-		return fmt.Errorf("no major set in device rule")
+		return errNoMajor
 	}
 
 	if rule.Minor == nil {
-		return fmt.Errorf("no minor set in device rule")
+		return errNoMinor
 	}
 
 	// Open the appropriate allow/deny file.
@@ -134,16 +180,18 @@ func (c *cgroupv1) addDeviceRule(cgroupPath string, rule *DeviceRule) error {
 	} else {
 		path = filepath.Join(cgroupPath, "devices.deny")
 	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
 	// Write the device rule into the file.
-	_, err = file.WriteString(fmt.Sprintf("%s %d:%d %s", rule.Type, *rule.Major, *rule.Minor, rule.Access))
+	_, err = fmt.Fprintf(file,
+		"%s %d:%d %s", rule.Type, *rule.Major, *rule.Minor, rule.Access)
 	if err != nil {
-		return err
+		return fmt.Errorf("write device rule to %q: %w", path, err)
 	}
 
 	return nil

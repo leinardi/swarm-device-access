@@ -1,0 +1,29 @@
+# swarm-device-access config file
+# All settings are optional. CLI flags override file values.
+# Send SIGHUP to reload this file without restarting the daemon.
+# Settings marked [restart required] take effect only at startup.
+
+# log-level: info        # debug | info | warn | error
+# log-format: text       # text | json | plain
+# log-time: false        # include timestamps in log lines
+
+# docker-socket: /var/run/docker.sock   # [restart required]
+# metrics-addr: ":9090"                 # Prometheus /metrics + /healthz + /readyz [restart required]
+# debug-addr: ""                        # pprof endpoints [restart required]
+
+# dry-run: false         # log rules without writing to cgroup
+
+# Policy mode: opt-in (default) or all.
+# opt-in: process only containers with label swarm-device-access.enable=true
+# all:    process all containers unless swarm-device-access.enable=false
+# policy-mode: opt-in
+
+# Glob patterns for /dev/... paths to allow (empty = allow all).
+# Per-container labels (swarm-device-access.device-allow) can narrow this further.
+# device-allow:
+#   - /dev/nvidia*
+#   - /dev/dri/*
+
+# Glob patterns for /dev/... paths to deny (deny takes priority over allow).
+# Per-container labels (swarm-device-access.device-deny) add to this list.
+# device-deny: []

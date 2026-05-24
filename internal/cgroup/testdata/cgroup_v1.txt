@@ -1,0 +1,5 @@
+12:cpuset:/docker/abc123def456
+11:devices:/docker/abc123def456
+10:memory:/docker/abc123def456
+9:blkio:/docker/abc123def456
+8:pids:/docker/abc123def456

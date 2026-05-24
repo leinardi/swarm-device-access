@@ -1,0 +1,42 @@
+services:
+  swarm-device-access:
+    image: docker:29 # dclint disable-line service-image-require-explicit-tag
+
+    volumes:
+      # The wrapper only needs the host Docker socket to dispatch `docker run`.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    command:
+      - run
+      - -i
+      - --rm
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
+      - /sys:/host/sys
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
+      # Optional: gives the daemon access to the host's system DBus so it can
+      # detect systemctl daemon-reload (which wipes cgroup BPF programs) and
+      # re-apply device rules. Without this mount, reload handling is skipped
+      # and the daemon logs a warning at startup.
+      # - -v
+      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - ghcr.io/leinardi/swarm-device-access:latest
+      - "-log-level"
+      - "info"
+      - "-log-format"
+      - "text"
+
+    entrypoint: docker
+
+    restart: unless-stopped
+
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any

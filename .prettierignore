@@ -1,0 +1,9 @@
+# .gitignore
+*.iml
+.idea/*
+
+# DCLint
+deployments/docker/docker-compose.yaml
+
+# Examples — human-readable illustrative compose files; not enforced by prettier
+examples/

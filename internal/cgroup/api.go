@@ -20,15 +20,25 @@ package cgroup
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-
-	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
-type DeviceRule = specs.LinuxDeviceCgroup
+// DeviceRule mirrors the shape of specs.LinuxDeviceCgroup from
+// github.com/opencontainers/runtime-spec/specs-go, inlined here to avoid
+// pulling in the runtime-spec module for a single type.
+type DeviceRule struct {
+	Allow  bool   `json:"allow"`
+	Type   string `json:"type,omitempty"`
+	Major  *int64 `json:"major,omitempty"`
+	Minor  *int64 `json:"minor,omitempty"`
+	Access string `json:"access,omitempty"`
+}
 
 type Interface interface {
 	GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error)
@@ -36,6 +46,7 @@ type Interface interface {
 	AddDeviceRules(cgroupPath string, devices []DeviceRule) error
 }
 
+//nolint:ireturn // intentional: callers use the interface
 func New(version int) (Interface, error) {
 	switch version {
 	case 1:
@@ -43,38 +54,62 @@ func New(version int) (Interface, error) {
 	case 2:
 		return &cgroupv2{}, nil
 	default:
-		return nil, fmt.Errorf("invalid version")
+		return nil, fmt.Errorf( //nolint:err113 // dynamic content
+			"invalid cgroup version %d",
+			version,
+		)
 	}
 }
 
-type cgroupv1 struct{}
-type cgroupv2 struct{}
+var errNoDeviceOrUnifiedCgroup = errors.New("no devices or unified cgroup entries found")
 
-var _ Interface = (*cgroupv1)(nil)
-var _ Interface = (*cgroupv2)(nil)
+type (
+	cgroupv1 struct{}
+	cgroupv2 struct{}
+)
 
-// GetDeviceCGroupVersion returns the version of linux cgroups in use
+var (
+	_ Interface = (*cgroupv1)(nil)
+	_ Interface = (*cgroupv2)(nil)
+)
+
+// GetDeviceCGroupVersion returns the version of linux cgroups in use.
 func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
-	// Open the pid's cgroup file in /proc.
-	path := fmt.Sprintf(filepath.Join(rootPath, "proc", "%v", "cgroup"), pid)
+	path := filepath.Join(rootPath, "proc", strconv.Itoa(pid), "cgroup")
+
 	file, err := os.Open(path)
 	if err != nil {
-		return -1, fmt.Errorf("failed to open cgroup path for pid '%d': %v", pid, err)
+		return -1, fmt.Errorf("failed to open cgroup path for pid '%d': %w", pid, err)
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanCGroupVersion(file, path)
+}
+
+// scanCGroupVersion parses the cgroup hierarchy file and returns 1 (v1) or 2 (v2).
+// Extracted from GetDeviceCGroupVersion to allow unit testing without a real /proc.
+func scanCGroupVersion(r io.Reader, path string) (int, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for either a 'devices' or a '' (i.e. unified) entry
 	found := make(map[string]bool)
+
 	for scanner.Scan() {
 		parts := strings.SplitN(scanner.Text(), ":", 3)
 		if len(parts) != 3 {
-			return -1, fmt.Errorf("malformed cgroup entry: %v", scanner.Text())
+			return -1, fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed cgroup entry: %v",
+				scanner.Text(),
+			)
 		}
+
 		found[parts[1]] = true
+	}
+
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		return -1, fmt.Errorf("read %q: %w", path, scanErr)
 	}
 
 	// If a 'devices' entry was found, return version 1.
@@ -87,5 +122,5 @@ func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
 		return 2, nil
 	}
 
-	return -1, fmt.Errorf("no devices or unified cgroup entries found")
+	return -1, errNoDeviceOrUnifiedCgroup
 }

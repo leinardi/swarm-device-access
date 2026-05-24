@@ -1,0 +1,60 @@
+# GPU passthrough example for Docker Swarm
+#
+# Runs the swarm-device-access daemon globally (one instance per node)
+# and a CUDA worker service that bind-mounts the NVIDIA device files.
+#
+# Prerequisites on each node:
+#   - NVIDIA driver installed
+#   - /dev/nvidia0, /dev/nvidiactl, /dev/nvidia-uvm present
+#   - swarm-device-access daemon running (global service below)
+#
+# Deploy:
+#   docker stack deploy -c docker-compose.yaml gpu-example
+
+services:
+  cuda-worker:
+    image: nvidia/cuda:12.4.0-base-ubuntu22.04
+    # Required when daemon runs in opt-in mode (the default).
+    labels:
+      swarm-device-access.enable: "true"
+    volumes:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+    command: [ "nvidia-smi" ]
+    deploy:
+      mode: replicated
+      replicas: 1
+  swarm-device-access:
+    image: docker:29
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - run
+      - -i
+      - --rm
+      - --name=swarm-device-access
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
+      - /sys:/host/sys
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
+      # Enable reload-after-daemon-reload (optional):
+      # - -v
+      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      # Policy mode: opt-in (default) processes only labelled containers.
+      # Use -policy-mode=all to process every container on the node.
+      # - -policy-mode=opt-in
+      # Limit scope to NVIDIA devices only (optional):
+      # - -device-allow=/dev/nvidia*
+      - ghcr.io/leinardi/swarm-device-access:latest
+    entrypoint: docker
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any

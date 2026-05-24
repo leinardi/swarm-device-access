@@ -1,0 +1,35 @@
+name: Integration tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - devel
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build daemon binary
+        run: make go-build
+
+      - name: Run integration tests
+        env:
+          SDA_TEST_BINARY: ${{ github.workspace }}/dist/swarm-device-access
+        run: go test -tags=integration -timeout=60s -v ./test/integration/...

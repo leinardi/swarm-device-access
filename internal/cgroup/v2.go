@@ -20,9 +20,13 @@ package cgroup
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -31,21 +35,31 @@ import (
 )
 
 const (
-	BpfProgramLicense = "Apache"
+	bpfProgramLicense = "Apache"
 )
 
-// GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid
+var (
+	errNoCgroup2Fs     = errors.New("no cgroup2 filesystem in mountinfo file")
+	errNoCgroupV2Entry = errors.New("no cgroupv2 entries in file")
+)
+
+// GetDeviceCGroupMountPath returns the mount path (and its prefix) for the device cgroup controller associated with pid.
 func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error) {
-	// Open the pid's mountinfo file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "mountinfo"), pid)
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "mountinfo")
+
 	file, err := os.Open(path)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanMountInfoV2(file, path)
+}
+
+// scanMountInfoV2 parses a mountinfo reader for the cgroup2 (unified) mount entry.
+// Extracted from GetDeviceCGroupMountPath to allow unit testing without a real /proc.
+func scanMountInfoV2(r io.Reader, path string) (string, string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for a subsystem of '' (i.e. unified) entry.
@@ -53,7 +67,10 @@ func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		// Split each entry by '[space]'
 		parts := strings.Split(scanner.Text(), " ")
 		if len(parts) < 5 {
-			return "", "", fmt.Errorf("malformed mountinfo entry: %v", scanner.Text())
+			return "", "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed mountinfo entry: %v",
+				scanner.Text(),
+			)
 		}
 		// Look for an entry with cgroup2 as the mount type.
 		if parts[len(parts)-3] != "cgroup2" {
@@ -61,7 +78,10 @@ func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		}
 		// Make sure the mount prefix is not a relative path.
 		if strings.HasPrefix(parts[3], "/..") {
-			return "", "", fmt.Errorf("relative path in mount prefix: %v", parts[3])
+			return "", "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"relative path in mount prefix: %v",
+				parts[3],
+			)
 		}
 		// Return the 3rd element as the prefix of the mount point for
 		// the devices cgroup and the 4th element as the mount point of
@@ -69,21 +89,35 @@ func (c *cgroupv2) GetDeviceCGroupMountPath(procRootPath string, pid int) (strin
 		return parts[3], parts[4], nil
 	}
 
-	return "", "", fmt.Errorf("no cgroup2 filesystem in mountinfo file")
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		return "", "", fmt.Errorf("read %q: %w", path, scanErr)
+	}
+
+	return "", "", errNoCgroup2Fs
 }
 
-// GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid
-func (c *cgroupv2) GetDeviceCGroupRootPath(procRootPath string, prefix string, pid int) (string, error) {
-	// Open the pid's cgroup file in /proc.
-	path := fmt.Sprintf(filepath.Join(procRootPath, "proc", "%v", "cgroup"), pid)
+// GetDeviceCGroupRootPath returns the root path for the device cgroup controller associated with pid.
+func (c *cgroupv2) GetDeviceCGroupRootPath(
+	procRootPath string,
+	prefix string,
+	pid int,
+) (string, error) {
+	path := filepath.Join(procRootPath, "proc", strconv.Itoa(pid), "cgroup")
+
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer file.Close()
 
-	// Create a scanner to loop through the file's contents.
-	scanner := bufio.NewScanner(file)
+	return scanProcCgroupV2(file, path, prefix)
+}
+
+// scanProcCgroupV2 parses a /proc/<pid>/cgroup reader for the cgroup v2 unified root path.
+// Extracted from GetDeviceCGroupRootPath to allow unit testing without a real /proc.
+func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	// Loop through the file looking for either a '' (i.e. unified) entry.
@@ -91,7 +125,10 @@ func (c *cgroupv2) GetDeviceCGroupRootPath(procRootPath string, prefix string, p
 		// Split each entry by ':'
 		parts := strings.SplitN(scanner.Text(), ":", 3)
 		if len(parts) != 3 {
-			return "", fmt.Errorf("malformed cgroup entry: %v", scanner.Text())
+			return "", fmt.Errorf( //nolint:err113 // dynamic content, not wrappable
+				"malformed cgroup entry: %v",
+				scanner.Text(),
+			)
 		}
 		// Look for the (empty) subsystem in the 1st element.
 		if parts[1] != "" {
@@ -102,55 +139,91 @@ func (c *cgroupv2) GetDeviceCGroupRootPath(procRootPath string, prefix string, p
 		if prefix == "/" {
 			return parts[2], nil
 		}
+
 		return strings.TrimPrefix(parts[2], prefix), nil
 	}
 
-	return "", fmt.Errorf("no cgroupv2 entries in file")
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		return "", fmt.Errorf("read %q: %w", path, scanErr)
+	}
+
+	return "", errNoCgroupV2Entry
 }
 
-// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath
+// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath.
 func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	// Open the cgroup path.
-	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0600)
+	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0)
 	if err != nil {
-		return fmt.Errorf("unable to open the cgroup path: %v", err)
+		return fmt.Errorf("unable to open the cgroup path: %w", err)
 	}
 	defer unix.Close(dirFD)
 
 	// Find any existing eBPF device filter programs attached to this cgroup.
 	oldProgs, err := FindAttachedCgroupDeviceFilters(dirFD)
 	if err != nil {
-		return fmt.Errorf("unable to find any existing device filters attached to the cgroup: %v", err)
+		return fmt.Errorf(
+			"unable to find any existing device filters attached to the cgroup: %w",
+			err,
+		)
 	}
 
 	// Generate a new set of eBPF programs by prepending instructions for the
 	// new devices to the instructions of each existing program.
 	// If no existing programs found, create a new program with just our device filter.
 	var newProgs []*ebpf.Program
+	defer func() {
+		for _, p := range newProgs {
+			p.Close()
+		}
+	}()
+
 	if len(oldProgs) == 0 {
 		oldInsts := asm.Instructions{asm.Return()}
 
-		newProg, err := generateNewProgram(rules, oldInsts)
+		var newProg *ebpf.Program
+
+		newProg, err = generateNewProgram(rules, oldInsts)
 		if err != nil {
-			return fmt.Errorf("unable to generate new device filter program with no existing programs: %v", err)
+			return fmt.Errorf(
+				"unable to generate new device filter program with no existing programs: %w",
+				err,
+			)
 		}
 
 		newProgs = append(newProgs, newProg)
 	}
+
 	for _, oldProg := range oldProgs {
-		oldInfo, err := oldProg.Info()
+		var (
+			oldInfo  *ebpf.ProgramInfo
+			oldInsts asm.Instructions
+			newProg  *ebpf.Program
+		)
+
+		oldInfo, err = oldProg.Info()
 		if err != nil {
-			return fmt.Errorf("unable to get Info() of the original device filters program: %v", err)
+			return fmt.Errorf(
+				"unable to get Info() of the original device filters program: %w",
+				err,
+			)
 		}
 
-		oldInsts, err := oldInfo.Instructions()
+		oldInsts, err = oldInfo.Instructions()
 		if err != nil {
-			return fmt.Errorf("unable to get the instructions of the original device filters program: %v", err)
+			return fmt.Errorf(
+				"unable to get the instructions of the original device filters program: %w",
+				err,
+			)
 		}
 
-		newProg, err := generateNewProgram(rules, oldInsts)
+		newProg, err = generateNewProgram(rules, oldInsts)
 		if err != nil {
-			return fmt.Errorf("unable to generate new device filter program from existing programs: %v", err)
+			return fmt.Errorf(
+				"unable to generate new device filter program from existing programs: %w",
+				err,
+			)
 		}
 
 		newProgs = append(newProgs, newProg)
@@ -162,7 +235,12 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 		Cur: unix.RLIM_INFINITY,
 		Max: unix.RLIM_INFINITY,
 	}
-	_ = unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
+
+	rlimitErr := unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
+	if rlimitErr != nil {
+		slog.Default().Warn("setrlimit RLIMIT_MEMLOCK failed; BPF_PROG_LOAD may fail",
+			"err", rlimitErr)
+	}
 
 	// Replace the set of existing eBPF programs with the new ones.
 	// We don't have to worry about atomically replacing each program (i.e. by
@@ -171,13 +249,14 @@ func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
 	for _, oldProg := range oldProgs {
 		err = DetachCgroupDeviceFilter(oldProg, dirFD)
 		if err != nil {
-			return fmt.Errorf("unable to detach original device filters program: %v", err)
+			return fmt.Errorf("unable to detach original device filters program: %w", err)
 		}
 	}
+
 	for _, newProg := range newProgs {
 		err = AttachCgroupDeviceFilter(newProg, dirFD)
 		if err != nil {
-			return fmt.Errorf("unable to attach new device filters program: %v", err)
+			return fmt.Errorf("unable to attach new device filters program: %w", err)
 		}
 	}
 
@@ -188,18 +267,22 @@ func generateNewProgram(rules []DeviceRule, oldInsts asm.Instructions) (*ebpf.Pr
 	// Prepend instructions for the new devices to the original set of instructions.
 	newInsts, err := PrependDeviceFilter(rules, oldInsts)
 	if err != nil {
-		return nil, fmt.Errorf("unable to prepend new device filters to the original device filters program: %v", err)
+		return nil, fmt.Errorf(
+			"unable to prepend new device filters to the original device filters program: %w",
+			err,
+		)
 	}
 
 	// Generate new eBPF program for the merged device filter instructions.
 	spec := &ebpf.ProgramSpec{
 		Type:         ebpf.CGroupDevice,
 		Instructions: newInsts,
-		License:      BpfProgramLicense,
+		License:      bpfProgramLicense,
 	}
+
 	newProg, err := ebpf.NewProgram(spec)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create new device filters program: %v", err)
+		return nil, fmt.Errorf("unable to create new device filters program: %w", err)
 	}
 
 	return newProg, nil

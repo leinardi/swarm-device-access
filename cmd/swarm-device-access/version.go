@@ -1,5 +1,7 @@
+//go:build linux
+
 /*
- * Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright 2026 Roberto Leinardi
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,20 +16,14 @@
  * limitations under the License.
  */
 
-#ifndef HEADER_NVCGO_CTYPES_H
-#define HEADER_NVCGO_CTYPES_H
+package main
 
-#include <sys/types.h>
-
-#include <stdbool.h>
-#include <stdint.h>
-
-struct device_rule {
-        bool allow;
-        const char *type;
-        const char *access;
-        dev_t major;
-        dev_t minor;
-};
-
-#endif /* HEADER_NVCGO_CTYPES_H */
+// These values are logged once at startup and overridden at build time with
+// -ldflags, e.g.:
+//
+//	go build -ldflags "-X main.version=1.2.3 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%d)"
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)

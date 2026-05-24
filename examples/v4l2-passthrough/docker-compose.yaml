@@ -1,0 +1,57 @@
+# V4L2 (webcam / capture card) passthrough example for Docker Swarm
+#
+# Passes /dev/video0 into a worker container for video capture.
+#
+# Prerequisites:
+#   - V4L2 device present at /dev/video0 on the host
+#   - v4l-utils or ffmpeg available in the worker image
+#
+# Deploy:
+#   docker stack deploy -c docker-compose.yaml v4l2-example
+
+services:
+  swarm-device-access:
+    image: docker:29
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - run
+      - -i
+      - --rm
+      - --name=swarm-device-access
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
+      - /sys:/host/sys
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
+      # Restrict to V4L2 devices only:
+      # - -device-allow=/dev/video*
+      - ghcr.io/leinardi/swarm-device-access:latest
+    entrypoint: docker
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any
+
+  v4l2-worker:
+    image: linuxserver/ffmpeg:latest # dclint disable-line service-image-require-explicit-tag
+    volumes:
+      - /dev/video0:/dev/video0
+      - /tmp/output:/output
+    # Capture 5 seconds of video from /dev/video0
+    command:
+      - -f
+      - v4l2
+      - -i
+      - /dev/video0
+      - -t
+      - "5"
+      - /output/capture.mp4
+    deploy:
+      mode: replicated
+      replicas: 1
