@@ -19,6 +19,7 @@
 package cgroup
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -135,6 +136,26 @@ func TestAppendDevice_NoMajorNoMinor(t *testing.T) {
 	// acceptBlock (2) = 3 appended + 5 init = 8 total.
 	if len(p.insts) != 8 {
 		t.Errorf("instruction count = %d, want 8", len(p.insts))
+	}
+}
+
+func TestAppendDevice_NilMajor(t *testing.T) {
+	p := newProgram(t)
+	rule := DeviceRule{Allow: true, Type: "c", Minor: ptr64(0), Access: "rwm"}
+
+	err := p.appendDevice(rule, "pfx")
+	if !errors.Is(err, errNoMajor) {
+		t.Fatalf("appendDevice() err = %v, want %v", err, errNoMajor)
+	}
+}
+
+func TestAppendDevice_NilMinor(t *testing.T) {
+	p := newProgram(t)
+	rule := DeviceRule{Allow: true, Type: "c", Major: ptr64(1), Access: "rwm"}
+
+	err := p.appendDevice(rule, "pfx")
+	if !errors.Is(err, errNoMinor) {
+		t.Fatalf("appendDevice() err = %v, want %v", err, errNoMinor)
 	}
 }
 

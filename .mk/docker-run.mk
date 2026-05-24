@@ -5,7 +5,8 @@
 # The daemon requires:
 #   - the Docker UNIX socket (to subscribe to events and inspect containers)
 #   - the host /sys tree at /host/sys (to write into /sys/fs/cgroup)
-#   - host cgroup namespace, host pid namespace, --privileged
+#   - host /dev tree (to stat device major/minor numbers)
+#   - host cgroup, pid, and user namespaces, --privileged
 #
 # Override DOCKER_RUN_ARGS to pass extra daemon flags:
 #   make docker-run DOCKER_RUN_ARGS="-log-level debug -log-time"
@@ -20,7 +21,9 @@ docker-run: ## Run the image locally with host cgroup/pid namespaces and require
 		--privileged \
 		--cgroupns=host \
 		--pid=host \
+		--userns=host \
 		-v "$(DOCKER_SOCKET):/var/run/docker.sock" \
 		-v /sys:/host/sys \
+		-v /dev:/dev \
 		"$(IMAGE_REPO):$(IMAGE_TAG)" \
 		$(DOCKER_RUN_ARGS)

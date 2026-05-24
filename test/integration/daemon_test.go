@@ -42,10 +42,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	dockerclient "github.com/docker/docker/client"
 )
 
@@ -64,6 +66,13 @@ const (
 	logReady = "subscribed to docker events"
 	// logDetected is a substring of the dry-run log line for a device rule.
 	logDetected = "dry-run: would add device rule"
+
+	testImage = "docker.io/library/busybox:1.36"
+)
+
+var (
+	pullTestImageOnce sync.Once
+	pullTestImageErr  error
 )
 
 // TestDaemon_DryRun_DetectsDeviceMount starts the daemon with -dry-run,
@@ -77,6 +86,11 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 
 	binary := findBinary(t)
 	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	labelKey := "sda.integration.test"
+	labelValue := labelValueForTest(t)
+	requireLabel := labelKey + "=" + labelValue
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
@@ -89,6 +103,7 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 		"-dry-run",
 		"-log-level=debug",
 		"-log-format=text",
+		"-require-label="+requireLabel,
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -123,7 +138,7 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 	}
 
 	// ---- create container with /dev/null bind mount ----
-	containerID := startTestContainer(t, ctx, cli)
+	containerID := startTestContainer(t, ctx, cli, map[string]string{labelKey: labelValue})
 	t.Cleanup(func() { removeContainer(t, cli, containerID) })
 
 	// ---- assert dry-run log appears ----
@@ -142,6 +157,9 @@ func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
 
 	binary := findBinary(t)
 	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	requireLabel := "sda.integration.test=" + labelValueForTest(t)
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
@@ -153,7 +171,7 @@ func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
 		"-dry-run",
 		"-log-level=debug",
 		"-log-format=text",
-		"-require-label=sda.enable=true",
+		"-require-label="+requireLabel,
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -186,7 +204,7 @@ func TestDaemon_DryRun_LabelFilter_SkipsUnlabelledContainer(t *testing.T) {
 	}
 
 	// Container without the required label — daemon should skip it.
-	containerID := startTestContainer(t, ctx, cli)
+	containerID := startTestContainer(t, ctx, cli, nil)
 	t.Cleanup(func() { removeContainer(t, cli, containerID) })
 
 	select {
@@ -249,13 +267,54 @@ func requireDocker(t *testing.T) *dockerclient.Client {
 	return cli
 }
 
-func startTestContainer(t *testing.T, ctx context.Context, cli *dockerclient.Client) string {
+func ensureTestImage(t *testing.T, cli *dockerclient.Client) {
+	t.Helper()
+
+	pullTestImageOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+
+		reader, err := cli.ImagePull(ctx, testImage, image.PullOptions{})
+		if err != nil {
+			pullTestImageErr = err
+
+			return
+		}
+		defer reader.Close()
+
+		_, err = io.Copy(io.Discard, reader)
+		if err != nil {
+			pullTestImageErr = err
+		}
+	})
+
+	if pullTestImageErr != nil {
+		t.Fatalf("pull test image %s: %v", testImage, pullTestImageErr)
+	}
+}
+
+func labelValueForTest(t *testing.T) string {
+	t.Helper()
+
+	value := strings.ToLower(t.Name())
+	value = strings.NewReplacer("/", "-", "_", "-", " ", "-").Replace(value)
+
+	return value
+}
+
+func startTestContainer(
+	t *testing.T,
+	ctx context.Context,
+	cli *dockerclient.Client,
+	labels map[string]string,
+) string {
 	t.Helper()
 
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{
-			Image: "busybox:latest",
-			Cmd:   []string{"sh", "-c", "sleep 30"},
+			Image:  testImage,
+			Cmd:    []string{"sh", "-c", "sleep 30"},
+			Labels: labels,
 		},
 		&container.HostConfig{
 			Binds: []string{"/dev/null:/dev/null"},

@@ -152,6 +152,11 @@ formatters:
     - goimports
     - golines
   settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/leinardi/swarm-device-access)
     gofmt:
       rewrite-rules:
         - pattern: "interface{}"

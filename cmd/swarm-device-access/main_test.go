@@ -49,7 +49,13 @@ func (f *fakeInspector) ContainerInspect(
 // buildProcRoot creates a minimal /proc/<pid>/{cgroup,mountinfo} structure
 // under a temp dir so processContainer can resolve the cgroup path without a
 // real /proc filesystem.
-func buildProcRoot(t *testing.T, pid int, cgroupContent, mountinfoContent string) string {
+//
+//nolint:unparam // cgroupContent varies across test cases; linter sees current call sites only
+func buildProcRoot(
+	t *testing.T,
+	pid int,
+	cgroupContent, mountinfoContent string,
+) string {
 	t.Helper()
 
 	root := t.TempDir()
@@ -333,6 +339,79 @@ func TestDevicePathAllowed(t *testing.T) {
 	}
 }
 
+func TestIsDeviceMountSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "/dev", want: true},
+		{path: "/dev/null", want: true},
+		{path: "/dev/bus/usb", want: true},
+		{path: "/devops/null", want: false},
+		{path: "/development/null", want: false},
+		{path: "/tmp/dev/null", want: false},
+		{path: "", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+
+			got := isDeviceMountSource(tc.path)
+			if got != tc.want {
+				t.Errorf("isDeviceMountSource(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHostCGroupPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		sysfsPath    string
+		cgroupPrefix string
+		cgroupRoot   string
+		want         string
+	}{
+		{
+			name:         "host cgroup namespace",
+			sysfsPath:    "/sys/fs/cgroup",
+			cgroupPrefix: "/",
+			cgroupRoot:   "/system.slice/docker-abc.scope",
+			want:         "/host/sys/fs/cgroup/system.slice/docker-abc.scope",
+		},
+		{
+			name:         "private cgroup namespace",
+			sysfsPath:    "/sys/fs/cgroup",
+			cgroupPrefix: "/system.slice/docker-abc.scope",
+			cgroupRoot:   "/",
+			want:         "/host/sys/fs/cgroup/system.slice/docker-abc.scope",
+		},
+		{
+			name:         "mount prefix trimmed from proc cgroup",
+			sysfsPath:    "/sys/fs/cgroup",
+			cgroupPrefix: "/docker",
+			cgroupRoot:   "/abc",
+			want:         "/host/sys/fs/cgroup/docker/abc",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := hostCGroupPath(tc.sysfsPath, tc.cgroupPrefix, tc.cgroupRoot)
+			if got != tc.want {
+				t.Errorf("hostCGroupPath() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // ---- processContainer tests ----
 
 func TestProcessContainer_InspectError(t *testing.T) {
@@ -404,9 +483,9 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 
 	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
 
-	// Mixed mounts: one /dev, one not. The /dev mount will reach applyMount
-	// which will fail (stat on a fake path) but processContainer logs and
-	// continues — so the overall return is still nil.
+	// Mixed mounts: one /dev, one not. /dev/null is a real device so the rule is
+	// collected, but AddDeviceRules fails because the fake cgroup path does not
+	// exist. The aggregated error is now returned (not swallowed).
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
 		ContainerJSONBase: &container.ContainerJSONBase{State: state},
@@ -416,13 +495,148 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 		},
 	}}
 
-	// processContainer returns nil even when applyMount fails (warns instead).
 	err := processContainer(context.Background(), insp, "abc", root, false)
-	if err != nil {
-		t.Fatalf(
-			"processContainer should not return error when applyMount fails (logs warning): %v",
-			err,
+	if err == nil {
+		t.Fatal(
+			"processContainer should return error when AddDeviceRules fails on fake cgroup path",
 		)
+	}
+}
+
+func TestProcessContainer_DevMount_DryRunNoError(t *testing.T) {
+	const pid = 44
+
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+
+	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+	state := &container.State{Pid: pid}
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		Mounts: []container.MountPoint{
+			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+		},
+	}}
+
+	// dry-run=true: rules are logged but AddDeviceRules is never called, so no
+	// error from the missing cgroup path.
+	err := processContainer(context.Background(), insp, "abc", root, true)
+	if err != nil {
+		t.Fatalf("dry-run processContainer should not error: %v", err)
+	}
+}
+
+func TestProcessContainer_DeduplicatesDuplicateMounts(t *testing.T) {
+	const pid = 45
+
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+
+	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+	state := &container.State{Pid: pid}
+	// Two mounts that both resolve to /dev/null (same major:minor device).
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		Mounts: []container.MountPoint{
+			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+			{Source: "/dev/null", Destination: "/dev/null2", Type: mount.TypeBind},
+		},
+	}}
+
+	// dry-run verifies the collect+dedupe path returns nil (no cgroup write).
+	err := processContainer(context.Background(), insp, "abc", root, true)
+	if err != nil {
+		t.Fatalf("dry-run with duplicate mounts should not error: %v", err)
+	}
+}
+
+func TestValidatePatterns(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		patterns stringSliceFlag
+		wantErr  bool
+	}{
+		{patterns: nil, wantErr: false},
+		{patterns: stringSliceFlag{"/dev/nvidia*", "/dev/dri/*"}, wantErr: false},
+		{patterns: stringSliceFlag{"/dev/nvidia["}, wantErr: true},
+		{patterns: stringSliceFlag{"/dev/valid", "/dev/bad["}, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		err := validatePatterns(tc.patterns)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("validatePatterns(%v) err=%v, wantErr=%v", tc.patterns, err, tc.wantErr)
+		}
+	}
+}
+
+func TestValidateRequireLabel(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		policy  string
+		wantErr bool
+	}{
+		{policy: "", wantErr: false},
+		{policy: "foo=bar", wantErr: false},
+		{policy: "foo=", wantErr: false},
+		{policy: "foo", wantErr: true},
+		{policy: "=bar", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		err := validateRequireLabel(tc.policy)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("validateRequireLabel(%q) err=%v, wantErr=%v", tc.policy, err, tc.wantErr)
+		}
+	}
+}
+
+func TestCollectMountRules_ExcludedByPolicy(t *testing.T) {
+	t.Parallel()
+
+	cfg := &hotConfig{deviceDeny: stringSliceFlag{"/dev/null"}}
+	rules, errs := collectMountRules("/dev/null", cfg)
+
+	if len(rules) != 0 || len(errs) != 0 {
+		t.Errorf("expected no rules/errors for denied path, got rules=%v errs=%v", rules, errs)
+	}
+}
+
+func TestCollectMountRules_File(t *testing.T) {
+	t.Parallel()
+
+	cfg := &hotConfig{}
+	rules, errs := collectMountRules("/dev/null", cfg)
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+
+	if !rules[0].Allow || rules[0].Access != "rwm" {
+		t.Errorf("rule has unexpected allow/access: %+v", rules[0])
+	}
+}
+
+func TestCollectMountRules_BadPath(t *testing.T) {
+	t.Parallel()
+
+	cfg := &hotConfig{}
+	rules, errs := collectMountRules("/dev/nonexistent-device-xyzzy", cfg)
+
+	if len(rules) != 0 {
+		t.Errorf("expected no rules for bad path, got %v", rules)
+	}
+
+	if len(errs) == 0 {
+		t.Error("expected errors for bad path, got none")
 	}
 }
 

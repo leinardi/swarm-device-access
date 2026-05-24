@@ -111,6 +111,14 @@ func (p *program) appendDevice(dev DeviceRule, labelPrefix string) error {
 		)
 	}
 
+	if dev.Major == nil {
+		return errNoMajor
+	}
+
+	if dev.Minor == nil {
+		return errNoMinor
+	}
+
 	if *dev.Major > math.MaxUint32 {
 		return fmt.Errorf( //nolint:err113 // dynamic content
 			"invalid major %d",

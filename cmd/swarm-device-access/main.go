@@ -40,14 +40,15 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	"github.com/leinardi/swarm-device-access/internal/cgroup"
-	"github.com/leinardi/swarm-device-access/internal/logger"
-	"github.com/leinardi/swarm-device-access/internal/systemd"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
+
+	"github.com/leinardi/swarm-device-access/internal/cgroup"
+	"github.com/leinardi/swarm-device-access/internal/logger"
+	"github.com/leinardi/swarm-device-access/internal/systemd"
 )
 
 // containerInspector is the subset of *client.Client used by processContainer.
@@ -132,11 +133,19 @@ type configFileSchema struct {
 	LogTime      *bool    `yaml:"log-time"`
 	DockerSocket string   `yaml:"docker-socket"`
 	DryRun       *bool    `yaml:"dry-run"`
-	RequireLabel string   `yaml:"require-label"`
+	RequireLabel *string  `yaml:"require-label"`
 	DeviceAllow  []string `yaml:"device-allow"`
 	DeviceDeny   []string `yaml:"device-deny"`
 	MetricsAddr  string   `yaml:"metrics-addr"`
 	DebugAddr    string   `yaml:"debug-addr"`
+}
+
+// deviceRuleKey is the deduplication key for cgroup device rules collected
+// within a single container processing pass.
+type deviceRuleKey struct {
+	typ   string
+	major int64
+	minor int64
 }
 
 // hotConfig holds the settings that can be changed without restarting the daemon.
@@ -241,6 +250,27 @@ func run() int {
 	}
 
 	applyFileConfig(&fileCfg)
+
+	startupValidationErr := validateRequireLabel(*requireLabel)
+	if startupValidationErr != nil {
+		fmt.Fprintf(os.Stderr, "invalid -require-label: %v\n", startupValidationErr)
+
+		return 1
+	}
+
+	startupValidationErr = validatePatterns(deviceAllow)
+	if startupValidationErr != nil {
+		fmt.Fprintf(os.Stderr, "invalid -device-allow: %v\n", startupValidationErr)
+
+		return 1
+	}
+
+	startupValidationErr = validatePatterns(deviceDeny)
+	if startupValidationErr != nil {
+		fmt.Fprintf(os.Stderr, "invalid -device-deny: %v\n", startupValidationErr)
+
+		return 1
+	}
 
 	logger.Configure(*logFormat, *logLevel, *logTime)
 
@@ -581,15 +611,15 @@ func applyFileConfig(fileCfg *configFileSchema) {
 		*dryRun = *fileCfg.DryRun
 	}
 
-	if !cliSet["require-label"] && fileCfg.RequireLabel != "" {
-		*requireLabel = fileCfg.RequireLabel
+	if !cliSet["require-label"] && fileCfg.RequireLabel != nil {
+		*requireLabel = *fileCfg.RequireLabel
 	}
 
-	if !cliSet["device-allow"] && len(fileCfg.DeviceAllow) > 0 {
+	if !cliSet["device-allow"] && fileCfg.DeviceAllow != nil {
 		deviceAllow = fileCfg.DeviceAllow
 	}
 
-	if !cliSet["device-deny"] && len(fileCfg.DeviceDeny) > 0 {
+	if !cliSet["device-deny"] && fileCfg.DeviceDeny != nil {
 		deviceDeny = fileCfg.DeviceDeny
 	}
 
@@ -605,7 +635,7 @@ func applyFileConfig(fileCfg *configFileSchema) {
 // updating activeCfg + logger on each SIGHUP. Settings that require a
 // restart (docker-socket, metrics-addr, debug-addr) are not reloaded.
 //
-//nolint:gocyclo,cyclop // complexity is inherent: handles SIGHUP, config reload, logger update, and reload actions
+//nolint:gocyclo,cyclop,gocognit // complexity is inherent: handles SIGHUP, config reload, logger update, and reload actions
 func watchSIGHUP(ctx context.Context) {
 	sigCh := make(chan os.Signal, 1)
 
@@ -660,16 +690,49 @@ func watchSIGHUP(ctx context.Context) {
 				newDryRun = *fileCfg.DryRun
 			}
 
-			if !cliSet["require-label"] && fileCfg.RequireLabel != "" {
-				newRequireLabel = fileCfg.RequireLabel
+			if !cliSet["require-label"] && fileCfg.RequireLabel != nil {
+				newRequireLabel = *fileCfg.RequireLabel
 			}
 
-			if !cliSet["device-allow"] && len(fileCfg.DeviceAllow) > 0 {
+			if !cliSet["device-allow"] && fileCfg.DeviceAllow != nil {
 				newDeviceAllow = fileCfg.DeviceAllow
 			}
 
-			if !cliSet["device-deny"] && len(fileCfg.DeviceDeny) > 0 {
+			if !cliSet["device-deny"] && fileCfg.DeviceDeny != nil {
 				newDeviceDeny = fileCfg.DeviceDeny
+			}
+
+			valErr := validateRequireLabel(newRequireLabel)
+			if valErr != nil {
+				log.Error(
+					"config reload: invalid require-label; keeping previous config",
+					"err",
+					valErr,
+				)
+
+				continue
+			}
+
+			valErr = validatePatterns(newDeviceAllow)
+			if valErr != nil {
+				log.Error(
+					"config reload: invalid device-allow; keeping previous config",
+					"err",
+					valErr,
+				)
+
+				continue
+			}
+
+			valErr = validatePatterns(newDeviceDeny)
+			if valErr != nil {
+				log.Error(
+					"config reload: invalid device-deny; keeping previous config",
+					"err",
+					valErr,
+				)
+
+				continue
 			}
 
 			activeCfg.Store(&hotConfig{
@@ -811,10 +874,51 @@ func devicePathAllowed(path string, allow, deny stringSliceFlag) bool {
 	return allow.contains(path)
 }
 
+// validatePatterns returns an error if any glob pattern in patterns is syntactically invalid.
+// Malformed patterns (e.g. /dev/nvidia[) silently never match; failing fast here prevents
+// silent policy misconfiguration.
+func validatePatterns(patterns stringSliceFlag) error {
+	for _, p := range patterns {
+		_, matchErr := filepath.Match(p, "")
+		if matchErr != nil {
+			return fmt.Errorf("invalid glob pattern %q: %w", p, matchErr)
+		}
+	}
+
+	return nil
+}
+
+// validateRequireLabel returns an error if policy is non-empty but malformed.
+// A valid non-empty policy must be "key=value" with a non-empty key.
+func validateRequireLabel(policy string) error {
+	if policy == "" {
+		return nil
+	}
+
+	key, _, ok := strings.Cut(policy, "=")
+	if !ok {
+		return fmt.Errorf( //nolint:err113 // dynamic content includes the policy value
+			"require-label %q: must be in key=value format",
+			policy,
+		)
+	}
+
+	if key == "" {
+		return fmt.Errorf( //nolint:err113 // dynamic content includes the policy value
+			"require-label %q: key must not be empty",
+			policy,
+		)
+	}
+
+	return nil
+}
+
 // processContainer inspects a container and applies cgroup BPF device-allow
 // rules for every bind mount sourced from /dev/...
 // procRootPath is the root used for /proc lookups; "/" in production, temp dir in tests.
 // dryRun skips cgroup writes and logs intent at Info level instead.
+//
+//nolint:cyclop,gocyclo // inherent: inspect + version-detect + path-resolve + mount-filter + collect + apply
 func processContainer(
 	ctx context.Context,
 	cli containerInspector,
@@ -866,60 +970,147 @@ func processContainer(
 		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
 	}
 
-	cgroupPath, sysfsPath, mountErr := api.GetDeviceCGroupMountPath(procRootPath, pid)
+	cgroupPrefix, sysfsPath, mountErr := api.GetDeviceCGroupMountPath(procRootPath, pid)
 	if mountErr != nil {
 		return fmt.Errorf("resolve cgroup mount path: %w", mountErr)
 	}
 
-	cgroupPath = filepath.Join(hostRootPath, sysfsPath, cgroupPath)
+	cgroupRoot, rootErr := api.GetDeviceCGroupRootPath(procRootPath, cgroupPrefix, pid)
+	if rootErr != nil {
+		return fmt.Errorf("resolve cgroup root path: %w", rootErr)
+	}
+
+	cgroupPath := hostCGroupPath(sysfsPath, cgroupPrefix, cgroupRoot)
 	log.Debug("cgroup path resolved", "pid", pid, "path", cgroupPath)
 
-	for _, mount := range info.Mounts {
-		if !strings.HasPrefix(mount.Source, "/dev") {
+	var (
+		allRules []cgroup.DeviceRule
+		allErrs  []error
+	)
+
+	seen := make(map[deviceRuleKey]struct{})
+
+	for _, mnt := range info.Mounts {
+		if !isDeviceMountSource(mnt.Source) {
 			continue
 		}
 
 		log.Debug("device mount detected",
 			"id", containerID,
 			"pid", pid,
-			"source", mount.Source,
-			"destination", mount.Destination,
+			"source", mnt.Source,
+			"destination", mnt.Destination,
 		)
 
-		applyErr := applyMount(api, mount.Source, cgroupPath, pid, dryRun)
-		if applyErr != nil {
-			log.Warn("could not apply device rule for mount",
-				"source", mount.Source,
-				"err", applyErr,
+		rules, errs := collectMountRules(mnt.Source, cfg)
+		allErrs = append(allErrs, errs...)
+
+		for _, rule := range rules {
+			k := deviceRuleKey{rule.Type, *rule.Major, *rule.Minor}
+			if _, dup := seen[k]; !dup {
+				seen[k] = struct{}{}
+
+				allRules = append(allRules, rule)
+			}
+		}
+	}
+
+	if len(allRules) == 0 {
+		return errors.Join(allErrs...)
+	}
+
+	applyErr := applyRulesToCgroup(api, allRules, cgroupPath, pid, dryRun)
+	if applyErr != nil {
+		allErrs = append(allErrs, applyErr)
+	}
+
+	return errors.Join(allErrs...)
+}
+
+// applyRulesToCgroup logs and (unless dryRun) attaches the collected device rules
+// to the cgroup at cgroupPath via a single AddDeviceRules call.
+func applyRulesToCgroup(
+	api cgroup.Interface,
+	rules []cgroup.DeviceRule,
+	cgroupPath string,
+	pid int,
+	dryRun bool,
+) error {
+	log := logger.L()
+
+	for _, rule := range rules {
+		if dryRun {
+			log.Info("dry-run: would add device rule",
+				"pid", pid,
+				"cgroup", cgroupPath,
+				"type", rule.Type,
+				"major", *rule.Major,
+				"minor", *rule.Minor,
+			)
+		} else {
+			log.Debug("adding device rule",
+				"pid", pid,
+				"cgroup", cgroupPath,
+				"type", rule.Type,
+				"major", *rule.Major,
+				"minor", *rule.Minor,
 			)
 		}
+	}
+
+	if dryRun {
+		return nil
+	}
+
+	err := api.AddDeviceRules(cgroupPath, rules)
+	if err != nil {
+		return fmt.Errorf("add device rules: %w", err)
 	}
 
 	return nil
 }
 
-// applyMount applies a device rule to a single file mount, or walks the
-// directory and applies rules to every contained device file.
-func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int, dryRun bool) error {
-	cfg := activeCfg.Load()
+func isDeviceMountSource(path string) bool {
+	return path == "/dev" || strings.HasPrefix(path, "/dev/")
+}
+
+func hostCGroupPath(sysfsPath, cgroupPrefix, cgroupRoot string) string {
+	return filepath.Join(hostRootPath, sysfsPath, cgroupPrefix, cgroupRoot)
+}
+
+// collectMountRules returns the DeviceRules and any errors for a mount source.
+// Directory mounts are walked; per-file policy checks apply.
+func collectMountRules(mountPath string, cfg *hotConfig) ([]cgroup.DeviceRule, []error) {
 	if !devicePathAllowed(mountPath, cfg.deviceAllow, cfg.deviceDeny) {
 		logger.L().Debug("device mount excluded by policy", "path", mountPath)
 
-		return nil
+		return nil, nil
 	}
 
-	fileInfo, statErr := os.Stat(mountPath)
-	if statErr != nil {
-		return fmt.Errorf("stat %q: %w", mountPath, statErr)
+	fileInfo, err := os.Stat(mountPath)
+	if err != nil {
+		return nil, []error{fmt.Errorf("stat %q: %w", mountPath, err)}
 	}
 
 	if !fileInfo.IsDir() {
-		return applyDeviceRules(api, mountPath, cgroupPath, pid, dryRun)
+		rule, err := collectDeviceRule(mountPath)
+		if err != nil {
+			return nil, []error{err}
+		}
+
+		return []cgroup.DeviceRule{rule}, nil
 	}
+
+	var (
+		rules []cgroup.DeviceRule
+		errs  []error
+	)
 
 	walkErr := filepath.Walk(mountPath, func(walkedPath string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			errs = append(errs, err)
+
+			return nil
 		}
 
 		if info.IsDir() {
@@ -932,70 +1123,38 @@ func applyMount(api cgroup.Interface, mountPath, cgroupPath string, pid int, dry
 			return nil
 		}
 
-		ruleErr := applyDeviceRules(api, walkedPath, cgroupPath, pid, dryRun)
+		rule, ruleErr := collectDeviceRule(walkedPath)
 		if ruleErr != nil {
-			logger.L().Warn("could not apply device rule",
-				"path", walkedPath,
-				"err", ruleErr,
-			)
+			errs = append(errs, fmt.Errorf("device rule for %q: %w", walkedPath, ruleErr))
+
+			return nil
 		}
+
+		rules = append(rules, rule)
 
 		return nil
 	})
 	if walkErr != nil {
-		return fmt.Errorf("walk %q: %w", mountPath, walkErr)
+		errs = append(errs, fmt.Errorf("walk %q: %w", mountPath, walkErr))
 	}
 
-	return nil
+	return rules, errs
 }
 
-func applyDeviceRules(
-	api cgroup.Interface,
-	mountPath, cgroupPath string,
-	pid int,
-	dryRun bool,
-) error {
-	log := logger.L()
-
-	deviceType, major, minor, infoErr := getDeviceInfo(mountPath)
-	if infoErr != nil {
-		return infoErr
+// collectDeviceRule returns the DeviceRule for a single (non-directory) device file.
+func collectDeviceRule(devicePath string) (cgroup.DeviceRule, error) {
+	deviceType, major, minor, err := getDeviceInfo(devicePath)
+	if err != nil {
+		return cgroup.DeviceRule{}, err
 	}
 
-	if dryRun {
-		log.Info("dry-run: would add device rule",
-			"pid", pid,
-			"cgroup", cgroupPath,
-			"type", deviceType,
-			"major", major,
-			"minor", minor,
-		)
-
-		return nil
-	}
-
-	log.Debug("adding device rule",
-		"pid", pid,
-		"cgroup", cgroupPath,
-		"type", deviceType,
-		"major", major,
-		"minor", minor,
-	)
-
-	ruleErr := api.AddDeviceRules(cgroupPath, []cgroup.DeviceRule{
-		{
-			Access: "rwm",
-			Major:  &major,
-			Minor:  &minor,
-			Type:   deviceType,
-			Allow:  true,
-		},
-	})
-	if ruleErr != nil {
-		return fmt.Errorf("add device rule: %w", ruleErr)
-	}
-
-	return nil
+	return cgroup.DeviceRule{
+		Allow:  true,
+		Access: "rwm",
+		Type:   deviceType,
+		Major:  &major,
+		Minor:  &minor,
+	}, nil
 }
 
 func getDeviceInfo(devicePath string) (deviceType string, major, minor int64, statErr error) {

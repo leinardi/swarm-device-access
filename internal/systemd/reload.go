@@ -25,6 +25,7 @@ import (
 	"fmt"
 
 	"github.com/godbus/dbus/v5"
+
 	"github.com/leinardi/swarm-device-access/internal/logger"
 )
 

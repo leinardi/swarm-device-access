@@ -158,6 +158,9 @@ make go-test           # run unit tests
 make docker-build      # build the container image
 ```
 
+See [`docs/testing.md`](docs/testing.md) for the CI-safe integration suite and
+the opt-in native privileged checklist.
+
 The Makefile pulls its shared logic from
 [`leinardi/make-common`](https://github.com/leinardi/make-common) at the
 version pinned in `.mk/.mk-common-version`. On first `make` run, the bootstrap
