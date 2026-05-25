@@ -40,6 +40,9 @@ services:
 
   v4l2-worker:
     image: linuxserver/ffmpeg:latest # dclint disable-line service-image-require-explicit-tag
+    labels:
+      swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/video*"
     volumes:
       - /dev/video0:/dev/video0
       - /tmp/output:/output

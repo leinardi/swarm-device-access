@@ -28,17 +28,18 @@
 //
 // Run:
 //
-//	GOOS=linux go test -tags=integration -timeout=60s ./test/integration/...
+//	GOOS=linux go test -tags=integration -timeout=120s ./test/integration/...
 //
 // Or from the repo root:
 //
-//	make go-build && go test -tags=integration -timeout=60s ./test/integration/...
+//	make go-build && go test -tags=integration -timeout=120s ./test/integration/...
 package integration
 
 import (
 	"bufio"
 	"context"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -85,7 +86,6 @@ var (
 // No BPF syscalls or elevated privileges are required: -dry-run skips
 // AddDeviceRules and logs intent instead.
 func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
-	binary := findBinary(t)
 	cli := requireDocker(t)
 	ensureTestImage(t, cli)
 
@@ -95,52 +95,18 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 	)
 	defer cancel()
 
-	// ---- start daemon ----
-	cmd := exec.CommandContext(ctx, binary,
+	detected := launchDaemon(t, ctx, 1,
 		"-dry-run",
 		"-policy-mode=opt-in",
 		"-log-level=debug",
 		"-log-format=text",
 	)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start daemon: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-
-	// ---- scan daemon output ----
-	ready := make(chan struct{}, 1)
-	detected := make(chan struct{}, 1)
-
-	go scanOutput(t, stdout, map[string]chan struct{}{
-		logReady:    ready,
-		logDetected: detected,
-	})
-
-	// ---- wait for daemon ready ----
-	select {
-	case <-ready:
-		t.Log("daemon subscribed to Docker events")
-	case <-time.After(startupTimeout):
-		t.Fatal("timeout waiting for daemon to subscribe to events")
-	}
-
-	// ---- create container with /dev/null bind mount and opt-in label ----
 	containerID := startTestContainer(t, ctx, cli, map[string]string{
 		policy.LabelEnable: "true",
-	})
+	}, []string{"/dev/null:/dev/null"})
 	t.Cleanup(func() { removeContainer(t, cli, containerID) })
 
-	// ---- assert dry-run log appears ----
 	select {
 	case <-detected:
 		t.Log("daemon logged dry-run device rule — pipeline verified")
@@ -150,10 +116,9 @@ func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 }
 
 // TestDaemon_DryRun_PolicyMode_SkipsUnlabelledContainer verifies that
-// -policy-mode=opt-in causes the daemon to skip containers without
-// swarm-device-access.enable=true.
+// -policy-mode=opt-in does not apply rules for containers that lack the
+// swarm-device-access.enable=true label.
 func TestDaemon_DryRun_PolicyMode_SkipsUnlabelledContainer(t *testing.T) {
-	binary := findBinary(t)
 	cli := requireDocker(t)
 	ensureTestImage(t, cli)
 
@@ -163,44 +128,14 @@ func TestDaemon_DryRun_PolicyMode_SkipsUnlabelledContainer(t *testing.T) {
 	)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binary,
+	detected := launchDaemon(t, ctx, 1,
 		"-dry-run",
 		"-policy-mode=opt-in",
 		"-log-level=debug",
 		"-log-format=text",
 	)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start daemon: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-
-	ready := make(chan struct{}, 1)
-	detected := make(chan struct{}, 1)
-
-	go scanOutput(t, stdout, map[string]chan struct{}{
-		logReady:            ready,
-		logDetected:         detected,
-		"skipped by policy": nil, // just log, don't signal
-	})
-
-	select {
-	case <-ready:
-	case <-time.After(startupTimeout):
-		t.Fatal("timeout waiting for daemon ready")
-	}
-
-	// Container without the enable label — opt-in mode should skip it.
-	containerID := startTestContainer(t, ctx, cli, nil)
+	containerID := startTestContainer(t, ctx, cli, nil, []string{"/dev/null:/dev/null"})
 	t.Cleanup(func() { removeContainer(t, cli, containerID) })
 
 	select {
@@ -208,6 +143,418 @@ func TestDaemon_DryRun_PolicyMode_SkipsUnlabelledContainer(t *testing.T) {
 		t.Error("daemon applied dry-run rule for unlabelled container; should have skipped")
 	case <-time.After(3 * time.Second):
 		t.Log("correctly skipped unlabelled container")
+	}
+}
+
+// TestDaemon_DryRun_PolicyMode_All_ProcessesUnlabelledContainer verifies that
+// -policy-mode=all processes containers that do not carry the opt-in label.
+func TestDaemon_DryRun_PolicyMode_All_ProcessesUnlabelledContainer(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=all",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, nil, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	select {
+	case <-detected:
+		t.Log("policy-mode=all processed unlabelled container")
+	case <-time.After(detectTimeout):
+		t.Error("timeout: policy-mode=all did not process unlabelled container")
+	}
+}
+
+// TestDaemon_DryRun_PolicyMode_All_SkipsOptedOutContainer verifies that
+// -policy-mode=all still skips containers that explicitly set enable=false.
+func TestDaemon_DryRun_PolicyMode_All_SkipsOptedOutContainer(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=all",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable: "false",
+	}, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	select {
+	case <-detected:
+		t.Error("daemon applied rule for enable=false container; should have skipped")
+	case <-time.After(3 * time.Second):
+		t.Log("correctly skipped opted-out container in policy-mode=all")
+	}
+}
+
+// TestDaemon_DryRun_GlobalDeviceDeny_BlocksDevice verifies that a device
+// matching the global -device-deny list is not included in the dry-run output.
+func TestDaemon_DryRun_GlobalDeviceDeny_BlocksDevice(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-device-deny=/dev/null",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable: "true",
+	}, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	select {
+	case <-detected:
+		t.Error("daemon logged a rule for a denied device; deny list not enforced")
+	case <-time.After(3 * time.Second):
+		t.Log("correctly blocked device matched by global deny list")
+	}
+}
+
+// TestDaemon_DryRun_GlobalDeviceAllow_BlocksNonMatchingDevice verifies that a
+// device NOT in the global -device-allow list is excluded from the dry-run output.
+func TestDaemon_DryRun_GlobalDeviceAllow_BlocksNonMatchingDevice(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	// Allow list contains /dev/zero; the container mounts /dev/null — not allowed.
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-device-allow=/dev/zero",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable: "true",
+	}, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	select {
+	case <-detected:
+		t.Error("daemon logged a rule for a device outside the allow list")
+	case <-time.After(3 * time.Second):
+		t.Log("correctly excluded device not in global allow list")
+	}
+}
+
+// TestDaemon_DryRun_LabelDeviceDeny_BlocksDevice verifies that the
+// swarm-device-access.device-deny container label filters out matching devices.
+func TestDaemon_DryRun_LabelDeviceDeny_BlocksDevice(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable:     "true",
+		policy.LabelDeviceDeny: "/dev/null",
+	}, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	select {
+	case <-detected:
+		t.Error("daemon logged a rule for a device denied via container label")
+	case <-time.After(3 * time.Second):
+		t.Log("correctly blocked device matched by container device-deny label")
+	}
+}
+
+// TestDaemon_DryRun_LabelDeviceAllow_NarrowsAccess verifies that the
+// swarm-device-access.device-allow container label restricts which devices
+// receive rules: a mount outside the per-container allow list is skipped.
+func TestDaemon_DryRun_LabelDeviceAllow_NarrowsAccess(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	// Per-container allow list is /dev/zero; container mounts /dev/null — excluded.
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable:      "true",
+		policy.LabelDeviceAllow: "/dev/zero",
+	}, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	select {
+	case <-detected:
+		t.Error("daemon logged a rule for a device outside the container allow label")
+	case <-time.After(3 * time.Second):
+		t.Log("correctly excluded device not in container device-allow label")
+	}
+}
+
+// TestDaemon_DryRun_ProcessesExistingContainers verifies the startup-enumeration
+// path: a container already running when the daemon starts must be processed by
+// processExistingContainers without waiting for a Docker event.
+func TestDaemon_DryRun_ProcessesExistingContainers(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	// Container starts BEFORE the daemon — no Docker event will fire for it.
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable: "true",
+	}, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	// processExistingContainers runs before "subscribed to docker events" is logged,
+	// so logDetected will already be buffered when launchDaemon returns.
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	select {
+	case <-detected:
+		t.Log("startup enumeration detected pre-existing container")
+	case <-time.After(detectTimeout):
+		t.Error("timeout: daemon did not process pre-existing container at startup")
+	}
+}
+
+// TestDaemon_DryRun_UnpauseEvent verifies that an "unpause" Docker event
+// triggers the same device-rule pipeline as a "start" event.
+func TestDaemon_DryRun_UnpauseEvent(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+2*detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	detected := launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable: "true",
+	}, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	// Wait for the start event to be processed first.
+	select {
+	case <-detected:
+		t.Log("start event processed")
+	case <-time.After(detectTimeout):
+		t.Fatal("timeout: start event not detected")
+	}
+
+	if err := cli.ContainerPause(ctx, containerID); err != nil {
+		t.Fatalf("pause container: %v", err)
+	}
+
+	if err := cli.ContainerUnpause(ctx, containerID); err != nil {
+		t.Fatalf("unpause container: %v", err)
+	}
+
+	// The unpause event must trigger a second processing pass.
+	select {
+	case <-detected:
+		t.Log("unpause event processed — daemon handles unpause correctly")
+	case <-time.After(detectTimeout):
+		t.Error("timeout: daemon did not process the unpause event")
+	}
+}
+
+// TestDaemon_DryRun_MultipleDeviceMounts verifies that every device bind-mount
+// in a container produces a separate dry-run rule log entry.
+func TestDaemon_DryRun_MultipleDeviceMounts(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	// Buffer 2: one slot per expected device rule.
+	detected := launchDaemon(t, ctx, 2,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	containerID := startTestContainer(t, ctx, cli, map[string]string{
+		policy.LabelEnable: "true",
+	}, []string{"/dev/null:/dev/null", "/dev/zero:/dev/zero"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	for range 2 {
+		select {
+		case <-detected:
+		case <-time.After(detectTimeout):
+			t.Error("timeout: expected two dry-run device rules, got fewer")
+			return
+		}
+	}
+
+	t.Log("both device rules logged for /dev/null and /dev/zero")
+}
+
+// TestDaemon_DryRun_ConfigFile_LoadsPolicyMode verifies that daemon settings
+// are correctly loaded from a YAML config file passed via -config, and that
+// CLI defaults do not override file-only values.
+func TestDaemon_DryRun_ConfigFile_LoadsPolicyMode(t *testing.T) {
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+detectTimeout+5*time.Second,
+	)
+	defer cancel()
+
+	f, err := os.CreateTemp(t.TempDir(), "sda-config-*.yaml")
+	if err != nil {
+		t.Fatalf("create temp config: %v", err)
+	}
+
+	if _, err := f.WriteString(
+		"policy-mode: \"all\"\ndry-run: true\nlog-level: debug\nlog-format: text\n",
+	); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	configPath := f.Name()
+	_ = f.Close()
+
+	// No -dry-run or -policy-mode flags on CLI — both come from the config file.
+	detected := launchDaemon(t, ctx, 1, "-config="+configPath)
+
+	containerID := startTestContainer(t, ctx, cli, nil, []string{"/dev/null:/dev/null"})
+	t.Cleanup(func() { removeContainer(t, cli, containerID) })
+
+	select {
+	case <-detected:
+		t.Log("config file applied: policy-mode=all processed unlabelled container")
+	case <-time.After(detectTimeout):
+		t.Error("timeout: config file policy-mode=all did not process unlabelled container")
+	}
+}
+
+// TestDaemon_DryRun_MetricsEndpoint verifies that -metrics-addr starts a
+// Prometheus-compatible HTTP endpoint that serves sda_ metrics.
+func TestDaemon_DryRun_MetricsEndpoint(t *testing.T) {
+	_ = requireDocker(t)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		startupTimeout+10*time.Second,
+	)
+	defer cancel()
+
+	const metricsAddr = "127.0.0.1:19091"
+
+	launchDaemon(t, ctx, 1,
+		"-dry-run",
+		"-policy-mode=opt-in",
+		"-metrics-addr="+metricsAddr,
+		"-log-level=debug",
+		"-log-format=text",
+	)
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"http://"+metricsAddr+"/metrics",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build metrics request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /metrics: want 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /metrics body: %v", err)
+	}
+
+	if !strings.Contains(string(body), "# HELP sda_") {
+		t.Errorf("GET /metrics: expected Prometheus help text for sda_ metrics;\nbody:\n%s", body)
 	}
 }
 
@@ -289,11 +636,59 @@ func ensureTestImage(t *testing.T, cli *dockerclient.Client) {
 	}
 }
 
+// launchDaemon starts the daemon binary with the given flags, waits for it to
+// subscribe to Docker events, and returns a channel that receives a struct{}
+// each time logDetected appears in the daemon output. detectedBufSize controls
+// the channel buffer; use 1 for most tests, 2 when two rules are expected.
+func launchDaemon(
+	t *testing.T,
+	ctx context.Context,
+	detectedBufSize int,
+	flags ...string,
+) chan struct{} {
+	t.Helper()
+
+	binary := findBinary(t)
+	cmd := exec.CommandContext(ctx, binary, flags...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	ready := make(chan struct{}, 1)
+	detected := make(chan struct{}, detectedBufSize)
+
+	go scanOutput(t, stdout, map[string]chan struct{}{
+		logReady:    ready,
+		logDetected: detected,
+	})
+
+	select {
+	case <-ready:
+		t.Log("daemon subscribed to Docker events")
+	case <-time.After(startupTimeout):
+		t.Fatal("timeout waiting for daemon to subscribe to events")
+	}
+
+	return detected
+}
+
 func startTestContainer(
 	t *testing.T,
 	ctx context.Context,
 	cli *dockerclient.Client,
 	labels map[string]string,
+	binds []string,
 ) string {
 	t.Helper()
 
@@ -304,7 +699,7 @@ func startTestContainer(
 			Labels: labels,
 		},
 		&container.HostConfig{
-			Binds: []string{"/dev/null:/dev/null"},
+			Binds: binds,
 		},
 		nil, nil, "",
 	)
@@ -331,23 +726,22 @@ func removeContainer(t *testing.T, cli *dockerclient.Client, containerID string)
 	_ = cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 }
 
-// scanOutput reads lines from r and closes each channel in signals when the
-// corresponding substring is found in a log line. A nil channel value means
-// "log but don't signal". Safe to call from a goroutine.
+// scanOutput reads lines from r and sends a struct{} on each channel in signals
+// whenever the corresponding substring is found. A nil channel means "log but
+// don't signal". Signals fire for every matching line; channel buffering and
+// the non-blocking send determine how many are delivered. Safe to call from a
+// goroutine.
 func scanOutput(t *testing.T, r io.Reader, signals map[string]chan struct{}) {
 	t.Helper()
 
 	scanner := bufio.NewScanner(r)
-	closed := make(map[string]bool)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		t.Log("[daemon]", line)
 
 		for substr, ch := range signals {
-			if !closed[substr] && strings.Contains(line, substr) {
-				closed[substr] = true
-
+			if strings.Contains(line, substr) {
 				if ch != nil {
 					select {
 					case ch <- struct{}{}:

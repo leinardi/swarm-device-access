@@ -1,71 +1,66 @@
 # swarm-device-access
 
-A small Linux daemon that listens to Docker container-start events and injects
-cgroup v2 BPF device-allow rules for any container that bind-mounts a `/dev/...`
-path. It enables GPU, USB, and other device passthrough for Docker Swarm
-services, which reject `devices:` and `device_cgroup_rules:` in their compose
-schema.
+`swarm-device-access` is a small Linux daemon for Docker Swarm nodes. It gives
+Swarm services the device access they usually expect from bind-mounting
+`/dev/...` paths, such as GPUs, USB buses, serial devices, or other host
+devices.
 
-`swarm-device-access` is a fork of the upstream
+Docker Swarm rejects `devices:` and `device_cgroup_rules:` in service compose
+files. A task can still bind-mount `/dev/nvidia0` or `/dev/bus/usb`, but the
+kernel's cgroup device policy may block the container from opening the device.
+The result is confusing: the file is visible inside the container, but access
+fails with `EACCES`.
+
+This daemon watches Docker for container starts and unpauses. When a matching
+container has a bind mount under `/dev`, it adds the needed cgroup device rule
+for that device's major/minor pair. On cgroup v2 hosts that means attaching a
+`BPF_CGROUP_DEVICE` program. On cgroup v1 hosts it writes to `devices.allow`.
+
+This project is a fork of
 [`allfro/device-mapping-manager`](https://github.com/allfro/device-mapping-manager).
-
-## 💡 What problem this solves
-
-Docker Swarm services do not honor the `devices:` or `device_cgroup_rules:`
-compose keys. The kernel still enforces cgroup device controls on every
-container, so a Swarm task that bind-mounts a `/dev/...` path can see the
-device file but cannot read or write to it (EACCES on open). The only
-supported escape hatch is to write directly to the cgroup's BPF device filter.
-
-`swarm-device-access` watches the Docker daemon for container starts and,
-for each container that bind-mounts something under `/dev`, attaches an extra
-BPF program to the container's cgroup that allows read/write/mknod on the
-mounted device's major/minor pair. The container then has the access it
-expected from the bind mount.
-
-## 📦 What this daemon does
-
-- Subscribes to Docker's `start` and `unpause` event stream (with
-  reconnect-with-backoff).
-- At startup, enumerates already-running containers so a daemon restart does
-  not leave them with missing device rules.
-- For each new container, inspects its mounts and applies a BPF
-  `BPF_CGROUP_DEVICE` program for every `/dev/...` bind mount.
-- Walks directory mounts (e.g. `/dev/bus/usb`) and applies a rule per device
-  file.
-- Supports both cgroup v1 (`devices.allow` write) and cgroup v2 (BPF program
-  attach). Most modern hosts use v2.
-- Optionally watches systemd's DBus `Reloading` signal and re-applies device
-  rules after `systemctl daemon-reload` (which clears cgroup BPF programs).
-  Enabled when the host's DBus socket is bind-mounted into the daemon;
-  silently skipped otherwise.
-
-The cgroup/BPF code is the original NVIDIA implementation from
+The cgroup/BPF implementation in `internal/cgroup/` comes from
 [NVIDIA's container toolkit](https://github.com/NVIDIA/k8s-device-plugin)
-(Apache 2.0), preserved in `internal/cgroup/`.
+and remains Apache 2.0 licensed.
 
-## 🚀 Quick start
+## 💡 What It Does
 
-The daemon must run on every Swarm node that hosts services needing device
-access. It requires `privileged: true`, `cgroupns: host`, `pid: host`,
-`userns: host`, and bind mounts of the host `/sys` and `/dev`.
+At runtime the daemon:
 
-Swarm's compose schema rejects `privileged`, `cgroup`, `pid`, and
-`userns_mode` on service definitions. The workaround is a wrapper service
-that runs a `docker` CLI image and shells out to `docker run` against the
-host's Docker socket — that `docker run` invocation accepts every flag
-Swarm forbids.
+- Processes already-running containers at startup, so daemon restarts do not
+  leave existing tasks without device access.
+- Subscribes to Docker `start` and `unpause` events, with reconnect and backoff
+  if the Docker event stream drops.
+- Inspects each eligible container for bind mounts whose source is under
+  `/dev`.
+- Walks directory mounts such as `/dev/bus/usb` and applies one rule per device
+  file.
+- Applies cgroup v1 `devices.allow` rules or cgroup v2 BPF device rules,
+  depending on the host.
+- Optionally watches systemd over DBus and reapplies rules after
+  `systemctl daemon-reload`, which clears cgroup BPF programs.
 
-### Docker Compose (Swarm)
+## 🚀 Quick Start
+
+Run one daemon instance on every Swarm node that may run services needing host
+device access.
+
+The daemon needs host-level privileges: `privileged`, host cgroup namespace,
+host PID namespace, host user namespace, the host Docker socket, `/sys` mounted
+at `/host/sys`, and `/dev` mounted into the daemon container.
+
+Swarm does not allow those runtime options directly on a service. The common
+workaround is to deploy a small wrapper service that runs the Docker CLI and
+uses the host Docker socket to launch the real privileged daemon container.
+
+### Docker Compose for Swarm
 
 ```yaml
 services:
   swarm-device-access:
     image: docker:29
     entrypoint: docker
-    # Run the actual daemon outside Swarm's purview via the host Docker socket.
-    # Swarm rejects privileged/cgroup/pid/userns on services, so this wrapper
-    # launches the privileged container with `docker run` instead.
+    # Swarm rejects privileged/cgroup/pid/userns on services. This wrapper
+    # launches the actual daemon with `docker run`, where those flags are valid.
     command:
       - run
       - -i
@@ -80,7 +75,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - -v
       - /dev:/dev
-      # Optional: enables re-apply of device rules after systemctl daemon-reload.
+      # Optional: reapply device rules after systemctl daemon-reload.
       # - -v
       # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
       - ghcr.io/leinardi/swarm-device-access:latest
@@ -97,6 +92,7 @@ services:
     command: ["nvidia-smi"]
     labels:
       swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/nvidia*"
     volumes:
       - /dev/nvidia0:/dev/nvidia0
       - /dev/nvidiactl:/dev/nvidiactl
@@ -106,79 +102,120 @@ services:
       replicas: 1
 ```
 
-A copy of the daemon's compose file is in
+The daemon compose file is also available at
 [`deployments/docker/docker-compose.yaml`](deployments/docker/docker-compose.yaml).
 
 ## ⚙️ Configuration
 
-The binary is configured via CLI flags:
+You can configure the daemon with CLI flags, a YAML config file, or both. When a
+value is set in both places, the CLI flag wins.
 
-| Flag             | Default                | Description                                                                     |
-|------------------|------------------------|---------------------------------------------------------------------------------|
-| `-log-level`     | `info`                 | `debug`, `info`, `warn`, `error`                                                |
-| `-log-format`    | `text`                 | `text`, `json`, `plain`                                                         |
-| `-log-time`      | `false`                | Include timestamps in log lines                                                 |
-| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket                                         |
-| `-dry-run`       | `false`                | Log device rules that would be applied without writing to the cgroup            |
-| `-policy-mode`   | `opt-in`               | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`.          |
-| `-device-allow`  | `""`                   | Glob for `/dev/...` paths to allow (repeatable). Empty = allow all.             |
-| `-device-deny`   | `""`                   | Glob for `/dev/...` paths to deny (repeatable). Deny takes priority over allow. |
-| `-metrics-addr`  | `""`                   | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty = disabled. |
-| `-debug-addr`    | `""`                   | `host:port` for pprof `/debug/pprof/*`. Empty = disabled.                       |
-| `-config`        | `""`                   | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |
-| `-help`          |                        | Print this flag list and exit                                                   |
+| Flag             | Default                | Description                                                                      |
+|------------------|------------------------|----------------------------------------------------------------------------------|
+| `-log-level`     | `info`                 | `debug`, `info`, `warn`, `error`                                                 |
+| `-log-format`    | `text`                 | `text`, `json`, `plain`                                                          |
+| `-log-time`      | `false`                | Include timestamps in log lines                                                  |
+| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket                                          |
+| `-dry-run`       | `false`                | Log device rules that would be applied without writing to the cgroup             |
+| `-policy-mode`   | `opt-in`               | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`.           |
+| `-device-allow`  | `""`                   | Glob for `/dev/...` paths to allow, repeatable. Empty means allow all.           |
+| `-device-deny`   | `""`                   | Glob for `/dev/...` paths to deny, repeatable. Deny takes priority over allow.   |
+| `-metrics-addr`  | `""`                   | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. |
+| `-debug-addr`    | `""`                   | `host:port` for pprof `/debug/pprof/*`. Empty disables it.                       |
+| `-config`        | `""`                   | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP.  |
+| `-help`          |                        | Print this flag list and exit                                                    |
 
-### Config file
+### Config File
 
-All CLI flags can be set via a YAML config file (`-config /path/to/config.yaml`). CLI flags always take priority. An example config is at [`deployments/docker/config.yaml`](deployments/docker/config.yaml).
+All CLI flags can be represented in YAML and loaded with `-config`. See
+[`deployments/docker/config.yaml`](deployments/docker/config.yaml) for an
+example.
 
-Send `SIGHUP` to reload the config file without restarting:
+Send `SIGHUP` to reload the config file without restarting the daemon:
 
 ```bash
 kill -HUP $(docker inspect --format '{{.State.Pid}}' swarm-device-access)
 ```
 
-Settings that require a restart: `docker-socket`, `metrics-addr`, `debug-addr`.
+Some settings are only read at startup and still require a restart:
+`docker-socket`, `metrics-addr`, and `debug-addr`.
 
-### Container labels
+### Container Labels
 
-Per-container policy is controlled via Docker labels on the consumer service:
+Consumer services opt in and narrow their allowed device set with labels:
 
-| Label                                  | Values                      | Description                                                    |
-|----------------------------------------|-----------------------------|----------------------------------------------------------------|
-| `swarm-device-access.enable`           | `true` / `false`            | Opt in (`true`) or explicitly opt out (`false`) of processing. |
-| `swarm-device-access.device-allow`     | Comma-separated globs       | Allow only matching `/dev/...` paths. Empty = inherit global.  |
-| `swarm-device-access.device-deny`      | Comma-separated globs       | Deny matching `/dev/...` paths. Overrides allow. Empty = none. |
+| Label                              | Values                | Description                                                    |
+|------------------------------------|-----------------------|----------------------------------------------------------------|
+| `swarm-device-access.enable`       | `true` / `false`      | Opt in (`true`) or explicitly opt out (`false`) of processing. |
+| `swarm-device-access.device-allow` | Comma-separated globs | Allow only matching `/dev/...` paths. Empty means inherit.     |
+| `swarm-device-access.device-deny`  | Comma-separated globs | Deny matching `/dev/...` paths. Deny overrides allow.          |
 
-The global `-device-allow` / `-device-deny` flags set the maximum allowed access.
-Per-container labels can only narrow it further. Deny always wins over allow.
+Global `-device-allow` and `-device-deny` define the broadest access the daemon
+may grant. Per-container labels can only narrow that access. Deny rules always
+win.
 
 ## 🔒 Security
 
-`swarm-device-access` runs with `privileged: true`, mounts the host `/dev` tree,
-and has read/write access to the Docker socket. Together these grant host-root–
-equivalent capabilities: a compromised or misconfigured daemon can affect every
-container on the node.
+This daemon is powerful by design. It runs privileged, mounts the host `/dev`
+tree, and can talk to the Docker socket. Treat it as host-root equivalent: if it
+is compromised or misconfigured, every container on that node may be affected.
 
-The default `-policy-mode=opt-in` is intentional: the daemon processes only
-containers that carry `swarm-device-access.enable: "true"`. This minimises
-blast radius — an unrelated container that happens to bind-mount a `/dev/...`
-path is not silently granted device access. Operators who trust every
-container on the Swarm node can switch to `-policy-mode=all`.
+The default policy mode is `opt-in` for that reason. Only containers with
+`swarm-device-access.enable: "true"` are processed, so unrelated containers that
+happen to bind-mount something under `/dev` are not silently granted access.
+
+If every workload on the node is trusted, `-policy-mode=all` can be used to
+process all containers unless they explicitly set
+`swarm-device-access.enable: "false"`.
 
 See [SECURITY.md](SECURITY.md) for the threat model and disclosure policy.
+
+## 🧪 Verifying Device Passthrough
+
+On most x86 Linux hosts, `/dev/ttyS0` (a serial port) is present but **not** in
+Docker's default cgroup allowlist, making it a reliable test target.
+
+First, confirm access is denied without the label (opt-in mode, the default):
+
+```bash
+docker run --rm -v /dev/ttyS0:/dev/ttyS0 alpine \
+  sh -c 'echo x >/dev/ttyS0' 2>&1
+# Expected: sh: write error: Operation not permitted
+```
+
+Now run with the opt-in label. The daemon detects the start event and applies the
+cgroup device rule asynchronously. The `sleep 1` gives it time to do so before
+the write is attempted — in production, long-lived services start up slowly
+enough that this race does not arise:
+
+```bash
+docker run --rm \
+  --label swarm-device-access.enable=true \
+  --label 'swarm-device-access.device-allow=/dev/ttyS0' \
+  -v /dev/ttyS0:/dev/ttyS0 \
+  alpine sh -c 'sleep 1 && echo x >/dev/ttyS0 && echo "access granted"'
+# Expected: access granted
+```
+
+With debug logs enabled, successful processing looks like this:
+
+```text
+level=DEBUG device mount detected id=abc123 source=/dev/ttyS0 ...
+level=DEBUG adding device rule pid=1234 type=c major=4 minor=64
+```
 
 ## 🛠️ Development
 
 ### Prerequisites
 
-- Linux host (the daemon is Linux-only; see `//go:build linux` constraints)
+- Linux host. The daemon is Linux-only and uses `//go:build linux` constraints.
 - Go 1.26+
 - Docker
 - `pre-commit`, `golangci-lint`, `hadolint`, `markdownlint-cli2`, `yamllint`,
-  `shellcheck`, `actionlint`, `checkmake` (installed by the pre-commit hooks)
+  `shellcheck`, `actionlint`, and `checkmake`. The pre-commit hooks install
+  these tools when needed.
 
-### Common tasks
+### Common Tasks
 
 ```bash
 make help              # list all available targets
@@ -191,12 +228,12 @@ make docker-build      # build the container image
 See [`docs/testing.md`](docs/testing.md) for the CI-safe integration suite and
 the opt-in native privileged checklist.
 
-The Makefile pulls its shared logic from
-[`leinardi/make-common`](https://github.com/leinardi/make-common) at the
-version pinned in `.mk/.mk-common-version`. On first `make` run, the bootstrap
-script downloads the snippets into `.mk/`.
+The Makefile pulls shared logic from
+[`leinardi/make-common`](https://github.com/leinardi/make-common), pinned by
+`.mk/.mk-common-version`. On the first `make` run, the bootstrap script downloads
+the snippets into `.mk/`.
 
-### Multi-arch image build
+### Multi-Arch Image Build
 
 ```bash
 docker buildx build \
@@ -208,25 +245,8 @@ docker buildx build \
   -t ghcr.io/leinardi/swarm-device-access:dev .
 ```
 
-## 🧪 Verifying device passthrough
-
-On a host running the daemon, start a container that bind-mounts a device:
-
-```bash
-docker run --rm -v /dev/null:/dev/null alpine sh -c 'echo hello > /dev/null'
-```
-
-Without the daemon, this works because `/dev/null` is universally allowed.
-For a real GPU/USB device, the same pattern will fail unless the daemon is
-running. Watch the daemon's logs:
-
-```text
-level=DEBUG device mount detected id=abc123 source=/dev/nvidia0 ...
-level=DEBUG adding device rule pid=1234 type=c major=195 minor=0
-```
-
 ## 📜 License
 
 [Apache License 2.0](LICENSE). The code in `internal/cgroup/` originates from
-[NVIDIA's container toolkit](https://github.com/NVIDIA/k8s-device-plugin)
-under the same license.
+[NVIDIA's container toolkit](https://github.com/NVIDIA/k8s-device-plugin) under
+the same license.
