@@ -40,6 +40,9 @@ services:
 
   usb-worker:
     image: ubuntu:24.04
+    labels:
+      swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/bus/usb/*"
     volumes:
       # Bind-mount the entire USB bus; the daemon will apply rules to each device.
       - /dev/bus/usb:/dev/bus/usb
