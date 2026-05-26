@@ -117,6 +117,11 @@ The daemon uses a two-level policy:
 
 **Per-container policy** (Docker labels):
 
+Declare these labels under `deploy.labels:` in your Swarm stack file — that is
+the service spec, the natural home alongside Traefik / Homepage / other
+label-driven tooling. The daemon also reads top-level `labels:` when present;
+per-container (task-level) values win on conflict.
+
 | Label                              | Description                                                    |
 |------------------------------------|----------------------------------------------------------------|
 | `swarm-device-access.enable`       | `true` to opt in, `false` to explicitly opt out.               |

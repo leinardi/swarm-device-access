@@ -19,24 +19,33 @@
 package processor
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/swarm"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
+	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
-// fakeInspector is a test double for ContainerInspector.
+// fakeInspector is a test double for DockerInspector.
 type fakeInspector struct {
-	result container.InspectResponse
-	err    error
+	result        container.InspectResponse
+	err           error
+	serviceResult swarm.Service
+	serviceErr    error
+	serviceCalls  int
 }
 
 func (f *fakeInspector) ContainerInspect(
@@ -46,11 +55,21 @@ func (f *fakeInspector) ContainerInspect(
 	return f.result, f.err
 }
 
+func (f *fakeInspector) ServiceInspectWithRaw(
+	_ context.Context,
+	_ string,
+	_ swarm.ServiceInspectOptions,
+) (swarm.Service, []byte, error) {
+	f.serviceCalls++
+
+	return f.serviceResult, nil, f.serviceErr
+}
+
 // buildProcRoot creates a minimal /proc/<pid>/{cgroup,mountinfo} structure
 // under a temp dir so ProcessContainer can resolve the cgroup path without a
 // real /proc filesystem.
 //
-//nolint:unparam // cgroupContent varies across test cases; linter sees current call sites only
+
 func buildProcRoot(
 	t *testing.T,
 	pid int,
@@ -443,5 +462,170 @@ func TestCollectMountRules_BadPath(t *testing.T) {
 
 	if len(errs) == 0 {
 		t.Error("expected errors for bad path, got none")
+	}
+}
+
+// captureLogger sets logger.L() to write to a buffer for the duration of the
+// test and restores the previous logger when the test ends.
+func captureLogger(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var buf bytes.Buffer
+	logger.Set(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
+	t.Cleanup(func() { logger.Set(nil) })
+
+	return &buf
+}
+
+//nolint:tparallel // subtests share the global logger via captureLogger; parallel would cause log interleaving
+func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
+	t.Parallel()
+
+	const (
+		cid       = "abc123"
+		serviceID = "svc456"
+		pid       = 51
+	)
+
+	makeSwarmContainer := func(extraLabels map[string]string) container.InspectResponse {
+		labels := map[string]string{swarmServiceIDLabel: serviceID}
+		maps.Copy(labels, extraLabels)
+
+		return container.InspectResponse{
+			ContainerJSONBase: &container.ContainerJSONBase{
+				State: &container.State{Pid: pid},
+			},
+			Config: &container.Config{Labels: labels},
+		}
+	}
+
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+
+	cases := []struct {
+		name            string
+		containerInfo   container.InspectResponse
+		svcResult       swarm.Service
+		svcErr          error
+		store           *config.Store
+		wantServiceCall bool
+		wantLogMsg      string
+		wantSkip        bool
+	}{
+		{
+			name:          "deploy.labels-only grants opt-in",
+			containerInfo: makeSwarmContainer(nil),
+			svcResult: swarm.Service{
+				Spec: swarm.ServiceSpec{
+					Annotations: swarm.Annotations{
+						Name:   "my-service",
+						Labels: map[string]string{policy.LabelEnable: "true"},
+					},
+				},
+			},
+			store:           newStore(policy.ModeOptIn, true),
+			wantServiceCall: true,
+			wantLogMsg:      "opt-in granted via service-level label",
+		},
+		{
+			name: "container labels override service",
+			containerInfo: makeSwarmContainer(map[string]string{
+				policy.LabelEnable: "false",
+			}),
+			svcResult: swarm.Service{
+				Spec: swarm.ServiceSpec{
+					Annotations: swarm.Annotations{
+						Name:   "my-service",
+						Labels: map[string]string{policy.LabelEnable: "true"},
+					},
+				},
+			},
+			store:           newStore(policy.ModeOptIn, true),
+			wantServiceCall: true,
+			wantSkip:        true,
+		},
+		{
+			name: "non-Swarm passthrough",
+			containerInfo: container.InspectResponse{
+				ContainerJSONBase: &container.ContainerJSONBase{
+					State: &container.State{Pid: pid},
+				},
+				Config: &container.Config{Labels: map[string]string{
+					policy.LabelEnable: "true",
+				}},
+			},
+			store:           newStore(policy.ModeOptIn, true),
+			wantServiceCall: false,
+		},
+		{
+			name: "service inspect error is non-fatal",
+			containerInfo: makeSwarmContainer(map[string]string{
+				policy.LabelEnable: "true",
+			}),
+			svcErr:          errDaemonUnavail,
+			store:           newStore(policy.ModeOptIn, true),
+			wantServiceCall: true,
+			wantLogMsg:      "could not inspect parent service",
+		},
+		{
+			name: "typo WARN on service label",
+			containerInfo: makeSwarmContainer(map[string]string{
+				policy.LabelEnable: "true",
+			}),
+			svcResult: swarm.Service{
+				Spec: swarm.ServiceSpec{
+					Annotations: swarm.Annotations{
+						Name:   "my-service",
+						Labels: map[string]string{policy.LabelPrefix + "enabled": "true"},
+					},
+				},
+			},
+			store:           newStore(policy.ModeOptIn, true),
+			wantServiceCall: true,
+			wantLogMsg:      "unrecognized swarm-device-access label on parent service",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := captureLogger(t)
+
+			procRoot := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+			inspector := &fakeInspector{
+				result:        tc.containerInfo,
+				serviceResult: tc.svcResult,
+				serviceErr:    tc.svcErr,
+			}
+
+			proc := &Processor{
+				Inspector: inspector,
+				Cfg:       tc.store,
+				HostRoot:  t.TempDir(),
+				ProcRoot:  procRoot,
+			}
+
+			_ = proc.ProcessContainer(context.Background(), cid)
+
+			logOutput := buf.String()
+
+			if tc.wantServiceCall && inspector.serviceCalls == 0 {
+				t.Error("expected ServiceInspectWithRaw to be called, was not")
+			}
+
+			if !tc.wantServiceCall && inspector.serviceCalls > 0 {
+				t.Errorf("expected no ServiceInspectWithRaw call, got %d", inspector.serviceCalls)
+			}
+
+			if tc.wantLogMsg != "" && !strings.Contains(logOutput, tc.wantLogMsg) {
+				t.Errorf("expected log to contain %q, got:\n%s", tc.wantLogMsg, logOutput)
+			}
+
+			if tc.wantSkip && !strings.Contains(logOutput, "skipped by policy") {
+				t.Errorf("expected skip-by-policy log, got:\n%s", logOutput)
+			}
+		})
 	}
 }

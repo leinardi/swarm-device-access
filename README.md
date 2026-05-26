@@ -90,14 +90,14 @@ services:
   cuda-worker:
     image: nvidia/cuda:12.4.0-base-ubuntu22.04
     command: ["nvidia-smi"]
-    labels:
-      swarm-device-access.enable: "true"
-      swarm-device-access.device-allow: "/dev/nvidia*"
     volumes:
       - /dev/nvidia0:/dev/nvidia0
       - /dev/nvidiactl:/dev/nvidiactl
       - /dev/nvidia-uvm:/dev/nvidia-uvm
     deploy:
+      labels:
+        swarm-device-access.enable: "true"
+        swarm-device-access.device-allow: "/dev/nvidia*"
       mode: replicated
       replicas: 1
 ```
@@ -149,6 +149,12 @@ Consumer services opt in and narrow their allowed device set with labels:
 | `swarm-device-access.enable`       | `true` / `false`      | Opt in (`true`) or explicitly opt out (`false`) of processing. |
 | `swarm-device-access.device-allow` | Comma-separated globs | Allow only matching `/dev/...` paths. Empty means inherit.     |
 | `swarm-device-access.device-deny`  | Comma-separated globs | Deny matching `/dev/...` paths. Deny overrides allow.          |
+
+Declare these labels under `deploy.labels:` (the Swarm service spec — the
+natural home for service-level metadata, alongside Traefik / Homepage / other
+label-driven tooling). The daemon also reads top-level `labels:` if you need to
+override a service-wide value on a single task; per-container values win on
+conflict.
 
 Global `-device-allow` and `-device-deny` define the broadest access the daemon
 may grant. Per-container labels can only narrow that access. Deny rules always

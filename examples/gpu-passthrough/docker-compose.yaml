@@ -14,16 +14,16 @@
 services:
   cuda-worker:
     image: nvidia/cuda:12.4.0-base-ubuntu22.04
-    # Required when daemon runs in opt-in mode (the default).
-    labels:
-      swarm-device-access.enable: "true"
-      swarm-device-access.device-allow: "/dev/nvidia*"
     volumes:
       - /dev/nvidia0:/dev/nvidia0
       - /dev/nvidiactl:/dev/nvidiactl
       - /dev/nvidia-uvm:/dev/nvidia-uvm
     command: [ "nvidia-smi" ]
     deploy:
+      labels:
+        # Required when daemon runs in opt-in mode (the default).
+        swarm-device-access.enable: "true"
+        swarm-device-access.device-allow: "/dev/nvidia*"
       mode: replicated
       replicas: 1
   swarm-device-access:

@@ -328,3 +328,131 @@ func sliceEqual(a, b []string) bool {
 
 	return true
 }
+
+func TestMergeLabels(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		service   map[string]string
+		container map[string]string
+		want      map[string]string
+	}{
+		{
+			name: "both nil",
+			want: map[string]string{},
+		},
+		{
+			name:      "nil service",
+			container: map[string]string{"a": "1"},
+			want:      map[string]string{"a": "1"},
+		},
+		{
+			name:    "nil container",
+			service: map[string]string{"a": "1"},
+			want:    map[string]string{"a": "1"},
+		},
+		{
+			name:      "disjoint union",
+			service:   map[string]string{"a": "1"},
+			container: map[string]string{"b": "2"},
+			want:      map[string]string{"a": "1", "b": "2"},
+		},
+		{
+			name:      "container wins on conflict",
+			service:   map[string]string{"a": "service"},
+			container: map[string]string{"a": "container"},
+			want:      map[string]string{"a": "container"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := policy.MergeLabels(tc.service, tc.container)
+
+			if len(got) != len(tc.want) {
+				t.Fatalf("MergeLabels() len=%d, want %d; got=%v", len(got), len(tc.want), got)
+			}
+
+			for k, wantV := range tc.want {
+				if got[k] != wantV {
+					t.Errorf("key %q: got %q, want %q", k, got[k], wantV)
+				}
+			}
+		})
+	}
+}
+
+func TestUnknownLabels(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		labels map[string]string
+		want   []string
+	}{
+		{
+			name:   "nil map",
+			labels: nil,
+			want:   nil,
+		},
+		{
+			name:   "empty map",
+			labels: map[string]string{},
+			want:   nil,
+		},
+		{
+			name:   "no swarm-device-access keys",
+			labels: map[string]string{"traefik.enable": "true"},
+			want:   nil,
+		},
+		{
+			name: "only known keys",
+			labels: map[string]string{
+				policy.LabelEnable:      "true",
+				policy.LabelDeviceAllow: "/dev/snd/*",
+				policy.LabelDeviceDeny:  "/dev/sda",
+			},
+			want: nil,
+		},
+		{
+			name: "mixed known and unknown",
+			labels: map[string]string{
+				policy.LabelEnable:             "true",
+				policy.LabelPrefix + "enabled": "true",
+				policy.LabelPrefix + "zzz":     "x",
+			},
+			want: []string{
+				policy.LabelPrefix + "enabled",
+				policy.LabelPrefix + "zzz",
+			},
+		},
+		{
+			name: "unknown sorted deterministically",
+			labels: map[string]string{
+				policy.LabelPrefix + "zzz": "1",
+				policy.LabelPrefix + "aaa": "2",
+				policy.LabelPrefix + "mmm": "3",
+			},
+			want: []string{
+				policy.LabelPrefix + "aaa",
+				policy.LabelPrefix + "mmm",
+				policy.LabelPrefix + "zzz",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := policy.UnknownLabels(tc.labels)
+
+			if !sliceEqual(got, tc.want) {
+				t.Errorf("UnknownLabels() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
