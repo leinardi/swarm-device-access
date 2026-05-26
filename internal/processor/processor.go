@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/swarm"
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
 	"github.com/leinardi/swarm-device-access/internal/config"
@@ -33,11 +34,18 @@ import (
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
-// ContainerInspector is the subset of *client.Client used by Processor.
+const swarmServiceIDLabel = "com.docker.swarm.service.id"
+
+// DockerInspector is the subset of *client.Client used by Processor.
 // It exists solely to allow unit tests to inject a fake without standing up a
 // real Docker daemon.
-type ContainerInspector interface {
+type DockerInspector interface {
 	ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error)
+	ServiceInspectWithRaw(
+		ctx context.Context,
+		serviceID string,
+		opts swarm.ServiceInspectOptions,
+	) (swarm.Service, []byte, error)
 }
 
 // deviceRuleKey is the deduplication key for cgroup device rules collected
@@ -54,7 +62,7 @@ type deviceRuleKey struct {
 // host root (typically "/host"). ProcRoot is used for /proc lookups ("/" in
 // production, temp dir in tests).
 type Processor struct {
-	Inspector ContainerInspector
+	Inspector DockerInspector
 	Cfg       *config.Store
 	Metrics   *observability.Recorder
 	HostRoot  string
@@ -80,14 +88,48 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		return nil
 	}
 
-	var labels map[string]string
+	var containerLabels map[string]string
 	if info.Config != nil {
-		labels = info.Config.Labels
+		containerLabels = info.Config.Labels
 	}
+
+	var (
+		serviceLabels map[string]string
+		svc           swarm.Service
+	)
+
+	if serviceID := containerLabels[swarmServiceIDLabel]; serviceID != "" {
+		var svcErr error
+
+		svc, _, svcErr = p.Inspector.ServiceInspectWithRaw(
+			ctx,
+			serviceID,
+			swarm.ServiceInspectOptions{},
+		)
+		if svcErr != nil {
+			log.Warn("could not inspect parent service; using container labels only",
+				"id", containerID,
+				"service_id", serviceID,
+				"err", svcErr,
+			)
+		} else {
+			serviceLabels = svc.Spec.Labels
+
+			for _, unknownKey := range policy.UnknownLabels(serviceLabels) {
+				log.Warn("unrecognized swarm-device-access label on parent service",
+					"id", containerID,
+					"service_id", serviceID,
+					"label", unknownKey,
+				)
+			}
+		}
+	}
+
+	effectiveLabels := policy.MergeLabels(serviceLabels, containerLabels)
 
 	cfg := p.Cfg.Load()
 
-	cpol, parseErr := policy.ParseContainer(labels)
+	cpol, parseErr := policy.ParseContainer(effectiveLabels)
 	if parseErr != nil {
 		log.Warn("container skipped: invalid policy labels",
 			"id", containerID, "err", parseErr)
@@ -104,6 +146,17 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		p.Metrics.RecordContainerSkipped("policy")
 
 		return nil
+	}
+
+	if svc.Spec.Name != "" {
+		cpolContainer, _ := policy.ParseContainer(containerLabels)
+		if !cfg.Policy.Enabled(cpolContainer) {
+			log.Info("opt-in granted via service-level label",
+				"id", containerID,
+				"service_id", containerLabels[swarmServiceIDLabel],
+				"service_name", svc.Spec.Name,
+			)
+		}
 	}
 
 	p.Metrics.RecordContainerScanned()

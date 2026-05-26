@@ -20,7 +20,9 @@ package policy
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -230,4 +232,44 @@ func matchAny(patterns []string, path string) bool {
 	}
 
 	return false
+}
+
+// knownLabels is the set of recognized swarm-device-access.* label keys.
+var knownLabels = map[string]struct{}{
+	LabelEnable:      {},
+	LabelDeviceAllow: {},
+	LabelDeviceDeny:  {},
+}
+
+// MergeLabels returns a merged label map: service labels as base, container
+// labels win on conflict. Nil inputs are treated as empty maps.
+func MergeLabels(service, container map[string]string) map[string]string {
+	merged := make(map[string]string, len(service)+len(container))
+
+	maps.Copy(merged, service)
+	maps.Copy(merged, container)
+
+	return merged
+}
+
+// UnknownLabels returns a sorted slice of keys in labels that start with
+// LabelPrefix but are not in the known label set. Returns nil when none.
+func UnknownLabels(labels map[string]string) []string {
+	var unknown []string
+
+	for k := range labels {
+		if strings.HasPrefix(k, LabelPrefix) {
+			if _, ok := knownLabels[k]; !ok {
+				unknown = append(unknown, k)
+			}
+		}
+	}
+
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	sort.Strings(unknown)
+
+	return unknown
 }
