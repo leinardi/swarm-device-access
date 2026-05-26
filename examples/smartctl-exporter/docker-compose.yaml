@@ -1,0 +1,70 @@
+# smartctl-exporter passthrough example for Docker Swarm
+#
+# Runs smartctl-exporter as a global service so it can read disk health
+# metrics from /dev/sg* and /dev/nvme* on every storage node.
+# The swarm-device-access daemon injects cgroup BPF device-allow rules at
+# container start, replacing the privileged: true that Compose would use.
+#
+# Prerequisites on each node:
+#   - /dev/sd*, /dev/nvme*, or /dev/sg* devices present
+#   - /run/udev populated by the host udevd
+#   - swarm-device-access daemon running (global service below)
+#
+# Deploy:
+#   docker stack deploy -c docker-compose.yaml smartctl-example
+
+services:
+  smartctl-exporter:
+    image: prometheuscommunity/smartctl-exporter:v0.14.0
+    volumes:
+      # Bind-mount the full /dev tree; daemon will allow each disk device.
+      - /dev:/dev:ro
+      - /run/udev:/run/udev:ro
+    command:
+      - --smartctl.interval=5m
+      - --smartctl.rescan=30m
+      - --web.listen-address=:9633
+      - --smartctl.device-exclude=^/dev/(loop|md|zram)
+    user: "0:0"
+    cap_add:
+      - SYS_RAWIO
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges=true
+    # Use top-level labels: — deploy.labels: are only visible on manager nodes.
+    labels:
+      swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/sd*,/dev/nvme*,/dev/sg*,/dev/disk/*"
+    deploy:
+      mode: global
+
+  swarm-device-access:
+    image: docker:29
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - run
+      - -i
+      - --rm
+      - --name=swarm-device-access
+      - --privileged
+      - --cgroupns=host
+      - --pid=host
+      - --userns=host
+      - -v
+      - /sys:/host/sys
+      - -v
+      - /var/run/docker.sock:/var/run/docker.sock
+      - -v
+      - /dev:/dev
+      # Enable reload-after-daemon-reload (optional):
+      # - -v
+      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      # Restrict to disk devices only (optional):
+      # - -device-allow=/dev/sd*,/dev/nvme*,/dev/sg*,/dev/disk/*
+      - ghcr.io/leinardi/swarm-device-access:latest
+    entrypoint: docker
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any

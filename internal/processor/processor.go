@@ -62,11 +62,12 @@ type deviceRuleKey struct {
 // host root (typically "/host"). ProcRoot is used for /proc lookups ("/" in
 // production, temp dir in tests).
 type Processor struct {
-	Inspector DockerInspector
-	Cfg       *config.Store
-	Metrics   *observability.Recorder
-	HostRoot  string
-	ProcRoot  string
+	Inspector      DockerInspector
+	Cfg            *config.Store
+	Metrics        *observability.Recorder
+	HostRoot       string
+	ProcRoot       string
+	IsSwarmManager bool
 }
 
 // ProcessContainer inspects a container and applies cgroup BPF device-allow
@@ -93,37 +94,7 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		containerLabels = info.Config.Labels
 	}
 
-	var (
-		serviceLabels map[string]string
-		svc           swarm.Service
-	)
-
-	if serviceID := containerLabels[swarmServiceIDLabel]; serviceID != "" {
-		var svcErr error
-
-		svc, _, svcErr = p.Inspector.ServiceInspectWithRaw(
-			ctx,
-			serviceID,
-			swarm.ServiceInspectOptions{},
-		)
-		if svcErr != nil {
-			log.Warn("could not inspect parent service; using container labels only",
-				"id", containerID,
-				"service_id", serviceID,
-				"err", svcErr,
-			)
-		} else {
-			serviceLabels = svc.Spec.Labels
-
-			for _, unknownKey := range policy.UnknownLabels(serviceLabels) {
-				log.Warn("unrecognized swarm-device-access label on parent service",
-					"id", containerID,
-					"service_id", serviceID,
-					"label", unknownKey,
-				)
-			}
-		}
-	}
+	svc, serviceLabels := p.resolveServiceLabels(ctx, containerID, containerLabels)
 
 	effectiveLabels := policy.MergeLabels(serviceLabels, containerLabels)
 
@@ -234,6 +205,69 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 	}
 
 	return errors.Join(allErrs...)
+}
+
+// resolveServiceLabels fetches parent service labels on manager nodes. On
+// worker nodes (IsSwarmManager=false) it returns immediately with zero values
+// so ProcessContainer can continue using container-level labels only.
+func (p *Processor) resolveServiceLabels(
+	ctx context.Context,
+	containerID string,
+	containerLabels map[string]string,
+) (svc swarm.Service, serviceLabels map[string]string) {
+	log := logger.L()
+
+	if !p.IsSwarmManager {
+		return svc, nil
+	}
+
+	serviceID := containerLabels[swarmServiceIDLabel]
+	if serviceID == "" {
+		return svc, nil
+	}
+
+	var svcErr error
+
+	svc, _, svcErr = p.Inspector.ServiceInspectWithRaw(
+		ctx,
+		serviceID,
+		swarm.ServiceInspectOptions{},
+	)
+	if svcErr != nil {
+		log.Warn("could not inspect parent service; using container labels only",
+			"id", containerID,
+			"service_id", serviceID,
+			"err", svcErr,
+		)
+
+		return swarm.Service{}, nil
+	}
+
+	serviceLabels = svc.Spec.Labels
+
+	for _, unknownKey := range policy.UnknownLabels(serviceLabels) {
+		log.Warn("unrecognized swarm-device-access label on parent service",
+			"id", containerID,
+			"service_id", serviceID,
+			"label", unknownKey,
+		)
+	}
+
+	for _, knownKey := range policy.KnownLabels(serviceLabels) {
+		log.Warn(
+			"swarm-device-access label set via deploy.labels on parent service; move to top-level labels: so worker nodes can read it",
+			"id",
+			containerID,
+			"service_id",
+			serviceID,
+			"service",
+			svc.Spec.Name,
+			"label",
+			knownKey,
+		)
+	}
+
+	return svc, serviceLabels
 }
 
 // applyRulesToCgroup logs and (unless dryRun) attaches the collected device

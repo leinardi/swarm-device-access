@@ -273,3 +273,23 @@ func UnknownLabels(labels map[string]string) []string {
 
 	return unknown
 }
+
+// KnownLabels returns a sorted list of swarm-device-access.* keys from labels
+// that are recognized by this package (i.e. the inverse of UnknownLabels).
+func KnownLabels(labels map[string]string) []string {
+	var known []string
+
+	for k := range labels {
+		if _, ok := knownLabels[k]; ok {
+			known = append(known, k)
+		}
+	}
+
+	if len(known) == 0 {
+		return nil
+	}
+
+	sort.Strings(known)
+
+	return known
+}
