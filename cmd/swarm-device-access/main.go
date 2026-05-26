@@ -111,6 +111,23 @@ func run() int {
 
 	recorder := observability.NewRecorder()
 
+	isSwarmManager := false
+
+	nodeInfo, infoErr := cli.Info(rootCtx)
+	if infoErr != nil {
+		log.Warn(
+			"could not query docker info; assuming worker node (service-label inspection disabled)",
+			"err",
+			infoErr,
+		)
+	} else {
+		isSwarmManager = nodeInfo.Swarm.ControlAvailable
+		log.Info("swarm role detected",
+			"manager", isSwarmManager,
+			"local_node_state", nodeInfo.Swarm.LocalNodeState,
+		)
+	}
+
 	// Start optional observability servers before the main loop so they are
 	// reachable during startup enumeration.
 	if *metricsAddr != "" {
@@ -122,11 +139,12 @@ func run() int {
 	}
 
 	proc := &processor.Processor{
-		Inspector: cli,
-		Cfg:       store,
-		Metrics:   recorder,
-		HostRoot:  hostRootPath,
-		ProcRoot:  "/",
+		Inspector:      cli,
+		Cfg:            store,
+		Metrics:        recorder,
+		HostRoot:       hostRootPath,
+		ProcRoot:       "/",
+		IsSwarmManager: isSwarmManager,
 	}
 
 	runErr := daemon.Run(rootCtx, daemon.Options{

@@ -52,9 +52,10 @@ services:
       - -t
       - "5"
       - /output/capture.mp4
+    # Use top-level labels: — deploy.labels: are only visible on manager nodes.
+    labels:
+      swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/video*"
     deploy:
-      labels:
-        swarm-device-access.enable: "true"
-        swarm-device-access.device-allow: "/dev/video*"
       mode: replicated
       replicas: 1
