@@ -156,6 +156,10 @@ label-driven tooling). The daemon also reads top-level `labels:` if you need to
 override a service-wide value on a single task; per-container values win on
 conflict.
 
+If you bind-mount a directory (for example `source: /dev/dri`), the
+`device-allow` glob is evaluated **per child node** inside that directory —
+write the glob against the children, e.g. `/dev/dri/*` or `/dev/dri/renderD128`.
+
 Global `-device-allow` and `-device-deny` define the broadest access the daemon
 may grant. Per-container labels can only narrow that access. Deny rules always
 win.

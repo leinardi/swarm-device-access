@@ -20,6 +20,7 @@ package processor
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,13 @@ import (
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
 	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/policy"
+)
+
+const (
+	maxDirDepth    = 8
+	maxLogChildren = 32
+
+	deviceAccessAll = "rwm"
 )
 
 // IsMountSource reports whether path is /dev or a path under /dev/.
@@ -43,19 +51,34 @@ func CollectMountRules(
 	gpol policy.Global,
 	cpol policy.Container,
 ) ([]cgroup.DeviceRule, []error) {
-	if !gpol.DeviceAllowed(cpol, mountPath) {
-		logger.L().Debug("device mount excluded by policy", "path", mountPath)
-
-		return nil, nil
-	}
-
-	fileInfo, err := os.Stat(mountPath)
+	linfo, err := os.Lstat(mountPath)
 	if err != nil {
 		return nil, []error{fmt.Errorf("stat %q: %w", mountPath, err)}
 	}
 
-	if !fileInfo.IsDir() {
-		rule, ruleErr := collectDeviceRule(mountPath)
+	effectivePath := mountPath
+	if linfo.Mode()&os.ModeSymlink != 0 {
+		resolved, resolveErr := filepath.EvalSymlinks(mountPath)
+		if resolveErr != nil {
+			return nil, []error{fmt.Errorf("resolve symlink %q: %w", mountPath, resolveErr)}
+		}
+
+		effectivePath = resolved
+
+		linfo, err = os.Lstat(effectivePath)
+		if err != nil {
+			return nil, []error{fmt.Errorf("stat %q: %w", effectivePath, err)}
+		}
+	}
+
+	if !linfo.IsDir() {
+		if !gpol.DeviceAllowed(cpol, effectivePath) {
+			logger.L().Debug("device mount excluded by policy", "path", effectivePath)
+
+			return nil, nil
+		}
+
+		rule, ruleErr := collectDeviceRule(effectivePath)
 		if ruleErr != nil {
 			return nil, []error{ruleErr}
 		}
@@ -63,44 +86,136 @@ func CollectMountRules(
 		return []cgroup.DeviceRule{rule}, nil
 	}
 
-	var (
-		rules []cgroup.DeviceRule
-		errs  []error
-	)
-
-	walkErr := filepath.Walk(mountPath, func(walkedPath string, info os.FileInfo, err error) error {
-		if err != nil {
-			errs = append(errs, err)
-
-			return nil
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		if !gpol.DeviceAllowed(cpol, walkedPath) {
-			logger.L().Debug("device file excluded by policy", "path", walkedPath)
-
-			return nil
-		}
-
-		rule, ruleErr := collectDeviceRule(walkedPath)
-		if ruleErr != nil {
-			errs = append(errs, fmt.Errorf("device rule for %q: %w", walkedPath, ruleErr))
-
-			return nil
-		}
-
-		rules = append(rules, rule)
-
-		return nil
-	})
-	if walkErr != nil {
-		errs = append(errs, fmt.Errorf("walk %q: %w", mountPath, walkErr))
+	state := &mountWalkState{
+		mountPath: effectivePath,
+		gpol:      gpol,
+		cpol:      cpol,
 	}
 
-	return rules, errs
+	walkErr := filepath.WalkDir(effectivePath, state.visitEntry)
+	if walkErr != nil {
+		state.errs = append(state.errs, fmt.Errorf("walk %q: %w", effectivePath, walkErr))
+	}
+
+	if len(state.rules) == 0 && len(state.childrenSeen) > 0 && len(state.errs) == 0 {
+		logger.L().Warn("mount excluded: no children matched allow/deny policy",
+			"path", effectivePath,
+			"children_seen", state.childrenSeen,
+			"allow_globs", append(gpol.DeviceAllow, cpol.DeviceAllow...),
+			"deny_globs", append(gpol.DeviceDeny, cpol.DeviceDeny...),
+		)
+	}
+
+	return state.rules, state.errs
+}
+
+type mountWalkState struct {
+	mountPath    string
+	gpol         policy.Global
+	cpol         policy.Container
+	rules        []cgroup.DeviceRule
+	errs         []error
+	childrenSeen []string
+}
+
+func (s *mountWalkState) visitEntry(walkedPath string, entry fs.DirEntry, entryErr error) error {
+	if entryErr != nil {
+		s.errs = append(s.errs, entryErr)
+
+		return nil
+	}
+
+	if entry.IsDir() {
+		if walkedPath == s.mountPath {
+			return nil
+		}
+
+		depth := strings.Count(
+			strings.TrimPrefix(walkedPath, s.mountPath),
+			string(filepath.Separator),
+		)
+		if depth > maxDirDepth {
+			logger.L().Debug("walk depth cap reached", "path", walkedPath)
+
+			return filepath.SkipDir
+		}
+
+		return nil
+	}
+
+	if entry.Type()&os.ModeSymlink != 0 {
+		return s.visitSymlink(walkedPath)
+	}
+
+	return s.visitRegularFile(walkedPath)
+}
+
+func (s *mountWalkState) visitSymlink(symlinkPath string) error {
+	realPath, resolveErr := filepath.EvalSymlinks(symlinkPath)
+	if resolveErr != nil {
+		s.errs = append(s.errs, fmt.Errorf("resolve symlink %q: %w", symlinkPath, resolveErr))
+
+		return nil
+	}
+
+	targetInfo, statErr := os.Stat(realPath)
+	if statErr != nil {
+		s.errs = append(s.errs, fmt.Errorf("stat symlink target %q: %w", realPath, statErr))
+
+		return nil
+	}
+
+	if targetInfo.IsDir() {
+		logger.L().Debug("symlink to directory skipped", "path", symlinkPath, "target", realPath)
+
+		return nil
+	}
+
+	s.trackChild(realPath)
+
+	if !s.gpol.DeviceAllowed(s.cpol, realPath) {
+		logger.L().Debug("device file excluded by policy", "path", realPath)
+
+		return nil
+	}
+
+	rule, ruleErr := collectDeviceRule(realPath)
+	if ruleErr != nil {
+		s.errs = append(s.errs, fmt.Errorf("device rule for %q: %w", realPath, ruleErr))
+
+		return nil
+	}
+
+	s.rules = append(s.rules, rule)
+
+	return nil
+}
+
+func (s *mountWalkState) visitRegularFile(filePath string) error {
+	s.trackChild(filePath)
+
+	if !s.gpol.DeviceAllowed(s.cpol, filePath) {
+		logger.L().Debug("device file excluded by policy", "path", filePath)
+
+		return nil
+	}
+
+	rule, ruleErr := collectDeviceRule(filePath)
+	if ruleErr != nil {
+		s.errs = append(s.errs, fmt.Errorf("device rule for %q: %w", filePath, ruleErr))
+
+		return nil
+	}
+
+	s.rules = append(s.rules, rule)
+
+	return nil
+}
+
+func (s *mountWalkState) trackChild(path string) {
+	if len(s.childrenSeen) < maxLogChildren {
+		s.childrenSeen = append(s.childrenSeen, filepath.Base(path))
+	}
 }
 
 // collectDeviceRule returns the DeviceRule for a single (non-directory) device file.
@@ -112,7 +227,7 @@ func collectDeviceRule(devicePath string) (cgroup.DeviceRule, error) {
 
 	return cgroup.DeviceRule{
 		Allow:  true,
-		Access: "rwm",
+		Access: deviceAccessAll,
 		Type:   deviceType,
 		Major:  &major,
 		Minor:  &minor,

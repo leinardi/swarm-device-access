@@ -465,16 +465,126 @@ func TestCollectMountRules_BadPath(t *testing.T) {
 	}
 }
 
+// TestCollectMountRules_DirectoryMount_NoChildrenMatch checks that a WARN is emitted
+// when a directory mount has children but none match the allow/deny policy.
+func TestCollectMountRules_DirectoryMount_NoChildrenMatch(t *testing.T) {
+	dir := t.TempDir()
+
+	err := os.WriteFile(filepath.Join(dir, "card0"), []byte{}, 0o600)
+	if err != nil {
+		t.Fatalf("create card0: %v", err)
+	}
+
+	err = os.WriteFile(filepath.Join(dir, "renderD128"), []byte{}, 0o600)
+	if err != nil {
+		t.Fatalf("create renderD128: %v", err)
+	}
+
+	gpol := policy.Global{
+		Mode:        policy.ModeAll,
+		DeviceAllow: []string{filepath.Join(dir, "nonexistent")},
+	}
+
+	buf := captureLogger(t)
+
+	rules, errs := CollectMountRules(dir, gpol, policy.Container{})
+
+	if len(rules) != 0 {
+		t.Errorf("expected no rules, got %v", rules)
+	}
+
+	if len(errs) != 0 {
+		t.Errorf("expected no errors, got %v", errs)
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "mount excluded: no children matched") {
+		t.Errorf("expected WARN log about no children matched, got: %s", logOutput)
+	}
+
+	if !strings.Contains(logOutput, "card0") || !strings.Contains(logOutput, "renderD128") {
+		t.Errorf("expected child names in WARN log, got: %s", logOutput)
+	}
+}
+
+// TestCollectMountRules_DirectoryMount_SymlinkToDirSkipped checks that a symlink inside
+// a directory mount that points to another directory is not recursed into.
+func TestCollectMountRules_DirectoryMount_SymlinkToDirSkipped(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "subdir")
+
+	err := os.Mkdir(subDir, 0o755)
+	if err != nil {
+		t.Fatalf("create subdir: %v", err)
+	}
+
+	err = os.Symlink(subDir, filepath.Join(dir, "linktodir"))
+	if err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	gpol := policy.Global{Mode: policy.ModeAll}
+
+	buf := captureLogger(t)
+
+	rules, errs := CollectMountRules(dir, gpol, policy.Container{})
+
+	if len(rules) != 0 {
+		t.Errorf("expected no rules for dir-only mount, got %v", rules)
+	}
+
+	if len(errs) != 0 {
+		t.Errorf("unexpected errors: %v", errs)
+	}
+
+	if !strings.Contains(buf.String(), "symlink to directory skipped") {
+		t.Errorf("expected debug log about skipped dir symlink, got: %s", buf.String())
+	}
+}
+
+// TestCollectMountRules_DirectoryMount_SymlinkToDevice is the core regression test:
+// a directory mount whose children include a symlink to a real device gets a cgroup rule
+// injected even though the allow-glob targets the resolved path, not the mount source.
+func TestCollectMountRules_DirectoryMount_SymlinkToDevice(t *testing.T) {
+	dir := t.TempDir()
+
+	err := os.Symlink("/dev/null", filepath.Join(dir, "null"))
+	if err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	gpol := policy.Global{
+		Mode:        policy.ModeAll,
+		DeviceAllow: []string{"/dev/null"},
+	}
+
+	rules, errs := CollectMountRules(dir, gpol, policy.Container{})
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule for /dev/null, got %d", len(rules))
+	}
+
+	if !rules[0].Allow || rules[0].Access != "rwm" {
+		t.Errorf("rule has unexpected allow/access: %+v", rules[0])
+	}
+}
+
 // captureLogger sets logger.L() to write to a buffer for the duration of the
 // test and restores the previous logger when the test ends.
 func captureLogger(t *testing.T) *bytes.Buffer {
 	t.Helper()
 
+	prev := logger.L()
+
 	var buf bytes.Buffer
 	logger.Set(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})))
-	t.Cleanup(func() { logger.Set(nil) })
+	t.Cleanup(func() { logger.Set(prev) })
 
 	return &buf
 }
