@@ -44,9 +44,10 @@ services:
       # Bind-mount the entire USB bus; the daemon will apply rules to each device.
       - /dev/bus/usb:/dev/bus/usb
     command: [ "lsusb" ]
+    # Use top-level labels: — deploy.labels: are only visible on manager nodes.
+    labels:
+      swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/bus/usb/*"
     deploy:
-      labels:
-        swarm-device-access.enable: "true"
-        swarm-device-access.device-allow: "/dev/bus/usb/*"
       mode: replicated
       replicas: 1

@@ -620,12 +620,13 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 		svcResult       swarm.Service
 		svcErr          error
 		store           *config.Store
+		isSwarmManager  bool
 		wantServiceCall bool
 		wantLogMsg      string
 		wantSkip        bool
 	}{
 		{
-			name:          "deploy.labels-only grants opt-in",
+			name:          "deploy.labels-only grants opt-in on manager",
 			containerInfo: makeSwarmContainer(nil),
 			svcResult: swarm.Service{
 				Spec: swarm.ServiceSpec{
@@ -636,11 +637,12 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 				},
 			},
 			store:           newStore(policy.ModeOptIn, true),
+			isSwarmManager:  true,
 			wantServiceCall: true,
 			wantLogMsg:      "opt-in granted via service-level label",
 		},
 		{
-			name: "container labels override service",
+			name: "container labels override service on manager",
 			containerInfo: makeSwarmContainer(map[string]string{
 				policy.LabelEnable: "false",
 			}),
@@ -653,6 +655,7 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 				},
 			},
 			store:           newStore(policy.ModeOptIn, true),
+			isSwarmManager:  true,
 			wantServiceCall: true,
 			wantSkip:        true,
 		},
@@ -667,15 +670,17 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 				}},
 			},
 			store:           newStore(policy.ModeOptIn, true),
+			isSwarmManager:  true,
 			wantServiceCall: false,
 		},
 		{
-			name: "service inspect error is non-fatal",
+			name: "service inspect error is non-fatal on manager",
 			containerInfo: makeSwarmContainer(map[string]string{
 				policy.LabelEnable: "true",
 			}),
 			svcErr:          errDaemonUnavail,
 			store:           newStore(policy.ModeOptIn, true),
+			isSwarmManager:  true,
 			wantServiceCall: true,
 			wantLogMsg:      "could not inspect parent service",
 		},
@@ -693,8 +698,34 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 				},
 			},
 			store:           newStore(policy.ModeOptIn, true),
+			isSwarmManager:  true,
 			wantServiceCall: true,
 			wantLogMsg:      "unrecognized swarm-device-access label on parent service",
+		},
+		{
+			name: "worker node skips service inspect",
+			containerInfo: makeSwarmContainer(map[string]string{
+				policy.LabelEnable: "true",
+			}),
+			store:           newStore(policy.ModeOptIn, true),
+			isSwarmManager:  false,
+			wantServiceCall: false,
+		},
+		{
+			name:          "manager warns when known label set via deploy.labels",
+			containerInfo: makeSwarmContainer(nil),
+			svcResult: swarm.Service{
+				Spec: swarm.ServiceSpec{
+					Annotations: swarm.Annotations{
+						Name:   "my-service",
+						Labels: map[string]string{policy.LabelEnable: "true"},
+					},
+				},
+			},
+			store:           newStore(policy.ModeOptIn, true),
+			isSwarmManager:  true,
+			wantServiceCall: true,
+			wantLogMsg:      "swarm-device-access label set via deploy.labels on parent service",
 		},
 	}
 
@@ -711,10 +742,11 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 			}
 
 			proc := &Processor{
-				Inspector: inspector,
-				Cfg:       tc.store,
-				HostRoot:  t.TempDir(),
-				ProcRoot:  procRoot,
+				Inspector:      inspector,
+				Cfg:            tc.store,
+				HostRoot:       t.TempDir(),
+				ProcRoot:       procRoot,
+				IsSwarmManager: tc.isSwarmManager,
 			}
 
 			_ = proc.ProcessContainer(context.Background(), cid)
