@@ -24,8 +24,10 @@ services:
       # detect systemctl daemon-reload (which wipes cgroup BPF programs) and
       # re-apply device rules. Without this mount, reload handling is skipped
       # and the daemon logs a warning at startup.
+      # NOTE: dhi.io/static has no /var/run→/run symlink; the container-side
+      # path must be /var/run/dbus/system_bus_socket (not /run/dbus/...).
       # - -v
-      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      # - /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
       - ghcr.io/leinardi/swarm-device-access:latest
       - "-log-level"
       - "info"
