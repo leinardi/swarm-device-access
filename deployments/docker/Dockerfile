@@ -3,10 +3,10 @@
 ########################
 # deps: cache modules
 ########################
-FROM --platform=$BUILDPLATFORM golang:1.26.3-alpine AS deps
+FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev AS deps
 WORKDIR /src
 RUN --mount=type=cache,target=/var/cache/apk \
-	apk add --no-cache ca-certificates git
+	apk add --no-cache git
 COPY go.mod go.sum ./
 # Use a named cache so we can reuse it in the build stage (no COPY needed)
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
 ########################
 # build: compile static binary
 ########################
-FROM --platform=$BUILDPLATFORM golang:1.26.3-alpine AS build
+FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev AS build
 ARG VERSION="dev"
 ARG COMMIT="none"
 ARG DATE="unknown"
@@ -29,8 +29,6 @@ ENV CGO_ENABLED=0 \
     GOARCH=${TARGETARCH}
 
 WORKDIR /src
-RUN --mount=type=cache,target=/var/cache/apk \
-	apk add --no-cache ca-certificates
 
 # Bring in source
 COPY . .
@@ -43,10 +41,10 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
 		-o /out/swarm-device-access ./cmd/swarm-device-access
 
 ########################
-# runtime: alpine (root by default, required for cgroup BPF syscalls;
-# includes a shell + busybox utilities for in-container debugging).
+# runtime: dhi.io hardened static base (distroless-style, no shell).
+# The daemon binary is CGO_ENABLED=0 so no libc is required.
 ########################
-FROM alpine:3.23.4
+FROM dhi.io/static:20250419
 
 # hadolint ignore=DL3050
 LABEL org.opencontainers.image.title="swarm-device-access" \
@@ -68,4 +66,7 @@ COPY --from=build /out/swarm-device-access /usr/local/bin/swarm-device-access
 # the container is started with --pid=host (which would place an init shim
 # outside PID 1 of its own pid namespace and prevent it from working anyway).
 
+# dhi.io/static defaults to a non-root user; bpf(2) and cgroup writes require root.
+# hadolint ignore=DL3002
+USER 0
 ENTRYPOINT ["/usr/local/bin/swarm-device-access"]

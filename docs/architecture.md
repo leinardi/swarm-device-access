@@ -151,7 +151,7 @@ The daemon **must** run as root with:
 - `/dev` bind-mounted (so device major/minor can be read via `unix.Stat`)
 - `/var/run/docker.sock` bind-mounted
 
-The DBus socket (`/run/dbus/system_bus_socket`) is optional — enables systemd reload handling.
+The DBus socket is optional — enables systemd reload handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`; the container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run` symlink.
 
 ## Observability
 
@@ -217,8 +217,7 @@ level=INFO msg="dry-run: would add device rule" pid=1234 cgroup=/host/sys/fs/cgr
 
 ### Daemon does not re-apply rules after `systemctl daemon-reload`
 
-Ensure `/run/dbus/system_bus_socket` is bind-mounted into the daemon container. Without it, the reload watcher is disabled (logged at `Warn` on
-startup).
+Ensure the host DBus socket is bind-mounted as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`. Without it, the reload watcher is disabled (logged at `Warn` on startup). The container-side path must be `/var/run/dbus/system_bus_socket` — `dhi.io/static` has no `/var/run → /run` symlink.
 
 ### Daemon cannot connect to Docker
 

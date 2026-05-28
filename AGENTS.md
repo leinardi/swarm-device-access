@@ -73,7 +73,7 @@ with care; the upstream PRs went into runc/containerd long ago.**
 
 The daemon **must** run with `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`, and bind mounts for `/var/run/docker.sock` and
 `/sys → /host/sys`. The `hostRootPath = "/host"` constant in `main.go` is the inside-container view of the host root; cgroup paths are joined against
-it. The DBus socket mount (`/run/dbus/system_bus_socket`) is optional — enables reload handling.
+it. The DBus socket mount is optional — enables reload handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`; the container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run` symlink.
 
 ## Conventions worth knowing
 
