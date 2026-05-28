@@ -76,8 +76,9 @@ services:
       - -v
       - /dev:/dev
       # Optional: reapply device rules after systemctl daemon-reload.
+      # NOTE: dhi.io/static has no /var/run→/run symlink; use /var/run/dbus/... inside the container.
       # - -v
-      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      # - /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
       - ghcr.io/leinardi/swarm-device-access:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
