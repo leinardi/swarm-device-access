@@ -69,7 +69,13 @@ func run(ctx context.Context, opts Options, startWatcher func(context.Context, O
 
 	processed := make(map[string]time.Time)
 
-	processErr := processExistingContainers(ctx, opts.Docker, processed, opts.Proc)
+	processErr := processExistingContainers(
+		ctx,
+		opts.Docker,
+		processed,
+		opts.Metrics,
+		processorApply(opts.Proc),
+	)
 	if processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
@@ -89,7 +95,8 @@ func processExistingContainers(
 	ctx context.Context,
 	cli dockerAPI,
 	processed map[string]time.Time,
-	proc *processor.Processor,
+	metrics *observability.Recorder,
+	apply applyFn,
 ) error {
 	log := logger.L()
 
@@ -103,11 +110,14 @@ func processExistingContainers(
 	for idx := range containers {
 		startedAt := time.Now()
 
-		processErr := proc.ProcessContainer(ctx, containers[idx].ID)
+		processErr := processOne(
+			ctx,
+			containers[idx].ID,
+			metrics,
+			apply,
+			"could not process running container",
+		)
 		if processErr != nil {
-			log.Warn("could not process running container",
-				"id", containers[idx].ID, "err", processErr)
-
 			continue
 		}
 
@@ -115,6 +125,13 @@ func processExistingContainers(
 	}
 
 	return nil
+}
+
+// processorApply adapts Processor.ProcessContainer to applyFn.
+func processorApply(proc *processor.Processor) applyFn {
+	return func(ctx context.Context, id string) error {
+		return proc.ProcessContainer(ctx, id)
+	}
 }
 
 // startReloadWatcher tries to subscribe to systemd's DBus Reloading signal so
@@ -144,7 +161,13 @@ func startReloadWatcher(ctx context.Context, opts Options) {
 
 			fresh := make(map[string]time.Time)
 
-			processErr := processExistingContainers(ctx, opts.Docker, fresh, opts.Proc)
+			processErr := processExistingContainers(
+				ctx,
+				opts.Docker,
+				fresh,
+				opts.Metrics,
+				processorApply(opts.Proc),
+			)
 			if processErr != nil {
 				log.Warn("could not re-apply rules after systemd reload",
 					"err", processErr)

@@ -19,8 +19,12 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,8 +32,11 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/swarm"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
+	"github.com/leinardi/swarm-device-access/internal/logger"
+	"github.com/leinardi/swarm-device-access/internal/observability"
 	"github.com/leinardi/swarm-device-access/internal/processor"
 )
 
@@ -284,5 +291,223 @@ func TestListenEvents_ReconnectBeforeAnyEventUsesInitialSince(t *testing.T) {
 	_, sinces, _ := docker.snapshot()
 	if sinces[0] != formatSince(initial) {
 		t.Errorf("reconnect Since = %q, want %q", sinces[0], formatSince(initial))
+	}
+}
+
+var (
+	errApplyFailed = errors.New("apply failed")
+
+	recorderOnce sync.Once
+	testRecorder *observability.Recorder
+)
+
+// sharedRecorder returns a Recorder registered once against the default
+// Prometheus registry (registering twice panics).
+func sharedRecorder() *observability.Recorder {
+	recorderOnce.Do(func() { testRecorder = observability.NewRecorder() })
+
+	return testRecorder
+}
+
+// metricsSnapshot holds the values processOne is responsible for.
+type metricsSnapshot struct {
+	appliedOK     float64
+	appliedError  float64
+	durationCount uint64
+	lastEvent     float64
+}
+
+func readMetrics(t *testing.T) metricsSnapshot {
+	t.Helper()
+
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+
+	var snap metricsSnapshot
+
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			switch family.GetName() {
+			case "sda_rules_applied_total":
+				for _, label := range metric.GetLabel() {
+					if label.GetName() != "result" {
+						continue
+					}
+
+					if label.GetValue() == "ok" {
+						snap.appliedOK = metric.GetCounter().GetValue()
+					} else {
+						snap.appliedError = metric.GetCounter().GetValue()
+					}
+				}
+			case "sda_apply_duration_seconds":
+				snap.durationCount = metric.GetHistogram().GetSampleCount()
+			case "sda_last_event_timestamp_seconds":
+				snap.lastEvent = metric.GetGauge().GetValue()
+			}
+		}
+	}
+
+	return snap
+}
+
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	prev := logger.L()
+
+	var buf bytes.Buffer
+	logger.Set(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { logger.Set(prev) })
+
+	return &buf
+}
+
+func assertFailureReported(t *testing.T, before, after metricsSnapshot, logOutput, wantMsg string) {
+	t.Helper()
+
+	if after.appliedError-before.appliedError != 1 {
+		t.Errorf(
+			"rules_applied{result=error} delta = %v, want 1",
+			after.appliedError-before.appliedError,
+		)
+	}
+
+	if after.appliedOK != before.appliedOK {
+		t.Errorf(
+			"rules_applied{result=ok} changed on failure: %v -> %v",
+			before.appliedOK,
+			after.appliedOK,
+		)
+	}
+
+	if after.durationCount-before.durationCount != 1 {
+		t.Errorf(
+			"apply_duration sample delta = %d, want 1",
+			after.durationCount-before.durationCount,
+		)
+	}
+
+	if after.lastEvent != before.lastEvent {
+		t.Errorf(
+			"last_event_timestamp changed on failure: %v -> %v",
+			before.lastEvent,
+			after.lastEvent,
+		)
+	}
+
+	wantLine := false
+
+	for line := range strings.SplitSeq(logOutput, "\n") {
+		if strings.Contains(line, "level=WARN") &&
+			strings.Contains(line, `msg="`+wantMsg+`"`) &&
+			strings.Contains(line, "id=bad") &&
+			strings.Contains(line, `err="apply failed"`) {
+			wantLine = true
+		}
+	}
+
+	if !wantLine {
+		t.Errorf("expected WARN %q with id and err, got: %s", wantMsg, logOutput)
+	}
+}
+
+// TestProcessOne_StartupFailureMatchesEventPath checks that a failing apply
+// during the startup enumeration records the same metrics and WARN log as the
+// same failure on the event path.
+func TestProcessOne_StartupFailureMatchesEventPath(t *testing.T) {
+	metrics := sharedRecorder()
+	failingApply := func(_ context.Context, _ string) error { return errApplyFailed }
+
+	buf := captureLogs(t)
+	before := readMetrics(t)
+
+	docker := &fakeDocker{containers: []container.Summary{{ID: "bad"}}}
+	processed := map[string]time.Time{}
+
+	err := processExistingContainers(context.Background(), docker, processed, metrics, failingApply)
+	if err != nil {
+		t.Fatalf("processExistingContainers: %v", err)
+	}
+
+	if _, recorded := processed["bad"]; recorded {
+		t.Error("failed container must not be recorded as processed")
+	}
+
+	assertFailureReported(
+		t,
+		before,
+		readMetrics(t),
+		buf.String(),
+		"could not process running container",
+	)
+
+	buf.Reset()
+
+	before = readMetrics(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msgs, errs := makeChans(1, 0)
+	backoff := minBackoff
+
+	msgs <- events.Message{Actor: events.Actor{ID: "bad"}, TimeNano: time.Now().UnixNano()}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		metrics,
+		failingApply,
+	)
+
+	assertFailureReported(t, before, readMetrics(t), buf.String(), "could not process container")
+}
+
+// TestProcessOne_StartupSuccessRecordsMetrics checks the success path at
+// startup: ok result, duration sample and last-event timestamp.
+func TestProcessOne_StartupSuccessRecordsMetrics(t *testing.T) {
+	metrics := sharedRecorder()
+	before := readMetrics(t)
+
+	docker := &fakeDocker{containers: []container.Summary{{ID: "good"}}}
+	processed := map[string]time.Time{}
+
+	err := processExistingContainers(context.Background(), docker, processed, metrics, noopApply)
+	if err != nil {
+		t.Fatalf("processExistingContainers: %v", err)
+	}
+
+	after := readMetrics(t)
+
+	if after.appliedOK-before.appliedOK != 1 {
+		t.Errorf("rules_applied{result=ok} delta = %v, want 1", after.appliedOK-before.appliedOK)
+	}
+
+	if after.durationCount-before.durationCount != 1 {
+		t.Errorf(
+			"apply_duration sample delta = %d, want 1",
+			after.durationCount-before.durationCount,
+		)
+	}
+
+	if after.lastEvent == 0 {
+		t.Error("last_event_timestamp not set after successful startup apply")
+	}
+
+	if _, recorded := processed["good"]; !recorded {
+		t.Error("successful container should be recorded as processed")
 	}
 }

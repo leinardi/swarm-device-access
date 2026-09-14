@@ -114,9 +114,7 @@ func listenEvents(
 		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff, clearProcessed,
 			&lastEventNano,
 			opts.Metrics,
-			func(ctx context.Context, id string) error {
-				return opts.Proc.ProcessContainer(ctx, id)
-			})
+			processorApply(opts.Proc))
 		if !disconnected {
 			return
 		}
@@ -212,21 +210,36 @@ func consumeEvents(
 				}
 			}
 
-			start := time.Now()
-
-			applyErr := apply(ctx, msg.Actor.ID)
-			if applyErr != nil {
-				log.Warn("could not process container",
-					"id", msg.Actor.ID, "err", applyErr)
-				metrics.RecordRuleApplied(false)
-			} else {
-				metrics.RecordRuleApplied(true)
-				metrics.SetLastEvent(time.Now())
-			}
-
-			metrics.ObserveApplyDuration(time.Since(start))
+			_ = processOne(ctx, msg.Actor.ID, metrics, apply, "could not process container")
 		}
 	}
+}
+
+// processOne applies device rules to one container and records the outcome:
+// rules-applied result, apply duration, last-event timestamp on success, and
+// a WARN with logMsg on failure. It is shared by the startup enumeration and
+// the event stream so both paths report identically.
+func processOne(
+	ctx context.Context,
+	containerID string,
+	metrics *observability.Recorder,
+	apply applyFn,
+	logMsg string,
+) error {
+	start := time.Now()
+
+	applyErr := apply(ctx, containerID)
+	if applyErr != nil {
+		logger.L().Warn(logMsg, "id", containerID, "err", applyErr)
+		metrics.RecordRuleApplied(false)
+	} else {
+		metrics.RecordRuleApplied(true)
+		metrics.SetLastEvent(time.Now())
+	}
+
+	metrics.ObserveApplyDuration(time.Since(start))
+
+	return applyErr
 }
 
 func nextBackoff(current time.Duration) time.Duration {
