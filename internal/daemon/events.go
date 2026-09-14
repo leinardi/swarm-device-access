@@ -39,20 +39,56 @@ const (
 // In production this wraps Processor.ProcessContainer; in tests it is replaced by a fake.
 type applyFn func(ctx context.Context, id string) error
 
-// listenEvents subscribes to Docker container events and applies device rules.
+// eventListOptions returns the Docker event subscription options: "start"
+// and "unpause" container events at or after since.
+func eventListOptions(since string) events.ListOptions {
+	return events.ListOptions{
+		Since: since,
+		Filters: filters.NewArgs(
+			filters.Arg("event", "start"),
+			filters.Arg("event", "unpause"),
+		),
+	}
+}
+
+// formatSince formats a timestamp for events.ListOptions.Since.
+func formatSince(since time.Time) string {
+	return since.UTC().Format(time.RFC3339Nano)
+}
+
+// resubscribeSince returns the Since value for a re-subscription: one
+// nanosecond after the last event received, so neither the events emitted
+// during the disconnect nor the last event itself are replayed (a replayed
+// event would re-apply rules, and cgroup v2 programs grow on every apply).
+// Before any event has been received it falls back to the initial since.
+func resubscribeSince(initial time.Time, lastEventNano int64) string {
+	if lastEventNano == 0 {
+		return formatSince(initial)
+	}
+
+	return formatSince(time.Unix(0, lastEventNano+1))
+}
+
+// listenEvents consumes Docker container events and applies device rules.
 // "start" covers fresh starts and restart's second phase; "unpause" covers
-// resume from a paused state if the cgroup state was cleared. On stream error
-// it reconnects with exponential backoff (capped) rather than terminating the
-// daemon — replaces the upstream log.Fatal(err) pattern.
+// resume from a paused state if the cgroup state was cleared. msgs and errs
+// are the stream already opened by Run before the startup enumeration. On
+// stream error it reconnects with exponential backoff (capped) rather than
+// terminating the daemon — replaces the upstream log.Fatal(err) pattern.
 //
 // /readyz reflects live Docker event-stream health via observability.SetReady.
 func listenEvents(
 	ctx context.Context,
 	opts Options,
-	processed map[string]struct{},
+	processed map[string]time.Time,
+	since time.Time,
+	msgs <-chan events.Message,
+	errs <-chan error,
 ) {
 	log := logger.L()
 	backoff := minBackoff
+
+	var lastEventNano int64
 
 	// The processed map guards the overlap window between startup enumeration
 	// and the live event stream. After 2×maxBackoff (60s) the window has
@@ -60,25 +96,23 @@ func listenEvents(
 	// before producing a start event and will never be drained normally.
 	clearProcessed := time.After(2 * maxBackoff)
 
-	eventFilters := filters.NewArgs(
-		filters.Arg("event", "start"),
-		filters.Arg("event", "unpause"),
-	)
-
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		msgs, errs := opts.Docker.Events(
-			ctx,
-			events.ListOptions{Filters: eventFilters},
-		)
+		if msgs == nil {
+			msgs, errs = opts.Docker.Events(
+				ctx,
+				eventListOptions(resubscribeSince(since, lastEventNano)),
+			)
+		}
 
 		observability.SetReady(true)
 		log.Debug("subscribed to docker events")
 
 		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff, clearProcessed,
+			&lastEventNano,
 			opts.Metrics,
 			func(ctx context.Context, id string) error {
 				return opts.Proc.ProcessContainer(ctx, id)
@@ -87,19 +121,29 @@ func listenEvents(
 			return
 		}
 
+		msgs, errs = nil, nil
+
 		observability.SetReady(false)
 	}
 }
 
 // consumeEvents drains one events.Subscribe lifecycle. Returns true if the
-// caller should reconnect, false on context cancellation.
+// caller should reconnect, false on context cancellation. lastEventNano is
+// updated with the timestamp of every received event.
+//
+// An event is skipped only when processed holds an entry for the container
+// and the event is not newer than that entry: Docker emits "start" after the
+// container is running, so an earlier event was already visible to the
+// startup inspect. A newer event (restart, unpause) has a new cgroup and is
+// applied. The entry is removed on the first event for that ID either way.
 func consumeEvents(
 	ctx context.Context,
 	msgs <-chan events.Message,
 	errs <-chan error,
-	processed map[string]struct{},
+	processed map[string]time.Time,
 	backoff *time.Duration,
 	clearProcessed <-chan time.Time,
+	lastEventNano *int64,
 	metrics *observability.Recorder,
 	apply applyFn,
 ) bool {
@@ -153,12 +197,19 @@ func consumeEvents(
 
 			*backoff = minBackoff
 
+			if msg.TimeNano > *lastEventNano {
+				*lastEventNano = msg.TimeNano
+			}
+
 			metrics.RecordEvent(string(msg.Action))
 
-			if _, alreadyProcessed := processed[msg.Actor.ID]; alreadyProcessed {
+			recordedAt, alreadyProcessed := processed[msg.Actor.ID]
+			if alreadyProcessed {
 				delete(processed, msg.Actor.ID)
 
-				continue
+				if !time.Unix(0, msg.TimeNano).After(recordedAt) {
+					continue
+				}
 			}
 
 			start := time.Now()

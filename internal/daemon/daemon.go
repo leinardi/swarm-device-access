@@ -21,9 +21,10 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/docker/docker/api/types/events"
 
 	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/observability"
@@ -31,38 +32,63 @@ import (
 	"github.com/leinardi/swarm-device-access/internal/systemd"
 )
 
+// dockerAPI is the subset of *client.Client used by the daemon loop. It exists
+// so tests can inject a fake event stream and container list.
+type dockerAPI interface {
+	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
+	Events(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error)
+}
+
 // Options bundles the dependencies required by Run.
 type Options struct {
-	Docker  *client.Client
+	Docker  dockerAPI
 	Proc    *processor.Processor
 	Metrics *observability.Recorder
 }
 
-// Run enumerates existing containers, subscribes to the systemd reload signal,
-// and then blocks on the Docker event stream until ctx is done.
+// Run subscribes to the Docker event stream, enumerates existing containers,
+// subscribes to the systemd reload signal, and then blocks on the event stream
+// until ctx is done.
+//
+// The event stream is opened before the enumeration, with Since set to the
+// time just before subscribing, so a container started while the list is
+// being processed is still delivered as an event instead of being missed.
 func Run(ctx context.Context, opts Options) error {
+	return run(ctx, opts, startReloadWatcher)
+}
+
+func run(ctx context.Context, opts Options, startWatcher func(context.Context, Options)) error {
 	log := logger.L()
 
-	processed := make(map[string]struct{})
+	since := time.Now()
+
+	// The client delivers messages on an unbuffered channel, so events that
+	// arrive during the enumeration below wait (with backpressure on the
+	// socket) until listenEvents starts consuming them.
+	msgs, errs := opts.Docker.Events(ctx, eventListOptions(formatSince(since)))
+
+	processed := make(map[string]time.Time)
 
 	processErr := processExistingContainers(ctx, opts.Docker, processed, opts.Proc)
 	if processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
 	}
 
-	startReloadWatcher(ctx, opts)
+	startWatcher(ctx, opts)
 
-	listenEvents(ctx, opts, processed)
+	listenEvents(ctx, opts, processed, since, msgs, errs)
 
 	return nil
 }
 
 // processExistingContainers iterates the currently running containers and
-// applies device rules to each one that bind-mounts /dev/... paths.
+// applies device rules to each one that bind-mounts /dev/... paths. For every
+// container processed successfully, processed records the time captured just
+// before it was inspected, so later events for an earlier run can be skipped.
 func processExistingContainers(
 	ctx context.Context,
-	cli *client.Client,
-	processed map[string]struct{},
+	cli dockerAPI,
+	processed map[string]time.Time,
 	proc *processor.Processor,
 ) error {
 	log := logger.L()
@@ -75,6 +101,8 @@ func processExistingContainers(
 	log.Debug("enumerating running containers", "count", len(containers))
 
 	for idx := range containers {
+		startedAt := time.Now()
+
 		processErr := proc.ProcessContainer(ctx, containers[idx].ID)
 		if processErr != nil {
 			log.Warn("could not process running container",
@@ -83,7 +111,7 @@ func processExistingContainers(
 			continue
 		}
 
-		processed[containers[idx].ID] = struct{}{}
+		processed[containers[idx].ID] = startedAt
 	}
 
 	return nil
@@ -114,7 +142,7 @@ func startReloadWatcher(ctx context.Context, opts Options) {
 		watcher.Watch(ctx, func() {
 			opts.Metrics.IncReloadReapply()
 
-			fresh := make(map[string]struct{})
+			fresh := make(map[string]time.Time)
 
 			processErr := processExistingContainers(ctx, opts.Docker, fresh, opts.Proc)
 			if processErr != nil {
