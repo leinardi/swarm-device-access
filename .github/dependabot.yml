@@ -1,6 +1,14 @@
 version: 2
 enable-beta-ecosystems: true # Required for the pre-commit ecosystem
 
+registries:
+  dhi:
+    type: docker-registry
+    url: https://dhi.io
+    username: leinardi
+    password: ${{ secrets.DHI_TOKEN }}
+    replaces-base: false
+
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -24,6 +32,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/deployments/docker"
+    registries: ["dhi"]
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
