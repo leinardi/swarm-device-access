@@ -83,3 +83,10 @@ it. The DBus socket mount is optional — enables reload handling. Mount as `-v 
   `GO_LDFLAGS` in `.mk/go.mk`.
 - `internal/cgroup/` retains NVIDIA's original copyright header (Apache 2.0). Don't relicense or reformat that block.
 - The README is the source of truth for the user-facing story; keep flag tables and the docker-compose snippet in sync if you change flags or mounts.
+
+## Commit messages
+
+All commits MUST be Conventional Commits 1.0.0 **with a scope**: `<type>(<scope>)[!]: <description>`, optional blank-line body and
+footers. Enforced by the `conventional-pre-commit` `commit-msg` hook (`--force-scope`). Types: `feat`, `fix`, `docs`, `test`, `refactor`,
+`perf`, `build`, `ci`, `chore`, `style`, `revert`. Breaking changes use `!` before `:` or a `BREAKING CHANGE:` footer. Release notes are
+generated from these messages. Examples: `fix(processor): skip unresolvable symlinks`, `ci(dependabot): add dhi registry`.

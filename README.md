@@ -114,20 +114,20 @@ The daemon compose file is also available at
 You can configure the daemon with CLI flags, a YAML config file, or both. When a
 value is set in both places, the CLI flag wins.
 
-| Flag             | Default                | Description                                                                      |
-|------------------|------------------------|----------------------------------------------------------------------------------|
-| `-log-level`     | `info`                 | `debug`, `info`, `warn`, `error`                                                 |
-| `-log-format`    | `text`                 | `text`, `json`, `plain`                                                          |
-| `-log-time`      | `false`                | Include timestamps in log lines                                                  |
-| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket                                          |
-| `-dry-run`       | `false`                | Log device rules that would be applied without writing to the cgroup             |
-| `-policy-mode`   | `opt-in`               | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`.           |
-| `-device-allow`  | `""`                   | Glob for `/dev/...` paths to allow, repeatable. Empty means allow all.           |
-| `-device-deny`   | `""`                   | Glob for `/dev/...` paths to deny, repeatable. Deny takes priority over allow.   |
-| `-metrics-addr`  | `""`                   | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. |
-| `-debug-addr`    | `""`                   | `host:port` for pprof `/debug/pprof/*`. Empty disables it.                       |
-| `-config`        | `""`                   | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP.  |
-| `-help`          |                        | Print this flag list and exit                                                    |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-log-level` | `info` | `debug`, `info`, `warn`, `error` |
+| `-log-format` | `text` | `text`, `json`, `plain` |
+| `-log-time` | `false` | Include timestamps in log lines |
+| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
+| `-dry-run` | `false` | Log device rules that would be applied without writing to the cgroup |
+| `-policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
+| `-device-allow` | `""` | Glob for `/dev/...` paths to allow, repeatable. Empty means allow all. |
+| `-device-deny` | `""` | Glob for `/dev/...` paths to deny, repeatable. Deny takes priority over allow. |
+| `-metrics-addr` | `""` | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. |
+| `-debug-addr` | `""` | `host:port` for pprof `/debug/pprof/*`. Empty disables it. |
+| `-config` | `""` | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |
+| `-help` |  | Print this flag list and exit |
 
 ### Config File
 
@@ -148,11 +148,11 @@ Some settings are only read at startup and still require a restart:
 
 Consumer services opt in and narrow their allowed device set with labels:
 
-| Label                              | Values                | Description                                                    |
-|------------------------------------|-----------------------|----------------------------------------------------------------|
-| `swarm-device-access.enable`       | `true` / `false`      | Opt in (`true`) or explicitly opt out (`false`) of processing. |
-| `swarm-device-access.device-allow` | Comma-separated globs | Allow only matching `/dev/...` paths. Empty means inherit.     |
-| `swarm-device-access.device-deny`  | Comma-separated globs | Deny matching `/dev/...` paths. Deny overrides allow.          |
+| Label | Values | Description |
+| --- | --- | --- |
+| `swarm-device-access.enable` | `true` / `false` | Opt in (`true`) or explicitly opt out (`false`) of processing. |
+| `swarm-device-access.device-allow` | Comma-separated globs | Allow only matching `/dev/...` paths. Empty means inherit. |
+| `swarm-device-access.device-deny` | Comma-separated globs | Deny matching `/dev/...` paths. Deny overrides allow. |
 
 Declare these labels under top-level `labels:` in your service definition.
 Docker copies top-level labels into each task container, so the daemon can read

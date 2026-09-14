@@ -149,12 +149,12 @@ all three exceed their thresholds.
 
 ## 4. Complexity limits
 
-| Linter     | Threshold     | Note                                               |
-|------------|---------------|----------------------------------------------------|
-| `gocyclo`  | 15            | Cyclomatic complexity                              |
-| `cyclop`   | 15            | Same metric, different linter — both fire together |
-| `gocognit` | 35            | Cognitive complexity                               |
-| `funlen`   | 50 statements | Lines are disabled (`lines: -1`)                   |
+| Linter | Threshold | Note |
+| --- | --- | --- |
+| `gocyclo` | 15 | Cyclomatic complexity |
+| `cyclop` | 15 | Same metric, different linter — both fire together |
+| `gocognit` | 35 | Cognitive complexity |
+| `funlen` | 50 statements | Lines are disabled (`lines: -1`) |
 
 Prefer extracting helpers over suppressing. When suppression is the right call
 (e.g., a function that branches over many independent config fields), explain
@@ -207,11 +207,11 @@ tags.
 
 ## 9. Forbidden packages (`depguard`)
 
-| Forbidden                    | Use instead                                                              |
-|------------------------------|--------------------------------------------------------------------------|
+| Forbidden | Use instead |
+| --- | --- |
 | `github.com/sirupsen/logrus` | `github.com/leinardi/swarm-device-access/internal/logger` → `logger.L()` |
-| `github.com/pkg/errors`      | stdlib `errors` + `fmt.Errorf(...%w...)`                                 |
-| `github.com/instana/testify` | `github.com/stretchr/testify`                                            |
+| `github.com/pkg/errors` | stdlib `errors` + `fmt.Errorf(...%w...)` |
+| `github.com/instana/testify` | `github.com/stretchr/testify` |
 
 ---
 
