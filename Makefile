@@ -63,10 +63,9 @@ mk-common-update: ## Check for remote updates of shared .mk files
 # Project overrides
 # -----------------------------------------------------------------------------
 # swarm-device-access is Linux-only: all files in cmd/ and most of internal/
-# have //go:build linux. Override the shared go-build target to cross-compile
-# so `make go-build` works on macOS / Windows dev machines without needing the
-# caller to set GOOS by hand.
+# have //go:build linux. Export GOOS=linux for the shared go-build target so
+# `make go-build` cross-compiles on macOS / Windows dev machines without the
+# caller setting GOOS by hand. A target-specific variable (not a second recipe)
+# avoids make's "overriding recipe" warning and a duplicate `make help` entry.
 .PHONY: go-build
-go-build: ## Build linux binary into $(DIST_DIR)/ (cross-compiles from any host OS)
-	@mkdir -p "$(DIST_DIR)"
-	GOOS=linux $(GO) build -ldflags "$(GO_LDFLAGS)" -o "$(DIST_DIR)/$(BIN_NAME)" "$(GO_CMD)"
+go-build: export GOOS := linux
