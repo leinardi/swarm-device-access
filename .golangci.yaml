@@ -1,10 +1,20 @@
 version: "2"
 
+run:
+  # test/integration is behind this tag; without it the linter skips those files.
+  build-tags:
+    - integration
+
 linters:
   default: all
 
+  enable:
+    - gomodguard_v2
+
   disable:
+    - gomodguard
     - exhaustruct
+    - exhaustruct_v5
     - gochecknoglobals
     - nonamedreturns
     - wsl
@@ -16,16 +26,17 @@ linters:
       rules:
         logger:
           deny:
-            # logging is allowed only by logutils.Log,
             - pkg: "github.com/sirupsen/logrus"
-              desc: logging is allowed only by logger.L.
+              desc: logging is allowed only via internal/logger.
+          files:
+            # logrus is allowed to use only in the logger package.
+            - "!**/internal/logger/**.go"
+        forbidden-forks:
+          deny:
             - pkg: "github.com/pkg/errors"
               desc: Should be replaced by standard lib errors package.
             - pkg: "github.com/instana/testify"
               desc: It's a fork of github.com/stretchr/testify.
-          files:
-            # logrus is allowed to use only in logutils package.
-            - "!**/pkg/logutils/**.go"
     dupl:
       threshold: 100
     funlen:
@@ -68,13 +79,6 @@ linters:
       ignored-functions:
         - strings.SplitN
     govet:
-      settings:
-        printf:
-          funcs:
-            - (github.com/golangci/golangci-lint/v2/pkg/logutils.Log).Infof
-            - (github.com/golangci/golangci-lint/v2/pkg/logutils.Log).Warnf
-            - (github.com/golangci/golangci-lint/v2/pkg/logutils.Log).Errorf
-            - (github.com/golangci/golangci-lint/v2/pkg/logutils.Log).Fatalf
       enable:
         - nilness
         - shadow
@@ -99,27 +103,37 @@ linters:
         - name: unused-receiver
 
   exclusions:
+    generated: lax # skip files containing "Code generated" magic comment
     presets:
       - comments
       - std-error-handling
       - common-false-positives
       - legacy
-    paths:
-      - test/testdata_etc # test files
-      - internal/go # extracted from Go code
-      - internal/x # extracted from x/tools code
-      - pkg/goformatters/gci/internal # extracted from gci code
-      - pkg/goanalysis/runner_checker.go # extracted from x/tools code
     rules:
       - path: (.+)_test\.go
         linters:
           - dupl
+          - funlen
+          - gocognit
           - goconst
+          - gocyclo
           - lll
+          - maintidx
           - mnd
           - paralleltest
           - testpackage
           - varnamelen
+      - path: (.+)_test\.go
+        linters:
+          - cyclop
+        text: "calculated cyclomatic complexity"
+      # Config-level exclude, not an inline //nolint: golangci-lint run --fix strips
+      # the inline directives here. The integration tests intentionally stat and
+      # execute the daemon binary whose path comes from SDA_TEST_BINARY or the build output.
+      - path: test/integration/.+_test\.go
+        linters:
+          - gosec
+        text: "G70[23]:"
 
       # NVIDIA-derived cgroup/eBPF code: keep close to upstream shape.
       - path: internal/cgroup/.+\.go
@@ -140,7 +154,6 @@ linters:
           - nestif
           - nlreturn
           - revive
-          - stylecheck
           - unparam
           - varnamelen
 

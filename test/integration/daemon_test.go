@@ -75,7 +75,7 @@ const (
 
 var (
 	pullTestImageOnce sync.Once
-	pullTestImageErr  error
+	errPullTestImage  error
 )
 
 // TestDaemon_DryRun_DetectsDeviceMount starts the daemon with -dry-run and
@@ -411,11 +411,13 @@ func TestDaemon_DryRun_UnpauseEvent(t *testing.T) {
 		t.Fatal("timeout: start event not detected")
 	}
 
-	if err := cli.ContainerPause(ctx, containerID); err != nil {
+	err := cli.ContainerPause(ctx, containerID)
+	if err != nil {
 		t.Fatalf("pause container: %v", err)
 	}
 
-	if err := cli.ContainerUnpause(ctx, containerID); err != nil {
+	err = cli.ContainerUnpause(ctx, containerID)
+	if err != nil {
 		t.Fatalf("unpause container: %v", err)
 	}
 
@@ -458,6 +460,7 @@ func TestDaemon_DryRun_MultipleDeviceMounts(t *testing.T) {
 		case <-detected:
 		case <-time.After(detectTimeout):
 			t.Error("timeout: expected two dry-run device rules, got fewer")
+
 			return
 		}
 	}
@@ -483,9 +486,10 @@ func TestDaemon_DryRun_ConfigFile_LoadsPolicyMode(t *testing.T) {
 		t.Fatalf("create temp config: %v", err)
 	}
 
-	if _, err := f.WriteString(
+	_, err = f.WriteString(
 		"policy-mode: \"all\"\ndry-run: true\nlog-level: debug\nlog-format: text\n",
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("write temp config: %v", err)
 	}
 
@@ -531,7 +535,7 @@ func TestDaemon_DryRun_MetricsEndpoint(t *testing.T) {
 		ctx,
 		http.MethodGet,
 		"http://"+metricsAddr+"/metrics",
-		nil,
+		http.NoBody,
 	)
 	if err != nil {
 		t.Fatalf("build metrics request: %v", err)
@@ -560,7 +564,7 @@ func TestDaemon_DryRun_MetricsEndpoint(t *testing.T) {
 
 // ---- helpers ----
 
-func findBinary(t *testing.T) string {
+func findBinary(ctx context.Context, t *testing.T) string {
 	t.Helper()
 
 	path := os.Getenv(envBinary)
@@ -568,14 +572,16 @@ func findBinary(t *testing.T) string {
 		path = defaultBinary
 	}
 
-	if _, err := os.Stat(path); err != nil {
+	_, err := os.Stat(path)
+	if err != nil {
 		t.Skipf("daemon binary not found at %q (set %s or run make go-build): %v",
 			path, envBinary, err)
 	}
 
 	// Probe execability: a cross-compiled Linux binary on macOS returns
 	// "exec format error" which would crash the test later. Skip instead.
-	if err := exec.Command(path, "-help").Run(); err != nil {
+	err = exec.CommandContext(ctx, path, "-help").Run()
+	if err != nil {
 		if strings.Contains(err.Error(), "exec format error") ||
 			strings.Contains(err.Error(), "cannot execute") {
 			t.Skipf("daemon binary %q is not executable on this platform (cross-compiled?): %v",
@@ -601,7 +607,8 @@ func requireDocker(t *testing.T) *dockerclient.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := cli.Ping(ctx); err != nil {
+	_, err = cli.Ping(ctx)
+	if err != nil {
 		t.Skipf("Docker daemon not reachable: %v", err)
 	}
 
@@ -619,7 +626,7 @@ func ensureTestImage(t *testing.T, cli *dockerclient.Client) {
 
 		reader, err := cli.ImagePull(ctx, testImage, image.PullOptions{})
 		if err != nil {
-			pullTestImageErr = err
+			errPullTestImage = err
 
 			return
 		}
@@ -627,12 +634,12 @@ func ensureTestImage(t *testing.T, cli *dockerclient.Client) {
 
 		_, err = io.Copy(io.Discard, reader)
 		if err != nil {
-			pullTestImageErr = err
+			errPullTestImage = err
 		}
 	})
 
-	if pullTestImageErr != nil {
-		t.Fatalf("pull test image %s: %v", testImage, pullTestImageErr)
+	if errPullTestImage != nil {
+		t.Fatalf("pull test image %s: %v", testImage, errPullTestImage)
 	}
 }
 
@@ -648,7 +655,7 @@ func launchDaemon(
 ) chan struct{} {
 	t.Helper()
 
-	binary := findBinary(t)
+	binary := findBinary(ctx, t)
 	cmd := exec.CommandContext(ctx, binary, flags...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -656,7 +663,8 @@ func launchDaemon(
 		t.Fatalf("stdout pipe: %v", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	if err != nil {
 		t.Fatalf("start daemon: %v", err)
 	}
 
@@ -707,8 +715,10 @@ func startTestContainer(
 		t.Fatalf("create test container: %v", err)
 	}
 
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	err = cli.ContainerStart(ctx, resp.ID, container.StartOptions{})
+	if err != nil {
 		_ = cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+
 		t.Fatalf("start test container: %v", err)
 	}
 
