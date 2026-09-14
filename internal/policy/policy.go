@@ -223,6 +223,13 @@ func (g Global) DeviceAllowed(cpol Container, path string) bool {
 	return true
 }
 
+// ExplicitlyAllowed reports whether path is matched by at least one explicit
+// allow glob (global or per-container) and is not denied. Unlike
+// DeviceAllowed, it returns false when no allow globs are configured at all.
+func (g Global) ExplicitlyAllowed(cpol Container, path string) bool {
+	return (len(g.DeviceAllow) > 0 || len(cpol.DeviceAllow) > 0) && g.DeviceAllowed(cpol, path)
+}
+
 // matchAny reports whether path matches any glob pattern in patterns.
 func matchAny(patterns []string, path string) bool {
 	for _, p := range patterns {

@@ -146,6 +146,70 @@ func TestDeviceAllowed(t *testing.T) {
 	}
 }
 
+// TestExplicitlyAllowed checks that only a matching explicit allow glob (with no
+// matching deny glob) counts; the empty-allow "allow everything" default does not.
+func TestExplicitlyAllowed(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name           string
+		globalAllow    []string
+		globalDeny     []string
+		containerAllow []string
+		containerDeny  []string
+		path           string
+		want           bool
+	}{
+		{"no allow globs", nil, nil, nil, nil, "/dev/log", false},
+		{"no allow globs with deny", nil, []string{"/dev/sda"}, nil, nil, "/dev/log", false},
+		{"global allow matches", []string{"/dev/dri/*"}, nil, nil, nil, "/dev/dri/card0", true},
+		{"global allow no match", []string{"/dev/dri/*"}, nil, nil, nil, "/dev/log", false},
+		{"container allow matches", nil, nil, []string{"/dev/ttyUSB*"}, nil, "/dev/ttyUSB0", true},
+		{"container allow no match", nil, nil, []string{"/dev/ttyUSB*"}, nil, "/dev/log", false},
+		{
+			"global deny beats allow",
+			[]string{"/dev/*"},
+			[]string{"/dev/log"},
+			nil,
+			nil,
+			"/dev/log",
+			false,
+		},
+		{
+			"container deny beats allow",
+			[]string{"/dev/*"},
+			nil,
+			nil,
+			[]string{"/dev/log"},
+			"/dev/log",
+			false,
+		},
+		{
+			"container allow narrows global allow",
+			[]string{"/dev/dri/*"},
+			nil,
+			[]string{"/dev/dri/card0"},
+			nil,
+			"/dev/dri/renderD128",
+			false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			g := policy.Global{DeviceAllow: tc.globalAllow, DeviceDeny: tc.globalDeny}
+			c := policy.Container{DeviceAllow: tc.containerAllow, DeviceDeny: tc.containerDeny}
+			got := g.ExplicitlyAllowed(c, tc.path)
+
+			if got != tc.want {
+				t.Errorf("ExplicitlyAllowed(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestParseContainer covers label parsing and invalid-glob fail-closed (item 7).
 func TestParseContainer(t *testing.T) {
 	t.Parallel()

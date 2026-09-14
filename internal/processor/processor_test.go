@@ -34,6 +34,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/swarm"
 
+	"github.com/leinardi/swarm-device-access/internal/cgroup"
 	"github.com/leinardi/swarm-device-access/internal/config"
 	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/policy"
@@ -265,9 +266,15 @@ func TestProcessContainer_NoDevMounts(t *testing.T) {
 		ProcRoot:  root,
 	}
 
+	buf := captureLogger(t)
+
 	err := proc.ProcessContainer(context.Background(), "abc")
 	if err != nil {
 		t.Fatalf("expected nil error for container with no /dev mounts, got %v", err)
+	}
+
+	if strings.Contains(buf.String(), "container processed") {
+		t.Errorf("expected no summary for container without /dev mounts, got: %s", buf.String())
 	}
 }
 
@@ -424,10 +431,15 @@ func TestCollectMountRules_ExcludedByPolicy(t *testing.T) {
 	t.Parallel()
 
 	gpol := policy.Global{Mode: policy.ModeAll, DeviceDeny: []string{"/dev/null"}}
-	rules, errs := CollectMountRules("/dev/null", gpol, policy.Container{})
+	result := CollectMountRules("/dev/null", gpol, policy.Container{})
+	rules, errs := result.Rules, result.Errs
 
 	if len(rules) != 0 || len(errs) != 0 {
 		t.Errorf("expected no rules/errors for denied path, got rules=%v errs=%v", rules, errs)
+	}
+
+	if result.Skipped != 1 {
+		t.Errorf("expected Skipped=1 for denied path, got %d", result.Skipped)
 	}
 }
 
@@ -435,7 +447,8 @@ func TestCollectMountRules_File(t *testing.T) {
 	t.Parallel()
 
 	gpol := policy.Global{Mode: policy.ModeAll}
-	rules, errs := CollectMountRules("/dev/null", gpol, policy.Container{})
+	result := CollectMountRules("/dev/null", gpol, policy.Container{})
+	rules, errs := result.Rules, result.Errs
 
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -454,7 +467,8 @@ func TestCollectMountRules_BadPath(t *testing.T) {
 	t.Parallel()
 
 	gpol := policy.Global{Mode: policy.ModeAll}
-	rules, errs := CollectMountRules("/dev/nonexistent-device-xyzzy", gpol, policy.Container{})
+	result := CollectMountRules("/dev/nonexistent-device-xyzzy", gpol, policy.Container{})
+	rules, errs := result.Rules, result.Errs
 
 	if len(rules) != 0 {
 		t.Errorf("expected no rules for bad path, got %v", rules)
@@ -487,7 +501,8 @@ func TestCollectMountRules_DirectoryMount_NoChildrenMatch(t *testing.T) {
 
 	buf := captureLogger(t)
 
-	rules, errs := CollectMountRules(dir, gpol, policy.Container{})
+	result := CollectMountRules(dir, gpol, policy.Container{})
+	rules, errs := result.Rules, result.Errs
 
 	if len(rules) != 0 {
 		t.Errorf("expected no rules, got %v", rules)
@@ -527,7 +542,8 @@ func TestCollectMountRules_DirectoryMount_SymlinkToDirSkipped(t *testing.T) {
 
 	buf := captureLogger(t)
 
-	rules, errs := CollectMountRules(dir, gpol, policy.Container{})
+	result := CollectMountRules(dir, gpol, policy.Container{})
+	rules, errs := result.Rules, result.Errs
 
 	if len(rules) != 0 {
 		t.Errorf("expected no rules for dir-only mount, got %v", rules)
@@ -558,7 +574,8 @@ func TestCollectMountRules_DirectoryMount_SymlinkToDevice(t *testing.T) {
 		DeviceAllow: []string{"/dev/null"},
 	}
 
-	rules, errs := CollectMountRules(dir, gpol, policy.Container{})
+	result := CollectMountRules(dir, gpol, policy.Container{})
+	rules, errs := result.Rules, result.Errs
 
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -570,6 +587,264 @@ func TestCollectMountRules_DirectoryMount_SymlinkToDevice(t *testing.T) {
 
 	if !rules[0].Allow || rules[0].Access != "rwm" {
 		t.Errorf("rule has unexpected allow/access: %+v", rules[0])
+	}
+}
+
+// globQuote backslash-escapes glob metacharacters so a t.TempDir() path can be
+// used as a literal prefix inside a filepath.Match pattern.
+func globQuote(s string) string {
+	var sb strings.Builder
+
+	for _, r := range s {
+		if strings.ContainsRune(`\*?[`, r) {
+			sb.WriteRune('\\')
+		}
+
+		sb.WriteRune(r)
+	}
+
+	return sb.String()
+}
+
+// buildSymlinkTree creates a directory with valid device symlinks, dangling
+// symlinks and a regular file, mirroring what a host /dev bind mount looks like
+// inside the daemon container (e.g. /dev/log -> /run/... does not resolve).
+func buildSymlinkTree(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	links := map[string]string{
+		"null":    "/dev/null",
+		"zero":    "/dev/zero",
+		"log":     "/run/systemd/journal/dev-log-xyzzy",
+		"nullish": filepath.Join(dir, "missing-xyzzy"),
+	}
+
+	for name, target := range links {
+		err := os.Symlink(target, filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("create symlink %s: %v", name, err)
+		}
+	}
+
+	err := os.WriteFile(filepath.Join(dir, "regular.txt"), []byte("not a device"), 0o600)
+	if err != nil {
+		t.Fatalf("create regular.txt: %v", err)
+	}
+
+	return dir
+}
+
+func ruleSet(rules []cgroup.DeviceRule) map[string]struct{} {
+	set := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		set[rule.Type+" "+strconv.FormatInt(*rule.Major, 10)+":"+strconv.FormatInt(*rule.Minor, 10)] = struct{}{}
+	}
+
+	return set
+}
+
+func warnLines(logOutput string) []string {
+	var lines []string
+
+	for line := range strings.SplitSeq(logOutput, "\n") {
+		if strings.Contains(line, "level=WARN") {
+			lines = append(lines, line)
+		}
+	}
+
+	return lines
+}
+
+func TestGlobQuote(t *testing.T) {
+	t.Parallel()
+
+	quoted := globQuote(`/tmp/a*b?c[d\e`)
+	if quoted != `/tmp/a\*b\?c\[d\\e` {
+		t.Fatalf("globQuote = %q", quoted)
+	}
+
+	ok, err := filepath.Match(quoted, `/tmp/a*b?c[d\e`)
+	if err != nil || !ok {
+		t.Fatalf("quoted pattern does not match literal path: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestCollectMountRules_UnresolvableSymlinks_ExplicitAllow checks that dangling
+// symlinks are skipped (never errors) and only the one matched by an explicit
+// allow glob produces a WARN.
+func TestCollectMountRules_UnresolvableSymlinks_ExplicitAllow(t *testing.T) {
+	dir := buildSymlinkTree(t)
+
+	gpol := policy.Global{
+		Mode:        policy.ModeAll,
+		DeviceAllow: []string{"/dev/null", globQuote(dir) + "/nullish"},
+	}
+
+	buf := captureLogger(t)
+
+	result := CollectMountRules(dir, gpol, policy.Container{})
+
+	if len(result.Errs) != 0 {
+		t.Fatalf("unexpected errors: %v", result.Errs)
+	}
+
+	got := ruleSet(result.Rules)
+	if len(got) != 1 || len(result.Rules) != 1 {
+		t.Fatalf("expected exactly {c 1:3}, got %v", got)
+	}
+
+	if _, ok := got["c 1:3"]; !ok {
+		t.Fatalf("expected {c 1:3}, got %v", got)
+	}
+
+	// zero (excluded by policy), log, nullish (unresolvable), regular.txt (excluded by policy).
+	if result.Skipped != 4 {
+		t.Errorf("expected Skipped=4, got %d", result.Skipped)
+	}
+
+	warns := warnLines(buf.String())
+	if len(warns) != 1 {
+		t.Fatalf("expected exactly one WARN, got %d: %v", len(warns), warns)
+	}
+
+	if !strings.Contains(warns[0], "path="+filepath.Join(dir, "nullish")) ||
+		!strings.Contains(warns[0], "device symlink matches allow policy but cannot be resolved") {
+		t.Errorf("expected WARN for nullish, got: %s", warns[0])
+	}
+
+	if strings.Contains(warns[0], "path="+filepath.Join(dir, "log")) {
+		t.Errorf("unexpected WARN for log: %s", warns[0])
+	}
+}
+
+// TestCollectMountRules_UnresolvableSymlinks_NoAllowGlobs checks that without
+// allow globs dangling symlinks and non-device entries are skipped silently.
+func TestCollectMountRules_UnresolvableSymlinks_NoAllowGlobs(t *testing.T) {
+	dir := buildSymlinkTree(t)
+
+	gpol := policy.Global{Mode: policy.ModeAll}
+
+	buf := captureLogger(t)
+
+	result := CollectMountRules(dir, gpol, policy.Container{})
+
+	if len(result.Errs) != 0 {
+		t.Fatalf("unexpected errors: %v", result.Errs)
+	}
+
+	got := ruleSet(result.Rules)
+	_, hasNull := got["c 1:3"]
+	_, hasZero := got["c 1:5"]
+
+	if len(got) != 2 || !hasNull || !hasZero {
+		t.Fatalf("expected {c 1:3, c 1:5}, got %v", got)
+	}
+
+	// log, nullish (unresolvable), regular.txt (non-device).
+	if result.Skipped != 3 {
+		t.Errorf("expected Skipped=3, got %d", result.Skipped)
+	}
+
+	logOutput := buf.String()
+
+	warns := warnLines(logOutput)
+	if len(warns) != 0 {
+		t.Errorf("expected no WARN, got: %v", warns)
+	}
+
+	if !strings.Contains(logOutput, "unresolvable symlink skipped") {
+		t.Errorf("expected DEBUG about unresolvable symlink, got: %s", logOutput)
+	}
+
+	if !strings.Contains(logOutput, "non-device entry skipped") {
+		t.Errorf("expected DEBUG about non-device entry, got: %s", logOutput)
+	}
+}
+
+// TestCollectMountRules_SingleFileNonDevice checks that an explicitly mounted
+// single file that is not a device is still reported as an error.
+func TestCollectMountRules_SingleFileNonDevice(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "regular.txt")
+
+	err := os.WriteFile(file, []byte("not a device"), 0o600)
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+
+	result := CollectMountRules(file, policy.Global{Mode: policy.ModeAll}, policy.Container{})
+
+	if len(result.Rules) != 0 || len(result.Errs) != 1 {
+		t.Fatalf("expected one error and no rules, got rules=%v errs=%v", result.Rules, result.Errs)
+	}
+
+	if !errors.Is(result.Errs[0], errNotDevice) {
+		t.Errorf("expected errNotDevice, got %v", result.Errs[0])
+	}
+}
+
+// TestProcessContainer_DevDirectorySummary checks that a whole-/dev mount is
+// processed without a container-level error and emits one INFO summary.
+func TestProcessContainer_DevDirectorySummary(t *testing.T) {
+	const pid = 46
+
+	cgroupContent := "0::/docker/testcontainer\n"
+	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+
+	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+
+	state := &container.State{Pid: pid}
+	insp := &fakeInspector{result: container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		Mounts: []container.MountPoint{
+			{Source: "/dev", Destination: "/dev", Type: mount.TypeBind},
+		},
+	}}
+
+	store := config.NewStore()
+	store.Set(config.Runtime{
+		Policy: policy.Global{Mode: policy.ModeAll, DeviceAllow: []string{"/dev/null"}},
+		DryRun: true,
+	})
+
+	proc := &Processor{
+		Inspector: insp,
+		Cfg:       store,
+		HostRoot:  "/host",
+		ProcRoot:  root,
+	}
+
+	buf := captureLogger(t)
+
+	err := proc.ProcessContainer(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("ProcessContainer returned error: %v", err)
+	}
+
+	logOutput := buf.String()
+
+	summaries := 0
+
+	for line := range strings.SplitSeq(logOutput, "\n") {
+		if !strings.Contains(line, `msg="container processed"`) {
+			continue
+		}
+
+		summaries++
+
+		if !strings.Contains(line, "level=INFO") ||
+			!strings.Contains(line, "devices_granted=1") ||
+			!strings.Contains(line, "errors=0") ||
+			!strings.Contains(line, "dry_run=true") {
+			t.Errorf("unexpected summary line: %s", line)
+		}
+	}
+
+	if summaries != 1 {
+		t.Errorf("expected exactly one summary, got %d: %s", summaries, logOutput)
 	}
 }
 
