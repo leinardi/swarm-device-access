@@ -91,7 +91,17 @@ func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
 	msgs, errs := makeChans(0, 0)
 	backoff := minBackoff
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, nil, noopApply)
+	got := consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		noopApply,
+	)
 	if got {
 		t.Error(
 			"consumeEvents should return false (no reconnect) when context is already canceled",
@@ -106,7 +116,17 @@ func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
 
 	errs <- errTransportEOF
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, nil, noopApply)
+	got := consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		noopApply,
+	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on stream error")
 	}
@@ -125,7 +145,17 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 
 	cancel()
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, nil, noopApply)
+	got := consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		noopApply,
+	)
 	if got {
 		t.Error("consumeEvents should return false when stream error is context.Canceled")
 	}
@@ -138,7 +168,17 @@ func TestConsumeEvents_ChannelCloseReturnsReconnect(t *testing.T) {
 
 	close(msgs)
 
-	got := consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, nil, noopApply)
+	got := consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		noopApply,
+	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on channel close")
 	}
@@ -169,7 +209,7 @@ func TestConsumeEvents_EventCallsApply(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, nil, apply)
+	consumeEvents(ctx, msgs, errs, map[string]time.Time{}, &backoff, nil, new(int64), nil, apply)
 
 	if called.Load() != 2 {
 		t.Errorf("apply called %d times, want 2", called.Load())
@@ -182,8 +222,8 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 
 	msgs, errs := makeChans(1, 0)
 	backoff := minBackoff
-	processed := map[string]struct{}{
-		"already-seen": {},
+	processed := map[string]time.Time{
+		"already-seen": time.Now(),
 	}
 
 	var called atomic.Int32
@@ -201,7 +241,7 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, processed, &backoff, nil, nil, apply)
+	consumeEvents(ctx, msgs, errs, processed, &backoff, nil, new(int64), nil, apply)
 
 	if called.Load() != 0 {
 		t.Errorf("apply called %d times for deduplicated ID, want 0", called.Load())
@@ -218,9 +258,9 @@ func TestConsumeEvents_ClearProcessedOnTTL(t *testing.T) {
 
 	msgs, errs := makeChans(0, 0)
 	backoff := minBackoff
-	processed := map[string]struct{}{
-		"stale-a": {},
-		"stale-b": {},
+	processed := map[string]time.Time{
+		"stale-a": time.Now(),
+		"stale-b": time.Now(),
 	}
 
 	// Fire the TTL immediately via a closed channel.
@@ -232,7 +272,7 @@ func TestConsumeEvents_ClearProcessedOnTTL(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, processed, &backoff, clearCh, nil, noopApply)
+	consumeEvents(ctx, msgs, errs, processed, &backoff, clearCh, new(int64), nil, noopApply)
 
 	if len(processed) != 0 {
 		t.Errorf("processed map has %d entries after TTL, want 0", len(processed))
@@ -253,9 +293,133 @@ func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, map[string]struct{}{}, &backoff, nil, nil, noopApply)
+	consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		noopApply,
+	)
 
 	if backoff != minBackoff {
 		t.Errorf("backoff = %v after successful event, want %v (reset)", backoff, minBackoff)
+	}
+}
+
+// TestConsumeEvents_RestartWithinWindow checks the timestamp dedupe: an event
+// newer than the startup inspect is a new run (restart/unpause) and is applied;
+// an older one was already seen by the inspect and is skipped. The entry is
+// removed after either.
+func TestConsumeEvents_RestartWithinWindow(t *testing.T) {
+	recordedAt := time.Now()
+
+	cases := []struct {
+		name      string
+		eventTime time.Time
+		wantApply int32
+	}{
+		{"newer event applied", recordedAt.Add(time.Second), 1},
+		{"older event skipped", recordedAt.Add(-time.Millisecond), 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			msgs, errs := makeChans(1, 0)
+			backoff := minBackoff
+			processed := map[string]time.Time{"c1": recordedAt}
+
+			var called atomic.Int32
+
+			apply := func(_ context.Context, _ string) error {
+				called.Add(1)
+
+				return nil
+			}
+
+			msgs <- events.Message{Actor: events.Actor{ID: "c1"}, TimeNano: tc.eventTime.UnixNano()}
+
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				cancel()
+			}()
+
+			consumeEvents(ctx, msgs, errs, processed, &backoff, nil, new(int64), nil, apply)
+
+			if called.Load() != tc.wantApply {
+				t.Errorf("apply called %d times, want %d", called.Load(), tc.wantApply)
+			}
+
+			if _, stillPresent := processed["c1"]; stillPresent {
+				t.Error("processed entry should be removed after the first event")
+			}
+		})
+	}
+}
+
+func TestConsumeEvents_TracksLastEventNano(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msgs, errs := makeChans(2, 0)
+	backoff := minBackoff
+
+	var lastEventNano int64
+
+	msgs <- events.Message{Actor: events.Actor{ID: "c1"}, TimeNano: 200}
+
+	msgs <- events.Message{Actor: events.Actor{ID: "c2"}, TimeNano: 300}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		&lastEventNano,
+		nil,
+		noopApply,
+	)
+
+	if lastEventNano != 300 {
+		t.Errorf("lastEventNano = %d, want 300", lastEventNano)
+	}
+}
+
+func TestResubscribeSince(t *testing.T) {
+	initial := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+
+	got := resubscribeSince(initial, 0)
+	if got != initial.Format(time.RFC3339Nano) {
+		t.Errorf(
+			"resubscribeSince before any event = %q, want initial %q",
+			got,
+			initial.Format(time.RFC3339Nano),
+		)
+	}
+
+	last := time.Date(2026, 9, 14, 10, 0, 5, 123456789, time.UTC)
+
+	got = resubscribeSince(initial, last.UnixNano())
+
+	parsed, err := time.Parse(time.RFC3339Nano, got)
+	if err != nil {
+		t.Fatalf("parse %q: %v", got, err)
+	}
+
+	if !parsed.Equal(last.Add(time.Nanosecond)) {
+		t.Errorf("resubscribeSince = %v, want %v", parsed, last.Add(time.Nanosecond))
 	}
 }

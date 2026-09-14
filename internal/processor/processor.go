@@ -20,7 +20,6 @@ package processor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -159,52 +158,90 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 	cgroupPath := hostCGroupPath(p.HostRoot, sysfsPath, cgroupPrefix, cgroupRoot)
 	log.Debug("cgroup path resolved", "pid", pid, "path", cgroupPath)
 
-	var (
-		allRules []cgroup.DeviceRule
-		allErrs  []error
-	)
+	collected := collectContainerRules(containerID, pid, info.Mounts, cfg.Policy, cpol)
+
+	for _, deviceErr := range collected.deviceErrs {
+		log.Warn("device rule failed", "id", containerID, "err", deviceErr)
+	}
+
+	p.Metrics.AddDeviceFilesDiscovered(len(collected.granted))
+
+	if len(collected.deviceErrs) > 0 {
+		p.Metrics.AddRuleFailures(len(collected.deviceErrs))
+	}
+
+	if len(collected.granted) > 0 {
+		applyErr := p.applyRulesToCgroup(api, collected.granted, cgroupPath, pid, cfg.DryRun)
+		if applyErr != nil {
+			return applyErr
+		}
+	}
+
+	if collected.devMounts > 0 {
+		log.Info("container processed",
+			"id", containerID,
+			"pid", pid,
+			"devices_granted", len(collected.granted),
+			"skipped", collected.skipped,
+			"errors", len(collected.deviceErrs),
+			"dry_run", cfg.DryRun,
+		)
+	}
+
+	return nil
+}
+
+// containerRules aggregates the per-mount results for one container.
+type containerRules struct {
+	granted    []cgroup.DeviceRule // deduplicated across mounts
+	skipped    int
+	deviceErrs []error
+	devMounts  int
+}
+
+// collectContainerRules walks every /dev mount of a container and merges the
+// results. Per-device errors are collected, not returned, so one bad entry
+// does not prevent the remaining rules from being applied.
+func collectContainerRules(
+	containerID string,
+	pid int,
+	mounts []container.MountPoint,
+	gpol policy.Global,
+	cpol policy.Container,
+) containerRules {
+	var result containerRules
 
 	seen := make(map[deviceRuleKey]struct{})
 
-	for _, mnt := range info.Mounts {
+	for _, mnt := range mounts {
 		if !IsMountSource(mnt.Source) {
 			continue
 		}
 
-		log.Debug("device mount detected",
+		result.devMounts++
+
+		logger.L().Debug("device mount detected",
 			"id", containerID,
 			"pid", pid,
 			"source", mnt.Source,
 			"destination", mnt.Destination,
 		)
 
-		rules, errs := CollectMountRules(mnt.Source, cfg.Policy, cpol)
-		allErrs = append(allErrs, errs...)
+		mountResult := CollectMountRules(mnt.Source, gpol, cpol)
+		result.skipped += mountResult.Skipped
+		result.deviceErrs = append(result.deviceErrs, mountResult.Errs...)
 
-		for _, rule := range rules {
+		for _, rule := range mountResult.Rules {
 			key := deviceRuleKey{rule.Type, *rule.Major, *rule.Minor}
 			if _, dup := seen[key]; !dup {
 				seen[key] = struct{}{}
 
-				allRules = append(allRules, rule)
+				result.granted = append(result.granted, rule)
 			}
 		}
 	}
 
-	p.Metrics.AddDeviceFilesDiscovered(len(allRules))
-
-	if len(allRules) > 0 {
-		applyErr := p.applyRulesToCgroup(api, allRules, cgroupPath, pid, cfg.DryRun)
-		if applyErr != nil {
-			allErrs = append(allErrs, applyErr)
-		}
-	}
-
-	if len(allErrs) > 0 {
-		p.Metrics.AddRuleFailures(len(allErrs))
-	}
-
-	return errors.Join(allErrs...)
+	return result
 }
 
 // resolveServiceLabels fetches parent service labels on manager nodes. On

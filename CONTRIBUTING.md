@@ -57,13 +57,20 @@ The files in `internal/cgroup/` carry a `Copyright (c) 2021, NVIDIA CORPORATION`
 
 ## Commit messages
 
-No conventional-commit prefix is required. Start with a capitalized verb in the imperative mood:
+All commits must follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) with a scope:
+`<type>(<scope>)[!]: <description>`. The `conventional-pre-commit` hook enforces this on `commit-msg`, so install the hooks with
+`make pre-commit-install` (it installs both the `pre-commit` and `commit-msg` hooks). Release notes are generated from these messages.
+
+Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, `style`, `revert`. Use a lower-case,
+imperative description:
 
 ```
-Fix scanner.Err propagation in /proc cgroup parsers
-Add govulncheck workflow
-Replace fmt.Sprintf proc path pattern with strconv.Itoa
+fix(processor): skip unresolvable symlinks under device mounts
+ci(dependabot): authenticate docker updates against dhi.io
+feat(policy)!: drop the legacy allow label
 ```
+
+Mark breaking changes with `!` before the colon or a `BREAKING CHANGE: <description>` footer.
 
 ## Verification
 

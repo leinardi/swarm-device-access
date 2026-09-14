@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -30,6 +32,8 @@ repos:
     rev: v0.23.2
     hooks:
       - id: markdownlint-cli2
+        additional_dependencies:
+          - markdownlint-rule-table-format@1.0.3
   - repo: local
     hooks:
       - id: shellcheck
@@ -94,3 +98,9 @@ repos:
     rev: v1.0.0-rc.4
     hooks:
       - id: go-test-repo-mod
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: ["--force-scope"]

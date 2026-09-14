@@ -52,7 +52,8 @@ func NewRecorder() *Recorder {
 
 		rulesApplied: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "sda_rules_applied_total",
-			Help: "Total device rules applied (or skipped in dry-run).",
+			Help: "Containers handled, by result: ok = no container-level failure (includes policy, label and no-pid skips " +
+				"and partial per-device failures), error = container-level failure.",
 		}, []string{"result"}),
 
 		reloadReapplies: promauto.NewCounter(prometheus.CounterOpts{
@@ -88,7 +89,7 @@ func NewRecorder() *Recorder {
 
 		ruleFailures: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sda_rule_failures_total",
-			Help: "Errors during device rule collection or application.",
+			Help: "Per-device rule failures (entries that passed policy but could not be turned into a rule, and walk errors).",
 		}),
 
 		dryRunSkips: promauto.NewCounter(prometheus.CounterOpts{
@@ -98,7 +99,7 @@ func NewRecorder() *Recorder {
 
 		lastEventTimestamp: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "sda_last_event_timestamp_seconds",
-			Help: "Unix timestamp of the last successfully processed Docker event.",
+			Help: "Unix timestamp of the last container processed successfully (event, startup or reload).",
 		}),
 	}
 }
