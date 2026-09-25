@@ -14,6 +14,7 @@ make go-build      # cross-compiles to Linux into ./dist/ (works from macOS/Win)
 make go-test       # CGO_ENABLED=1 go test -race ./...
 make go-vet
 make go-tidy       # go mod tidy + go mod verify
+make audit-deps    # govulncheck + banned-module check (network required); also runs in CI and as a pre-commit hook on go.mod/go.sum changes
 make check         # pre-commit on all files
 make check-stage   # pre-commit on staging area only
 make docker-build
