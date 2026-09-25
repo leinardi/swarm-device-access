@@ -11,4 +11,4 @@ on:
 
 jobs:
   warm-pre-commit-cache:
-    uses: leinardi/gh-reusable-workflows/.github/workflows/pre-commit-warmup.yaml@v1
+    uses: leinardi/gh-reusable-workflows/.github/workflows/pre-commit-warmup.yaml@055867b173af35192c4a7d6711b88225b4cf4f48 # v1.2.0

@@ -43,7 +43,10 @@ Semantic versioning, derived from [Conventional Commits](https://www.conventiona
 
 Everything else (`build`, `chore`, `ci`, `docs`, `refactor`, `test` and so on) bumps nothing. When no commit since the last
 release is a `feat`, a `fix` or a breaking change, a run with no version **fails** with *"No feat/fix or breaking-change commit
-since `<tag>`, so there is nothing to bump. Re-run with an explicit version to force one."*
+since `<tag>`, so there is nothing to bump. Re-run with an explicit version to force one."* Dependabot's Go module updates are
+committed as `fix(deps)`, so a dependency bump alone is enough for a patch release; its GitHub Actions, pre-commit and Docker
+updates stay `chore(deps)` and bump nothing, so a Docker base-image bump that carries a security fix needs an explicit version
+to ship.
 
 Whether derived or typed, the version must be **higher than every version already released**. Tags here are immutable, so
 publishing a `v0.9.9` after `v0.10.0` would create a permanent lower tag. The only version a run may reuse is the one it is
@@ -161,6 +164,31 @@ gh attestation verify "oci://$IMAGE@$DIGEST" --repo leinardi/swarm-device-access
   --signer-workflow leinardi/swarm-device-access/.github/workflows/release.yaml --source-ref refs/heads/master
 docker buildx imagetools create -t "$IMAGE:latest" -t "$IMAGE:<major>" "$IMAGE@$DIGEST"
 ```
+
+## What the workflows trust
+
+**Every action is pinned to a full commit SHA**, with the version in a trailing comment, in all four workflows, the reusable
+warm-up workflow included. A tag is a mutable pointer: `@v7` resolves to whatever that tag points at on the day the job runs, and
+an action that moves, or whose repository is compromised, would execute inside the release job, which holds `contents: write`,
+`packages: write` and an OIDC identity. A SHA cannot be moved. Dependabot's `github-actions` ecosystem updates the pins and
+rewrites the comment. `svu` is pinned the same way, as a version in `SVU_VERSION`, and is a human's job to bump.
+
+A SHA pin fixes only the top-level ref, so the actions we own pin what they run too. `leinardi/gha-pre-commit-reviewdog-actions`
+pins `actions/cache` and everything else inside its composite actions from `v1.0.1`, the release pinned here.
+
+**Remaining exposure.** `leinardi/gh-reusable-workflows`' `pre-commit-warmup.yaml` (pinned here at `v1.2.0`) still runs
+`actions/checkout@v7`, `actions/setup-python@v7` and `actions/cache@v6` by mutable tag, in the warm-up job that runs on a manual
+dispatch or a push to `master` that changes `.pre-commit-config.yaml`. The reusable workflow declares `permissions: contents: read`,
+so that job's `GITHUB_TOKEN` is read-only, but the token is not what matters here. Every step in a job also gets the Actions cache
+token, which can write any cache key, and a job on `master` writes into the `master` cache scope. The release job runs on `master`
+and restores that scope twice: `actions/setup-go` with `cache: true` restores the Go module and build caches, and both image builds
+read the BuildKit layer cache with `cache-from: type=gha`. So a moved or compromised tag in the warm-up could poison the caches
+the release job builds from, and the binaries and image built from them would then be attested and signed like any other. The
+actions themselves never run in the release job; their cache writes can reach it.
+
+The fix is to pin those three actions in `leinardi/gh-reusable-workflows`, cut a new `v1.x.y` release and bump the pin here. It
+was deferred when the other repository's pins were done, and it is the one open gap in this section. Turning off `setup-go`'s cache
+and the GHA cache in the release job would close it from this side instead, at the cost of slower release builds.
 
 ## One-time setup: the `release` environment
 
