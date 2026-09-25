@@ -1,6 +1,6 @@
 module github.com/leinardi/swarm-device-access
 
-go 1.26.3
+go 1.26.8
 
 require (
 	github.com/cilium/ebpf v0.22.0

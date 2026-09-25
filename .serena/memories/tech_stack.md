@@ -1,6 +1,6 @@
 # Tech Stack
 
-- **Language**: Go 1.26.3 (module `github.com/leinardi/swarm-device-access`)
+- **Language**: Go 1.26.8 (module `github.com/leinardi/swarm-device-access`)
 - **Build**: Make wrapping `go`; shared `.mk/` snippets from `leinardi/make-common@v1`
 - **Key deps**:
     - `github.com/cilium/ebpf v0.19.0` — BPF program attach (cgroup v2)
