@@ -351,6 +351,96 @@ already covers the expected violations.
 
 ---
 
+## 18. Comments carry rationale; history goes in the commit
+
+A comment says **why the code is the way it is** — the constraint, the failure it avoids, the
+alternative that was rejected and what broke. It does not narrate what changed, when, or at whose
+request. That belongs in the commit body, where `git log` and `git blame` can find it and where it
+does not rot as the code moves.
+
+```go
+// Bad — history in the code.
+// Changed after the daemon-reload bug report; used to reuse the processed map.
+
+// Good — rationale in the code.
+// A fresh map on purpose: daemon-reload has already wiped every BPF program, so
+// containers the shared processed map remembers still need their rules re-applied.
+fresh := make(map[string]time.Time)
+```
+
+The same rule is what makes `//nolint` explanations useful: say why the fix does not apply here,
+not that the linter complained.
+
+---
+
+## 19. `time.Sleep` in tests: classify before you write one
+
+A sleep is the right tool for exactly three of the five things tests use it for. Decide which of
+these a site is *before* writing or converting it; the class dictates the shape.
+
+**Positive eventual — never a sleep.** "Something another goroutine will do has happened": an
+event was consumed, a container was inspected, a rule was applied. Poll with a deadline, never a
+guessed sleep: a slow machine then costs milliseconds instead of flaking, and the timeout message
+says which contract was broken rather than "unexpected nil". There is no shared `testsync` package
+here. Inside `internal/daemon`, reuse `waitFor(t, cond)` from `internal/daemon/daemon_test.go`
+(2-second deadline, fails with `condition not met before deadline`). Anywhere else, add a small
+`waitFor`-style helper only when you convert a site that needs it — not speculatively. A
+hand-rolled `for { … deadline … time.Sleep }` in a test body is this class too — convert it.
+
+This class needs something *observable* to poll. Where the only honest observable is unexported,
+prefer adding a small read-only seam on the production type over poking at internals — or, as the
+daemon tests do, record calls in the fake (`recordingInspector.inspected`) and poll that.
+
+**Negative assertion — a sleep, bounded and commented.** "Nothing happens": a deduplicated event
+never re-applies, a filtered action never reaches `apply`. There is no condition to poll for; the
+test gives the wrong behavior a bounded chance to appear and then asserts it did not. Say so in a
+comment, so the next reader does not "fix" it into a `waitFor` that cannot exist.
+
+**Real elapsed window — a sleep, and the duration is the point.** A dedup TTL, a backoff step, a
+resubscribe cursor with nanosecond resolution. The duration is under test; shortening it changes
+what is asserted. Name the window as a constant or express it as a multiple of the interval under
+test (`2 * minBackoff`), never a bare literal chosen by feel.
+
+**Ordering barrier with no quiescence signal — a sleep, and say why no seam exists.** "Let
+`consumeEvents` drain the buffered message before cancelling the context". These are the ones worth
+revisiting when a seam appears; the comment is what makes that possible.
+
+**Poll tick inside an eventual-wait helper — already correct.** The sleep inside `waitFor` itself.
+Leave it.
+
+Two shapes are always wrong: a sleep whose comment says "give X time to Y" where Y is observable,
+and a sleep added to make a flaky test pass without deciding which class it belongs to.
+
+**Known follow-up.** `internal/daemon` has 8 `time.Sleep` calls in its tests, not yet classified
+or converted:
+
+- `daemon_test.go:142` — the poll tick inside `waitFor` (already correct);
+- `daemon_test.go:460` and `events_test.go:208`, `:240`, `:271`, `:292`, `:349`, `:380` — each a
+  goroutine that sleeps 20 ms and then cancels the context so `consumeEvents` returns. Each is
+  either a positive eventual (poll the fake's `apply` record, then cancel) or a negative assertion
+  (dedup: nothing else may be applied) — classify each one, then convert or comment it.
+
+Do not add to that list; a new test uses the shape its class dictates.
+
+---
+
+## 20. Reuse before writing
+
+Every helper below exists so the hand-written version of it is written once. Before adding a
+logger, a path check, a wait or a metric guard, check whether one of these already answers the
+question — and if it nearly does, extend it rather than forking it.
+
+| Need | Use | Not |
+| --- | --- | --- |
+| Logging from any package | `logger.L()` (`internal/logger`) — lazily initialised, safe before `Configure` | `slog.Default()`, a package-level `slog.New`, or a logger threaded through only to log |
+| Is this mount source under `/dev` | `processor.IsMountSource` | a fresh `strings.HasPrefix(path, "/dev")`, which also matches `/devops/…` |
+| A wait in a loop that must stop on shutdown | `sleepCtx(ctx, d)` (`internal/daemon/events.go`) | a bare `time.Sleep` that ignores `ctx` |
+| Reconnect backoff | `minBackoff`, `maxBackoff` and `nextBackoff` (`internal/daemon/events.go`) | new duration literals or a second doubling loop at the call site |
+| Recording a metric from code that tests run without a registry | the `*observability.Recorder` methods (`RecordEvent`, `RecordRuleApplied`, `IncReloadReapply`, `IncDockerReconnect`, `ObserveApplyDuration`, `RecordContainerScanned`, `RecordContainerSkipped`, `AddDeviceFilesDiscovered`, `AddRuleFailures`, `AddDryRunSkips`) — each is nil-safe, so tests pass `nil` | an `if rec != nil` guard at the call site, or a fake recorder |
+| Waiting in an `internal/daemon` test | `waitFor(t, cond)` (`internal/daemon/daemon_test.go`) | `time.Sleep` with a guessed duration (see §19) |
+
+---
+
 ## Quick checklist before submitting Go code
 
 - [ ] Imports in 3 groups: stdlib / third-party / local, alphabetical within each
@@ -363,3 +453,8 @@ already covers the expected violations.
 - [ ] `//go:build linux` first line in Linux-specific files
 - [ ] Function statement count ≤ 50 (non-cgroup code)
 - [ ] No shadowed variables
+- [ ] Checked §20 for an existing helper before writing a new one
+- [ ] Comments say why, not what changed — history is in the commit body (§18)
+- [ ] Every `time.Sleep` in a test is classified per §19: a positive eventual polls with a
+      deadline (`waitFor` in `internal/daemon`), and any surviving sleep says which of the other
+      classes it is

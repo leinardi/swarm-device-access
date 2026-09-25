@@ -84,6 +84,25 @@ it. The DBus socket mount is optional — enables reload handling. Mount as `-v 
 - `internal/cgroup/` retains NVIDIA's original copyright header (Apache 2.0). Don't relicense or reformat that block.
 - The README is the source of truth for the user-facing story; keep flag tables and the docker-compose snippet in sync if you change flags or mounts.
 
+## Project skills
+
+Skills live in `.agents/skills/` (symlinked as `.claude/skills`). Load them before the work, not after review:
+
+- `go-style-guide` — before any `.go` edit.
+- `trust-boundary` — before touching `internal/config`, `internal/policy`, label parsing or rule collection in `internal/processor`,
+  `deployments/docker/Dockerfile` or anything else under `deployments/**`.
+- `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
+
+## Quality rules not enforced by tooling
+
+- **Reuse before writing.** Check `go-style-guide` §20 for an existing helper (`logger.L`, `processor.IsMountSource`, `sleepCtx`, the
+  backoff constants, the nil-safe `observability.Recorder`) before adding one.
+- **Fail closed.** An empty, unknown or malformed mode, config value or label denies or skips — it never falls back to wider device access.
+- **Deletion smell.** Removing a user-visible surface (flag, key, label, metric, documented behavior) and flipping its test to assert
+  absence needs a line in `README.md` or `docs/**` that retires it; a commit message is not enough.
+- **Suppressions show their work.** A new `//nolint`, `# shellcheck disable=` or `# hadolint ignore=` explains why the fix does not apply
+  here, not which rule fired.
+
 ## Commit messages
 
 All commits MUST be Conventional Commits 1.0.0 **with a scope**: `<type>(<scope>)[!]: <description>`, optional blank-line body and
