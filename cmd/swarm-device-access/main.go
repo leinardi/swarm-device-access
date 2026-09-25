@@ -29,7 +29,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
 	"github.com/leinardi/swarm-device-access/internal/daemon"
@@ -98,10 +98,8 @@ func run() int {
 	// SIGHUP: reload the config file and update hot settings + logger.
 	go watchSIGHUP(rootCtx, store)
 
-	cli, err := client.NewClientWithOpts(
-		client.WithHost("unix://"+*dockerSocket),
-		client.WithAPIVersionNegotiation(),
-	)
+	// API version negotiation is the client default; it runs lazily on the first request.
+	cli, err := client.New(client.WithHost("unix://" + *dockerSocket))
 	if err != nil {
 		log.Error("docker client init failed", "err", err)
 
@@ -113,7 +111,7 @@ func run() int {
 
 	isSwarmManager := false
 
-	nodeInfo, infoErr := cli.Info(rootCtx)
+	infoResult, infoErr := cli.Info(rootCtx, client.InfoOptions{})
 	if infoErr != nil {
 		log.Warn(
 			"could not query docker info; assuming worker node (service-label inspection disabled)",
@@ -121,10 +119,10 @@ func run() int {
 			infoErr,
 		)
 	} else {
-		isSwarmManager = nodeInfo.Swarm.ControlAvailable
+		isSwarmManager = infoResult.Info.Swarm.ControlAvailable
 		log.Info("swarm role detected",
 			"manager", isSwarmManager,
-			"local_node_state", nodeInfo.Swarm.LocalNodeState,
+			"local_node_state", infoResult.Info.Swarm.LocalNodeState,
 		)
 	}
 

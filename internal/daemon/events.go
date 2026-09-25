@@ -23,8 +23,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/observability"
@@ -41,17 +41,15 @@ type applyFn func(ctx context.Context, id string) error
 
 // eventListOptions returns the Docker event subscription options: "start"
 // and "unpause" container events at or after since.
-func eventListOptions(since string) events.ListOptions {
-	return events.ListOptions{
+func eventListOptions(since string) client.EventsListOptions {
+	return client.EventsListOptions{
 		Since: since,
-		Filters: filters.NewArgs(
-			filters.Arg("event", "start"),
-			filters.Arg("event", "unpause"),
-		),
+		// make, not the zero value: a nil client.Filters panics on Add.
+		Filters: make(client.Filters).Add("event", "start", "unpause"),
 	}
 }
 
-// formatSince formats a timestamp for events.ListOptions.Since.
+// formatSince formats a timestamp for client.EventsListOptions.Since.
 func formatSince(since time.Time) string {
 	return since.UTC().Format(time.RFC3339Nano)
 }
@@ -102,10 +100,11 @@ func listenEvents(
 		}
 
 		if msgs == nil {
-			msgs, errs = opts.Docker.Events(
+			stream := opts.Docker.Events(
 				ctx,
 				eventListOptions(resubscribeSince(since, lastEventNano)),
 			)
+			msgs, errs = stream.Messages, stream.Err
 		}
 
 		observability.SetReady(true)
@@ -165,6 +164,13 @@ func consumeEvents(
 		case streamErr := <-errs:
 			if streamErr == nil {
 				continue
+			}
+
+			// Checked before the error itself: once ctx is canceled the client
+			// can end the stream with a closed-body read error rather than
+			// context.Canceled, and that is a shutdown, not a stream failure.
+			if ctx.Err() != nil {
+				return false
 			}
 
 			if errors.Is(streamErr, context.Canceled) ||

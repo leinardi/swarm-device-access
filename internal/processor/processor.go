@@ -23,8 +23,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/swarm"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
 	"github.com/leinardi/swarm-device-access/internal/config"
@@ -39,12 +40,16 @@ const swarmServiceIDLabel = "com.docker.swarm.service.id"
 // It exists solely to allow unit tests to inject a fake without standing up a
 // real Docker daemon.
 type DockerInspector interface {
-	ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error)
-	ServiceInspectWithRaw(
+	ContainerInspect(
+		ctx context.Context,
+		containerID string,
+		options client.ContainerInspectOptions,
+	) (client.ContainerInspectResult, error)
+	ServiceInspect(
 		ctx context.Context,
 		serviceID string,
-		opts swarm.ServiceInspectOptions,
-	) (swarm.Service, []byte, error)
+		options client.ServiceInspectOptions,
+	) (client.ServiceInspectResult, error)
 }
 
 // deviceRuleKey is the deduplication key for cgroup device rules collected
@@ -76,10 +81,16 @@ type Processor struct {
 func (p *Processor) ProcessContainer(ctx context.Context, containerID string) error {
 	log := logger.L()
 
-	info, inspectErr := p.Inspector.ContainerInspect(ctx, containerID)
+	inspected, inspectErr := p.Inspector.ContainerInspect(
+		ctx,
+		containerID,
+		client.ContainerInspectOptions{},
+	)
 	if inspectErr != nil {
 		return fmt.Errorf("inspect container %q: %w", containerID, inspectErr)
 	}
+
+	info := inspected.Container
 
 	if info.State == nil || info.State.Pid == 0 {
 		log.Debug("container has no live pid; skipping", "id", containerID)
@@ -263,12 +274,10 @@ func (p *Processor) resolveServiceLabels(
 		return svc, nil
 	}
 
-	var svcErr error
-
-	svc, _, svcErr = p.Inspector.ServiceInspectWithRaw(
+	inspected, svcErr := p.Inspector.ServiceInspect(
 		ctx,
 		serviceID,
-		swarm.ServiceInspectOptions{},
+		client.ServiceInspectOptions{},
 	)
 	if svcErr != nil {
 		log.Warn("could not inspect parent service; using container labels only",
@@ -280,6 +289,7 @@ func (p *Processor) resolveServiceLabels(
 		return swarm.Service{}, nil
 	}
 
+	svc = inspected.Service
 	serviceLabels = svc.Spec.Labels
 
 	for _, unknownKey := range policy.UnknownLabels(serviceLabels) {

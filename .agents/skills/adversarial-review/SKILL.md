@@ -104,7 +104,9 @@ These are the ways this codebase breaks that generic reviewers miss. Read
 - **Conventional Commits with a scope** (`<type>(<scope>)[!]: <description>`), enforced by the
   `conventional-pre-commit` hook with `--force-scope`. Release notes are generated from them.
 - **depguard deny list** in `.golangci.yaml`: `github.com/sirupsen/logrus` outside
-  `internal/logger`, `github.com/pkg/errors`, and the `github.com/instana/testify` fork. A new
+  `internal/logger`, `github.com/pkg/errors`, the `github.com/instana/testify` fork, and
+  `github.com/docker/docker/…` (vulnerable in every version — the Docker SDK is
+  `github.com/moby/moby/client` + `github.com/moby/moby/api`). A new
   import of any of them — or a `//nolint:depguard` to sneak one in — is a finding.
 
 ## 4. Adversarial passes — language-agnostic

@@ -271,3 +271,5 @@ Ensure the host DBus socket is bind-mounted as `-v /run/dbus/system_bus_socket:/
 ### Daemon cannot connect to Docker
 
 Check the socket path with `-docker-socket`. Default: `/var/run/docker.sock`. On some hosts Docker Desktop uses a different path.
+
+The daemon requires Docker Engine 19.03+ (API 1.40). The `github.com/moby/moby/client` SDK refuses older engines with `API version … is not supported by this client: the minimum supported API version is 1.40`.
