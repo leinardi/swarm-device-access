@@ -95,7 +95,9 @@ a tag happens before the tag exists, and everything after it can be finished by 
 Everything stamped into an artifact comes from the commit rather than from the clock: the version, a fixed seven-character commit
 prefix, the commit date as the build date, and the commit time as BuildKit's `SOURCE_DATE_EPOCH`. The binaries are built with
 `-trimpath` and the exact Go version from `go.mod`, so a re-run of the same commit produces the same bytes, which is what lets a
-recovery check published assets by sha256.
+recovery check published assets by sha256. The image's base images are pinned by digest in
+[`deployments/docker/Dockerfile`](../deployments/docker/Dockerfile), so a rebuild uses the same bases too; Dependabot moves the
+pins forward through reviewed pull requests.
 
 ## Dry runs
 
