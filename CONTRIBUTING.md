@@ -72,6 +72,15 @@ feat(policy)!: drop the legacy allow label
 
 Mark breaking changes with `!` before the colon or a `BREAKING CHANGE: <description>` footer.
 
+The release version is derived from these types: since the last release, any `feat` makes the next release a minor, any `fix` a
+patch, and `!` or a `BREAKING CHANGE:` footer a major; `build`, `chore`, `ci`, `docs`, `refactor`, `test` and the rest bump nothing.
+See [`docs/release.md`](docs/release.md).
+
+Pull requests are merged with merge commits; squash and rebase merging are disabled. Every commit in a pull request therefore lands
+on `master` as it is and counts toward the version, so each commit needs a correct type, not just the pull request as a whole. The
+`conventional-commits` CI job checks every one of them. Enabling squash merging would make the pull-request title the commit
+subject instead, and would need a CI check on pull-request titles first.
+
 ## Verification
 
 After any change to the device-apply path, verify on a live host:

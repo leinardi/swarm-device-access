@@ -1,3 +1,7 @@
+# commit-msg as well as pre-commit, so that `make pre-commit-install` installs
+# the conventional-commit check too: the release version is derived from the
+# commit types, so a message that cannot be classified is caught at commit time
+# rather than at release time.
 default_install_hook_types: [pre-commit, commit-msg]
 
 repos:
@@ -5,8 +9,13 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-merge-conflict
+      # Fixtures are byte-for-byte captures of another tool's output (the files
+      # under internal/cgroup/testdata are /proc captures), and a formatter that
+      # tidies them makes them prove something other than what was captured.
       - id: end-of-file-fixer
+        exclude: (^|/)testdata/
       - id: trailing-whitespace
+        exclude: (^|/)testdata/
       - id: check-yaml
       - id: check-json
       - id: check-toml
@@ -113,6 +122,10 @@ repos:
     rev: v1.0.0-rc.4
     hooks:
       - id: go-test-repo-mod
+  # The release version is derived from the commit types since the last tag, so
+  # a message nobody can classify is a release nobody can version. With
+  # --force-scope, unlike monmux: every commit here names a scope, and AGENTS.md
+  # requires one.
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.4.0
     hooks:
