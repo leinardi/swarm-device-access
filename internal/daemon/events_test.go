@@ -21,11 +21,14 @@ package daemon
 import (
 	"context"
 	"errors"
+	"maps"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/events"
+	"github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/client"
 )
 
 var errTransportEOF = errors.New("transport EOF")
@@ -158,6 +161,75 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 	)
 	if got {
 		t.Error("consumeEvents should return false when stream error is context.Canceled")
+	}
+}
+
+// cancelledCtx reports itself canceled through Err but never closes Done, so a
+// select in consumeEvents can only take the errs case. That pins the race where
+// the stream error and the cancellation arrive together and select picks errs.
+type cancelledCtx struct{}
+
+func (cancelledCtx) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (cancelledCtx) Done() <-chan struct{} { return nil }
+
+func (cancelledCtx) Err() error { return context.Canceled }
+
+func (cancelledCtx) Value(any) any { return nil }
+
+func TestConsumeEvents_ArbitraryStreamErrorAfterCancelNoReconnect(t *testing.T) {
+	logs := captureLogs(t)
+
+	ctx := cancelledCtx{}
+	msgs, errs := makeChans(0, 1)
+	backoff := minBackoff
+
+	// A canceled stream can end with a closed-body read error rather than
+	// context.Canceled; it must be treated as shutdown, not a stream failure.
+	errs <- errTransportEOF
+
+	got := consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		noopApply,
+	)
+	if got {
+		t.Error("consumeEvents should return false when the context is already canceled")
+	}
+
+	if backoff != minBackoff {
+		t.Errorf(
+			"backoff = %v, want %v: a shutdown must not count as a failure",
+			backoff,
+			minBackoff,
+		)
+	}
+
+	if strings.Contains(logs.String(), "docker events stream error") {
+		t.Errorf("unexpected stream-error log at shutdown:\n%s", logs.String())
+	}
+}
+
+func TestEventListOptions(t *testing.T) {
+	t.Parallel()
+
+	const since = "2026-01-02T03:04:05.000000006Z"
+
+	got := eventListOptions(since)
+
+	if got.Since != since {
+		t.Errorf("Since = %q, want %q", got.Since, since)
+	}
+
+	want := client.Filters{"event": {"start": true, "unpause": true}}
+	if !maps.EqualFunc(got.Filters, want, maps.Equal) {
+		t.Errorf("Filters = %v, want %v", got.Filters, want)
 	}
 }
 

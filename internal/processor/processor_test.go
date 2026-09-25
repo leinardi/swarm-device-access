@@ -30,9 +30,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/swarm"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
 	"github.com/leinardi/swarm-device-access/internal/config"
@@ -52,18 +53,19 @@ type fakeInspector struct {
 func (f *fakeInspector) ContainerInspect(
 	_ context.Context,
 	_ string,
-) (container.InspectResponse, error) {
-	return f.result, f.err
+	_ client.ContainerInspectOptions,
+) (client.ContainerInspectResult, error) {
+	return client.ContainerInspectResult{Container: f.result}, f.err
 }
 
-func (f *fakeInspector) ServiceInspectWithRaw(
+func (f *fakeInspector) ServiceInspect(
 	_ context.Context,
 	_ string,
-	_ swarm.ServiceInspectOptions,
-) (swarm.Service, []byte, error) {
+	_ client.ServiceInspectOptions,
+) (client.ServiceInspectResult, error) {
 	f.serviceCalls++
 
-	return f.serviceResult, nil, f.serviceErr
+	return client.ServiceInspectResult{Service: f.serviceResult}, f.serviceErr
 }
 
 // buildProcRoot creates a minimal /proc/<pid>/{cgroup,mountinfo} structure
@@ -208,9 +210,7 @@ func TestProcessContainer_InspectError(t *testing.T) {
 
 func TestProcessContainer_NilState(t *testing.T) {
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{
-			State: nil,
-		},
+		State: nil,
 	}}
 	proc := &Processor{
 		Inspector: insp,
@@ -228,7 +228,7 @@ func TestProcessContainer_NilState(t *testing.T) {
 func TestProcessContainer_ZeroPid(t *testing.T) {
 	state := &container.State{Pid: 0}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 	}}
 	proc := &Processor{
 		Inspector: insp,
@@ -253,7 +253,7 @@ func TestProcessContainer_NoDevMounts(t *testing.T) {
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 		Mounts: []container.MountPoint{
 			{Source: "/tmp/data", Destination: "/data", Type: mount.TypeBind},
 			{Source: "/var/log", Destination: "/logs", Type: mount.TypeBind},
@@ -288,7 +288,7 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 		Mounts: []container.MountPoint{
 			{Source: "/tmp/data", Destination: "/data", Type: mount.TypeBind},
 			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
@@ -319,7 +319,7 @@ func TestProcessContainer_DevMount_DryRunNoError(t *testing.T) {
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 		Mounts: []container.MountPoint{
 			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
 		},
@@ -347,7 +347,7 @@ func TestProcessContainer_DeduplicatesDuplicateMounts(t *testing.T) {
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 		Mounts: []container.MountPoint{
 			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
 			{Source: "/dev/null", Destination: "/dev/null2", Type: mount.TypeBind},
@@ -376,7 +376,7 @@ func TestProcessContainer_OptInSkipsUnlabelled(t *testing.T) {
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 		Mounts: []container.MountPoint{
 			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
 		},
@@ -404,7 +404,7 @@ func TestProcessContainer_OptInProcessesEnabled(t *testing.T) {
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 		Config: &container.Config{
 			Labels: map[string]string{policy.LabelEnable: "true"},
 		},
@@ -798,7 +798,7 @@ func TestProcessContainer_DevDirectorySummary(t *testing.T) {
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: state},
+		State: state,
 		Mounts: []container.MountPoint{
 			{Source: "/dev", Destination: "/dev", Type: mount.TypeBind},
 		},
@@ -879,9 +879,7 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 		maps.Copy(labels, extraLabels)
 
 		return container.InspectResponse{
-			ContainerJSONBase: &container.ContainerJSONBase{
-				State: &container.State{Pid: pid},
-			},
+			State:  &container.State{Pid: pid},
 			Config: &container.Config{Labels: labels},
 		}
 	}
@@ -937,9 +935,7 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 		{
 			name: "non-Swarm passthrough",
 			containerInfo: container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					State: &container.State{Pid: pid},
-				},
+				State: &container.State{Pid: pid},
 				Config: &container.Config{Labels: map[string]string{
 					policy.LabelEnable: "true",
 				}},
@@ -1029,11 +1025,11 @@ func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
 			logOutput := buf.String()
 
 			if tc.wantServiceCall && inspector.serviceCalls == 0 {
-				t.Error("expected ServiceInspectWithRaw to be called, was not")
+				t.Error("expected ServiceInspect to be called, was not")
 			}
 
 			if !tc.wantServiceCall && inspector.serviceCalls > 0 {
-				t.Errorf("expected no ServiceInspectWithRaw call, got %d", inspector.serviceCalls)
+				t.Errorf("expected no ServiceInspect call, got %d", inspector.serviceCalls)
 			}
 
 			if tc.wantLogMsg != "" && !strings.Contains(logOutput, tc.wantLogMsg) {

@@ -29,9 +29,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/swarm"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/client"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
@@ -56,8 +56,8 @@ type fakeDocker struct {
 
 func (f *fakeDocker) ContainerList(
 	_ context.Context,
-	_ container.ListOptions,
-) ([]container.Summary, error) {
+	_ client.ContainerListOptions,
+) (client.ContainerListResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, "list")
 	f.listTime = time.Now()
@@ -67,13 +67,13 @@ func (f *fakeDocker) ContainerList(
 		f.onList()
 	}
 
-	return f.containers, nil
+	return client.ContainerListResult{Items: f.containers}, nil
 }
 
 func (f *fakeDocker) Events(
 	_ context.Context,
-	options events.ListOptions,
-) (msgs <-chan events.Message, errs <-chan error) {
+	options client.EventsListOptions,
+) client.EventsResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -81,10 +81,10 @@ func (f *fakeDocker) Events(
 	f.sinces = append(f.sinces, options.Since)
 
 	if len(f.sinces) == 1 && f.firstMsgs != nil {
-		return f.firstMsgs, f.firstErrs
+		return client.EventsResult{Messages: f.firstMsgs, Err: f.firstErrs}
 	}
 
-	return make(chan events.Message), make(chan error)
+	return client.EventsResult{Messages: make(chan events.Message), Err: make(chan error)}
 }
 
 func (f *fakeDocker) snapshot() (calls, sinces []string, listTime time.Time) {
@@ -105,22 +105,23 @@ type recordingInspector struct {
 func (r *recordingInspector) ContainerInspect(
 	_ context.Context,
 	containerID string,
-) (container.InspectResponse, error) {
+	_ client.ContainerInspectOptions,
+) (client.ContainerInspectResult, error) {
 	r.mu.Lock()
 	r.ids = append(r.ids, containerID)
 	r.mu.Unlock()
 
-	return container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{State: nil},
+	return client.ContainerInspectResult{
+		Container: container.InspectResponse{State: nil},
 	}, nil
 }
 
-func (*recordingInspector) ServiceInspectWithRaw(
+func (*recordingInspector) ServiceInspect(
 	_ context.Context,
 	_ string,
-	_ swarm.ServiceInspectOptions,
-) (swarm.Service, []byte, error) {
-	return swarm.Service{}, nil, nil
+	_ client.ServiceInspectOptions,
+) (client.ServiceInspectResult, error) {
+	return client.ServiceInspectResult{}, nil
 }
 
 func (r *recordingInspector) inspected() []string {

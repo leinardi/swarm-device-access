@@ -54,6 +54,26 @@ jobs:
             golangci-lint-fmt
             golangci-lint-full
 
+  # A dedicated job rather than an entry in the pre-commit-hooks list above: reviewdog runs hooks
+  # only on the files a PR changes, and the audit-deps-go hook only fires on go.mod/go.sum, so new
+  # code reaching an already-vulnerable API, or a transitively reintroduced banned module, would
+  # never be scanned there.
+  audit-deps:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Audit Go dependencies
+        run: make audit-deps
+
   markdownlint:
     runs-on: ubuntu-latest
 

@@ -48,6 +48,9 @@ The daemon needs host-level privileges: `privileged`, host cgroup namespace,
 host PID namespace, host user namespace, the host Docker socket, `/sys` mounted
 at `/host/sys`, and `/dev` mounted into the daemon container.
 
+It requires Docker Engine 19.03 or newer (API 1.40): the Docker client it uses
+refuses older engines.
+
 Swarm does not allow those runtime options directly on a service. The common
 workaround is to deploy a small wrapper service that runs the Docker CLI and
 uses the host Docker socket to launch the real privileged daemon container.

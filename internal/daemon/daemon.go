@@ -23,8 +23,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
+	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/observability"
@@ -35,8 +34,11 @@ import (
 // dockerAPI is the subset of *client.Client used by the daemon loop. It exists
 // so tests can inject a fake event stream and container list.
 type dockerAPI interface {
-	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
-	Events(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error)
+	ContainerList(
+		ctx context.Context,
+		options client.ContainerListOptions,
+	) (client.ContainerListResult, error)
+	Events(ctx context.Context, options client.EventsListOptions) client.EventsResult
 }
 
 // Options bundles the dependencies required by Run.
@@ -65,7 +67,7 @@ func run(ctx context.Context, opts Options, startWatcher func(context.Context, O
 	// The client delivers messages on an unbuffered channel, so events that
 	// arrive during the enumeration below wait (with backpressure on the
 	// socket) until listenEvents starts consuming them.
-	msgs, errs := opts.Docker.Events(ctx, eventListOptions(formatSince(since)))
+	stream := opts.Docker.Events(ctx, eventListOptions(formatSince(since)))
 
 	processed := make(map[string]time.Time)
 
@@ -82,7 +84,7 @@ func run(ctx context.Context, opts Options, startWatcher func(context.Context, O
 
 	startWatcher(ctx, opts)
 
-	listenEvents(ctx, opts, processed, since, msgs, errs)
+	listenEvents(ctx, opts, processed, since, stream.Messages, stream.Err)
 
 	return nil
 }
@@ -100,10 +102,12 @@ func processExistingContainers(
 ) error {
 	log := logger.L()
 
-	containers, err := cli.ContainerList(ctx, container.ListOptions{})
+	list, err := cli.ContainerList(ctx, client.ContainerListOptions{})
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
+
+	containers := list.Items
 
 	log.Debug("enumerating running containers", "count", len(containers))
 

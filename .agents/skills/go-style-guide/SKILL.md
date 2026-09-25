@@ -29,7 +29,7 @@ import (
     "fmt"
 
     // Group 2: third-party (everything that is NOT this module)
-    "github.com/docker/docker/client"
+    "github.com/moby/moby/client"
     "github.com/prometheus/client_golang/prometheus"
     "golang.org/x/sys/unix"
     "gopkg.in/yaml.v3"
@@ -212,6 +212,7 @@ tags.
 | `github.com/sirupsen/logrus` | `github.com/leinardi/swarm-device-access/internal/logger` → `logger.L()` |
 | `github.com/pkg/errors` | stdlib `errors` + `fmt.Errorf(...%w...)` |
 | `github.com/instana/testify` | `github.com/stretchr/testify` |
+| `github.com/docker/docker/…` | `github.com/moby/moby/client` + `github.com/moby/moby/api` (GO-2026-4887, GO-2026-4883) |
 
 ---
 

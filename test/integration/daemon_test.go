@@ -47,9 +47,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	dockerclient "github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	dockerclient "github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
@@ -411,12 +410,12 @@ func TestDaemon_DryRun_UnpauseEvent(t *testing.T) {
 		t.Fatal("timeout: start event not detected")
 	}
 
-	err := cli.ContainerPause(ctx, containerID)
+	_, err := cli.ContainerPause(ctx, containerID, dockerclient.ContainerPauseOptions{})
 	if err != nil {
 		t.Fatalf("pause container: %v", err)
 	}
 
-	err = cli.ContainerUnpause(ctx, containerID)
+	_, err = cli.ContainerUnpause(ctx, containerID, dockerclient.ContainerUnpauseOptions{})
 	if err != nil {
 		t.Fatalf("unpause container: %v", err)
 	}
@@ -596,10 +595,7 @@ func findBinary(ctx context.Context, t *testing.T) string {
 func requireDocker(t *testing.T) *dockerclient.Client {
 	t.Helper()
 
-	cli, err := dockerclient.NewClientWithOpts(
-		dockerclient.FromEnv,
-		dockerclient.WithAPIVersionNegotiation(),
-	)
+	cli, err := dockerclient.New(dockerclient.FromEnv)
 	if err != nil {
 		t.Skipf("Docker client init failed: %v", err)
 	}
@@ -607,7 +603,7 @@ func requireDocker(t *testing.T) *dockerclient.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err = cli.Ping(ctx)
+	_, err = cli.Ping(ctx, dockerclient.PingOptions{})
 	if err != nil {
 		t.Skipf("Docker daemon not reachable: %v", err)
 	}
@@ -624,7 +620,7 @@ func ensureTestImage(t *testing.T, cli *dockerclient.Client) {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
-		reader, err := cli.ImagePull(ctx, testImage, image.PullOptions{})
+		reader, err := cli.ImagePull(ctx, testImage, dockerclient.ImagePullOptions{})
 		if err != nil {
 			errPullTestImage = err
 
@@ -700,24 +696,23 @@ func startTestContainer(
 ) string {
 	t.Helper()
 
-	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	resp, err := cli.ContainerCreate(ctx, dockerclient.ContainerCreateOptions{
+		Config: &container.Config{
 			Image:  testImage,
 			Cmd:    []string{"sh", "-c", "sleep 30"},
 			Labels: labels,
 		},
-		&container.HostConfig{
+		HostConfig: &container.HostConfig{
 			Binds: binds,
 		},
-		nil, nil, "",
-	)
+	})
 	if err != nil {
 		t.Fatalf("create test container: %v", err)
 	}
 
-	err = cli.ContainerStart(ctx, resp.ID, container.StartOptions{})
+	_, err = cli.ContainerStart(ctx, resp.ID, dockerclient.ContainerStartOptions{})
 	if err != nil {
-		_ = cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		_, _ = cli.ContainerRemove(ctx, resp.ID, dockerclient.ContainerRemoveOptions{Force: true})
 
 		t.Fatalf("start test container: %v", err)
 	}
@@ -733,7 +728,7 @@ func removeContainer(t *testing.T, cli *dockerclient.Client, containerID string)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_ = cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	_, _ = cli.ContainerRemove(ctx, containerID, dockerclient.ContainerRemoveOptions{Force: true})
 }
 
 // scanOutput reads lines from r and sends a struct{} on each channel in signals

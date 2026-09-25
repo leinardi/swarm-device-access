@@ -37,6 +37,13 @@ linters:
               desc: Should be replaced by standard lib errors package.
             - pkg: "github.com/instana/testify"
               desc: It's a fork of github.com/stretchr/testify.
+        docker-sdk:
+          deny:
+            # Trailing slash: matches github.com/docker/docker/... only, not github.com/docker/docker-credential-helpers.
+            - pkg: "github.com/docker/docker/"
+              desc: >-
+                Affected by GO-2026-4887 and GO-2026-4883 in every version, with no fix in this module.
+                Use github.com/moby/moby/client and github.com/moby/moby/api instead.
     dupl:
       threshold: 100
     funlen:
