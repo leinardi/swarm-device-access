@@ -173,22 +173,14 @@ an action that moves, or whose repository is compromised, would execute inside t
 `packages: write` and an OIDC identity. A SHA cannot be moved. Dependabot's `github-actions` ecosystem updates the pins and
 rewrites the comment. `svu` is pinned the same way, as a version in `SVU_VERSION`, and is a human's job to bump.
 
-A SHA pin fixes only the top-level ref, so the actions we own pin what they run too. `leinardi/gha-pre-commit-reviewdog-actions`
-pins `actions/cache` and everything else inside its composite actions from `v1.0.1`, the release pinned here.
-
-**Remaining exposure.** `leinardi/gh-reusable-workflows`' `pre-commit-warmup.yaml` (pinned here at `v1.2.0`) still runs
-`actions/checkout@v7`, `actions/setup-python@v7` and `actions/cache@v6` by mutable tag, in the warm-up job that runs on a manual
-dispatch or a push to `master` that changes `.pre-commit-config.yaml`. The reusable workflow declares `permissions: contents: read`,
-so that job's `GITHUB_TOKEN` is read-only, but the token is not what matters here. Every step in a job also gets the Actions cache
-token, which can write any cache key, and a job on `master` writes into the `master` cache scope. The release job runs on `master`
-and restores that scope twice: `actions/setup-go` with `cache: true` restores the Go module and build caches, and both image builds
-read the BuildKit layer cache with `cache-from: type=gha`. So a moved or compromised tag in the warm-up could poison the caches
-the release job builds from, and the binaries and image built from them would then be attested and signed like any other. The
-actions themselves never run in the release job; their cache writes can reach it.
-
-The fix is to pin those three actions in `leinardi/gh-reusable-workflows`, cut a new `v1.x.y` release and bump the pin here. It
-was deferred when the other repository's pins were done, and it is the one open gap in this section. Turning off `setup-go`'s cache
-and the GHA cache in the release job would close it from this side instead, at the cost of slower release builds.
+A SHA pin fixes only the top-level ref, so the actions and reusable workflows we own pin what they run too:
+`leinardi/gha-pre-commit-reviewdog-actions` from `v1.0.1` and `leinardi/gh-reusable-workflows` from `v1.2.1`, the releases pinned
+here. The warm-up workflow matters more than it looks. It declares `permissions: contents: read`, but every step in a job also gets
+the Actions cache token, which can write any cache key, and the warm-up runs on `master`, so it writes into the `master` cache
+scope. The release job restores that scope twice: `actions/setup-go` with `cache: true` restores the Go module and build caches,
+and both image builds read the BuildKit layer cache with `cache-from: type=gha`. A moved tag inside the warm-up could therefore
+poison what the release builds, attests and signs. Keep the nested pins in both repositories current, and bump the pins here when
+they release.
 
 ## One-time setup: the `release` environment
 
