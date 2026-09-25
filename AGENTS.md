@@ -110,3 +110,7 @@ All commits MUST be Conventional Commits 1.0.0 **with a scope**: `<type>(<scope>
 footers. Enforced by the `conventional-pre-commit` `commit-msg` hook (`--force-scope`). Types: `feat`, `fix`, `docs`, `test`, `refactor`,
 `perf`, `build`, `ci`, `chore`, `style`, `revert`. Breaking changes use `!` before `:` or a `BREAKING CHANGE:` footer. Release notes are
 generated from these messages. Examples: `fix(processor): skip unresolvable symlinks`, `ci(dependabot): add dhi registry`.
+
+Release versions are derived from the commit types since the last tag (`feat` minor, `fix` patch, `!`/`BREAKING CHANGE` major;
+anything else bumps nothing), so a wrong type ships a wrong version. PRs land as merge commits, so every commit counts, not just the
+PR title. See [`docs/release.md`](docs/release.md).
