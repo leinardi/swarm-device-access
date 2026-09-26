@@ -55,6 +55,32 @@ Swarm does not allow those runtime options directly on a service. The common
 workaround is to deploy a small wrapper service that runs the Docker CLI and
 uses the host Docker socket to launch the real privileged daemon container.
 
+### Host Requirements
+
+On cgroup v2 hosts the daemon adds its grants to the device filter the
+container runtime already attached, replacing that program in place rather
+than removing it first, so the container is never left unfiltered. That needs:
+
+- The runtime's device filter attached with `BPF_F_ALLOW_MULTI`, as runc 1.0+,
+  crun and systemd do. A filter attached without it (exclusive or
+  `BPF_F_ALLOW_OVERRIDE`) cannot be replaced without a window in which the
+  container has no filter at all, so the container is skipped: the daemon logs
+  an error naming the attach mode and counts it under
+  `sda_containers_skipped_total{reason="unsupported_attach_mode"}`.
+- Every device filter attached to the container's cgroup readable by the
+  daemon. If any of them is hidden from it (for example an SELinux policy that
+  labels systemd's device filter so the daemon cannot open it), nothing is
+  changed and the container is retried: an unreadable program cannot be
+  checked or safely replaced. This is stricter than runc, which ignores such
+  programs, and such policies are unsupported.
+- A device filter attached at all. A container whose cgroup has none (for
+  example after `systemctl daemon-reload` wiped it) is not granted anything.
+
+Atomic replacement (`BPF_F_REPLACE`) is used when the kernel supports it
+(Linux 5.5+, detected on first use); otherwise each new program is attached
+before the original is detached, which is narrower, never wider, if it is
+interrupted.
+
 ### Docker Compose for Swarm
 
 ```yaml

@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/cilium/ebpf/rlimit"
 	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
@@ -87,6 +88,19 @@ func run() int {
 		"device_allow", cfg.Policy.DeviceAllow,
 		"device_deny", cfg.Policy.DeviceDeny,
 	)
+
+	// Lift RLIMIT_MEMLOCK once for the process so BPF_PROG_LOAD does not fail
+	// on kernels that still charge BPF memory to it (no-op from Linux 5.11,
+	// where memcg accounting replaced it). The limit is not inherited by
+	// containers.
+	memlockErr := rlimit.RemoveMemlock()
+	if memlockErr != nil {
+		log.Warn(
+			"could not remove RLIMIT_MEMLOCK; loading BPF device filters may fail",
+			"err",
+			memlockErr,
+		)
+	}
 
 	rootCtx, cancelRoot := signal.NotifyContext(
 		context.Background(),

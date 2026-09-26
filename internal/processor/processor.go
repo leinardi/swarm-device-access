@@ -20,6 +20,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -83,6 +84,10 @@ type Processor struct {
 	// at this scale; any Docker I/O made while holding it is bounded by
 	// CallTimeout.
 	mu sync.Mutex
+
+	// newCgroup builds the cgroup API for a version; nil means cgroup.New.
+	// Tests replace it to observe or fail the mutation without a kernel.
+	newCgroup func(version int) (cgroup.Interface, error)
 
 	// afterCompute, when set, runs under mu after the rules are computed
 	// and before they are applied. Tests use it to hold a worker mid-flight.
@@ -165,7 +170,12 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 
 	log.Debug("cgroup version detected", "pid", pid, "version", cgroupVersion)
 
-	api, apiErr := cgroup.New(cgroupVersion)
+	newCgroup := p.newCgroup
+	if newCgroup == nil {
+		newCgroup = cgroup.New
+	}
+
+	api, apiErr := newCgroup(cgroupVersion)
 	if apiErr != nil {
 		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
 	}
@@ -201,6 +211,26 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 
 	if len(collected.granted) > 0 {
 		applyErr := p.applyRulesToCgroup(api, collected.granted, cgroupPath, pid, cfg.DryRun)
+		if errors.Is(applyErr, cgroup.ErrUnsupportedAttachMode) {
+			// Permanent for this container: the runtime chose the attach mode.
+			// Nothing was attached or detached, so it keeps only the runtime's
+			// own device filter.
+			log.Error("container skipped: device filter attach mode not supported; "+
+				"the runtime must attach device filters with BPF_F_ALLOW_MULTI",
+				"id", containerID, "cgroup", cgroupPath, "err", applyErr)
+			p.Metrics.RecordContainerSkipped("unsupported_attach_mode")
+
+			return nil
+		}
+
+		if errors.Is(applyErr, cgroup.ErrFiltersInaccessible) {
+			return fmt.Errorf(
+				"container %q (reason filters_inaccessible, retryable): %w",
+				containerID,
+				applyErr,
+			)
+		}
+
 		if applyErr != nil {
 			return applyErr
 		}

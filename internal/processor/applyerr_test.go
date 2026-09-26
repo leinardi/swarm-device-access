@@ -1,0 +1,109 @@
+//go:build linux
+
+/*
+ * Copyright 2026 Roberto Leinardi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package processor
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+
+	"github.com/leinardi/swarm-device-access/internal/cgroup"
+	"github.com/leinardi/swarm-device-access/internal/policy"
+)
+
+// failingCgroup is a cgroup.Interface whose mutation returns err. The path
+// lookups delegate to the real v2 implementation, which reads the fake /proc.
+type failingCgroup struct {
+	cgroup.Interface
+
+	err   error
+	calls int
+}
+
+func (f *failingCgroup) AddDeviceRules(string, []cgroup.DeviceRule) error {
+	f.calls++
+
+	return f.err
+}
+
+func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
+	t.Helper()
+
+	const pid = 70
+
+	real2, err := cgroup.New(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fake.Interface = real2
+
+	return &Processor{
+		Inspector: &fakeInspector{result: container.InspectResponse{
+			State: &container.State{Pid: pid},
+			Mounts: []container.MountPoint{
+				{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+			},
+		}},
+		Cfg:       newStore(policy.ModeAll, false),
+		HostRoot:  "/host",
+		ProcRoot:  buildProcRoot(t, pid),
+		newCgroup: func(int) (cgroup.Interface, error) { return fake, nil },
+	}
+}
+
+func TestProcessContainer_UnsupportedAttachModeSkipsContainer(t *testing.T) {
+	buf := captureLogger(t)
+	fake := &failingCgroup{
+		err: fmt.Errorf("%w: attach mode none (exclusive)", cgroup.ErrUnsupportedAttachMode),
+	}
+
+	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("unsupported attach mode must skip, not fail: %v", err)
+	}
+
+	if fake.calls != 1 {
+		t.Fatalf("AddDeviceRules calls = %d, want 1", fake.calls)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "level=ERROR") ||
+		!strings.Contains(out, "attach mode none (exclusive)") {
+		t.Errorf("expected ERROR naming the attach mode, got:\n%s", out)
+	}
+}
+
+func TestProcessContainer_InaccessibleFiltersIsRetryableError(t *testing.T) {
+	fake := &failingCgroup{err: fmt.Errorf("%w: 1 of 2 programs", cgroup.ErrFiltersInaccessible)}
+
+	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	if !errors.Is(err, cgroup.ErrFiltersInaccessible) {
+		t.Fatalf("err = %v, want ErrFiltersInaccessible", err)
+	}
+
+	if !strings.Contains(err.Error(), "filters_inaccessible") {
+		t.Errorf("error %q does not carry the reason", err)
+	}
+}

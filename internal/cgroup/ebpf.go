@@ -32,7 +32,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"os"
 	"runtime"
@@ -43,11 +42,14 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/link"
 	"golang.org/x/sys/unix"
+
+	"github.com/leinardi/swarm-device-access/internal/logger"
 )
 
 var (
 	errProgramFinalized   = errors.New("the program is finalized")
 	errIncompleteProgList = errors.New("could not get complete list of CGROUP_DEVICE programs")
+	errNoOriginalProgram  = errors.New("no original device filter program to wrap")
 )
 
 type program struct {
@@ -235,7 +237,17 @@ func (p *program) finalize(
 }
 
 // FindAttachedCgroupDeviceFilters finds all ebpf prgrams associated with 'dirFd' that control device access.
-func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
+//
+// It returns the handles it could open, the total number of programs the
+// kernel reports as attached (ProgCnt), how many of those could not be opened
+// (EACCES/EPERM, typically an LSM label) and the cgroup's attach flags for
+// BPF_CGROUP_DEVICE. total is the only reliable "nothing attached" signal: an
+// empty handle slice can also mean every attached program is inaccessible.
+// On error no handle is returned and every handle opened so far is closed;
+// on success the caller owns (and must close) the returned handles.
+func FindAttachedCgroupDeviceFilters(
+	dirFd int,
+) (progs []*ebpf.Program, total, inaccessible int, attachFlags uint32, err error) {
 	type bpfAttrQuery struct {
 		TargetFd    uint32
 		AttachType  uint32
@@ -263,8 +275,13 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 			uintptr(unix.BPF_PROG_QUERY),
 			uintptr(unsafe.Pointer(&query)),
 			unsafe.Sizeof(query))
-		size = int(query.ProgCnt)
+		// The kernel writes into progIds through a pointer the GC cannot see,
+		// on success and on ENOSPC alike, so the buffer must stay alive until
+		// the syscall has returned, not merely until the ids are read below.
+		runtime.KeepAlive(progIds)
 		runtime.KeepAlive(query)
+
+		size = int(query.ProgCnt)
 
 		if errno != 0 {
 			// On ENOSPC we get the correct number of programs.
@@ -273,7 +290,7 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 				continue
 			}
 
-			return nil, fmt.Errorf("bpf_prog_query(BPF_CGROUP_DEVICE) failed: %w", errno)
+			return nil, 0, 0, 0, fmt.Errorf("bpf_prog_query(BPF_CGROUP_DEVICE) failed: %w", errno)
 		}
 
 		// Convert the ids to program handles.
@@ -281,41 +298,42 @@ func FindAttachedCgroupDeviceFilters(dirFd int) ([]*ebpf.Program, error) {
 
 		programs := make([]*ebpf.Program, 0, len(progIds))
 		for _, progId := range progIds {
-			program, err := ebpf.NewProgramFromID(ebpf.ProgramID(progId))
-			if err != nil {
-				// We skip over programs that give us -EACCES or -EPERM. This
-				// is necessary because there may be BPF programs that have
-				// been attached (such as with --systemd-cgroup) which have an
-				// LSM label that blocks us from interacting with the program.
-				//
-				// Because additional BPF_CGROUP_DEVICE programs only can add
-				// restrictions, there's no real issue with just ignoring these
-				// programs (and stops runc from breaking on distributions with
-				// very strict SELinux policies).
-				if errors.Is(err, os.ErrPermission) {
-					slog.Debug(
-						"ignoring existing CGROUP_DEVICE program (cannot be accessed -- likely LSM policy)",
+			program, openErr := ebpf.NewProgramFromID(ebpf.ProgramID(progId))
+			if openErr != nil {
+				// Programs that give us -EACCES or -EPERM (for example an LSM
+				// label on systemd's device filter) are counted, not skipped:
+				// runc ignores them because extra filters only restrict, but
+				// such a program could also be one of our own wrappers holding
+				// a grant, and without opening it neither its ownership nor
+				// the result of a replacement can be established.
+				if errors.Is(openErr, os.ErrPermission) {
+					logger.L().Debug(
+						"existing CGROUP_DEVICE program cannot be accessed (likely LSM policy)",
 						"prog_id",
 						progId,
 						"err",
-						err,
+						openErr,
 					)
+
+					inaccessible++
 
 					continue
 				}
 
-				return nil, fmt.Errorf("cannot fetch program from id: %w", err)
+				for _, opened := range programs {
+					opened.Close()
+				}
+
+				return nil, 0, 0, 0, fmt.Errorf("cannot fetch program from id: %w", openErr)
 			}
 
 			programs = append(programs, program)
 		}
 
-		runtime.KeepAlive(progIds)
-
-		return programs, nil
+		return programs, size, inaccessible, query.AttachFlags, nil
 	}
 
-	return nil, errIncompleteProgList
+	return nil, 0, 0, 0, errIncompleteProgList
 }
 
 // PrependDeviceFilter prepends a set of instructions for further device filtering to an existing device filtering ebpf program.
@@ -323,8 +341,11 @@ func PrependDeviceFilter(
 	devices []DeviceRule,
 	origInsts asm.Instructions,
 ) (asm.Instructions, error) {
+	// A bare Return() tail leaves R0 unset on fall-through, which the
+	// verifier rejects, and there is no safe default verdict to invent here:
+	// the original program is what denies everything not granted.
 	if len(origInsts) == 0 {
-		origInsts = asm.Instructions{asm.Return()}
+		return nil, errNoOriginalProgram
 	}
 
 	labelPrefix, err := randomLabelPrefix()

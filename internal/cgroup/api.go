@@ -52,7 +52,7 @@ func New(version int) (Interface, error) {
 	case 1:
 		return &cgroupv1{}, nil
 	case 2:
-		return &cgroupv2{}, nil
+		return &cgroupv2{ops: kernelOps{}, replace: processReplaceProbe}, nil
 	default:
 		return nil, fmt.Errorf( //nolint:err113 // dynamic content
 			"invalid cgroup version %d",
@@ -65,7 +65,10 @@ var errNoDeviceOrUnifiedCgroup = errors.New("no devices or unified cgroup entrie
 
 type (
 	cgroupv1 struct{}
-	cgroupv2 struct{}
+	cgroupv2 struct {
+		ops     v2ops
+		replace *replaceProbe
+	}
 )
 
 var (

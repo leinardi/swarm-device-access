@@ -278,7 +278,10 @@ func TestPrependDeviceFilter_RoundTrip(t *testing.T) {
 		{Allow: true, Type: "b", Major: ptr64(8), Minor: ptr64(0), Access: "rwm"},
 	}
 
-	insts, err := PrependDeviceFilter(rules, nil)
+	insts, err := PrependDeviceFilter(
+		rules,
+		asm.Instructions{asm.Mov.Imm32(asm.R0, 0), asm.Return()},
+	)
 	if err != nil {
 		t.Fatalf("PrependDeviceFilter: %v", err)
 	}
