@@ -170,7 +170,8 @@ func startReloadWatcher(ctx context.Context, opts Options) {
 				opts.Docker,
 				fresh,
 				opts.Metrics,
-				processorApply(opts.Proc),
+				// MUTATION: the reload re-apply no longer applies anything.
+				func(context.Context, string) error { return nil },
 			)
 			if processErr != nil {
 				log.Warn("could not re-apply rules after systemd reload",
