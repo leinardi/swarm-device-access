@@ -94,9 +94,11 @@ or deployment behavior:
 
 3. Start a consumer container with `--label swarm-device-access.enable=true` and
    a real `/dev/...` bind mount and confirm the daemon logs `device mount detected`
-   and `adding device rule`. (For Swarm stacks, the equivalent placement is
-   `deploy.labels:` in the service spec — `docker service create --label` writes
-   to the same location.)
+   and `adding device rule`. (For Swarm stacks, the equivalent placement is the
+   service's top-level `labels:`, which Docker copies into every task container;
+   `docker service create --container-label` writes to the same location. Do not
+   use `deploy.labels:` or `docker service create --label`: those are service
+   metadata that workers cannot read, see the README.)
 
 4. If the host uses cgroup v2, confirm a `BPF_CGROUP_DEVICE` program is attached
    to the consumer cgroup with `bpftool`.
