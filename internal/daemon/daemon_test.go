@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -43,25 +44,37 @@ import (
 // fakeDocker is a dockerAPI test double. The first Events call returns
 // firstMsgs/firstErrs; later calls return streams that stay open until ctx is
 // done. onList, when set, runs inside ContainerList (i.e. during enumeration).
+// hangList and hangEvents make the corresponding call block until its context
+// is done, like a wedged dockerd; hangEvents is keyed by the 1-based call number.
 type fakeDocker struct {
-	mu         sync.Mutex
-	calls      []string
-	sinces     []string
-	listTime   time.Time
-	containers []container.Summary
-	firstMsgs  chan events.Message
-	firstErrs  chan error
-	onList     func()
+	mu             sync.Mutex
+	calls          []string
+	sinces         []string
+	listTime       time.Time
+	containers     []container.Summary
+	firstMsgs      chan events.Message
+	firstErrs      chan error
+	onList         func()
+	hangList       bool
+	hangEvents     map[int]bool
+	eventsReturned int
+	eventsCtx      context.Context //nolint:containedctx // records the stream context so tests can assert its lifetime
 }
 
 func (f *fakeDocker) ContainerList(
-	_ context.Context,
+	ctx context.Context,
 	_ client.ContainerListOptions,
 ) (client.ContainerListResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, "list")
 	f.listTime = time.Now()
 	f.mu.Unlock()
+
+	if f.hangList {
+		<-ctx.Done()
+
+		return client.ContainerListResult{}, fmt.Errorf("hung list: %w", ctx.Err())
+	}
 
 	if f.onList != nil {
 		f.onList()
@@ -71,20 +84,55 @@ func (f *fakeDocker) ContainerList(
 }
 
 func (f *fakeDocker) Events(
-	_ context.Context,
+	ctx context.Context,
 	options client.EventsListOptions,
 ) client.EventsResult {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-
 	f.calls = append(f.calls, "events")
 	f.sinces = append(f.sinces, options.Since)
+	callNum := len(f.sinces)
+	hang := f.hangEvents[callNum]
+	f.eventsCtx = ctx
+	f.mu.Unlock()
 
-	if len(f.sinces) == 1 && f.firstMsgs != nil {
+	defer func() {
+		f.mu.Lock()
+		f.eventsReturned++
+		f.mu.Unlock()
+	}()
+
+	if hang {
+		<-ctx.Done()
+
+		errs := make(chan error, 1)
+		errs <- ctx.Err()
+
+		return client.EventsResult{Messages: make(chan events.Message), Err: errs}
+	}
+
+	if callNum == 1 && f.firstMsgs != nil {
 		return client.EventsResult{Messages: f.firstMsgs, Err: f.firstErrs}
 	}
 
 	return client.EventsResult{Messages: make(chan events.Message), Err: make(chan error)}
+}
+
+func (*fakeDocker) Ping(context.Context, client.PingOptions) (client.PingResult, error) {
+	return client.PingResult{}, nil
+}
+
+func (f *fakeDocker) lastEventsContext() context.Context {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.eventsCtx
+}
+
+func (f *fakeDocker) eventsCalls() (started, returned int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return len(f.sinces), f.eventsReturned
 }
 
 func (f *fakeDocker) snapshot() (calls, sinces []string, listTime time.Time) {
@@ -134,7 +182,13 @@ func (r *recordingInspector) inspected() []string {
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 
-	deadline := time.Now().Add(2 * time.Second)
+	waitForWithin(t, 2*time.Second, cond)
+}
+
+func waitForWithin(t *testing.T, limit time.Duration, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -232,8 +286,8 @@ func TestListenEvents_ReconnectSinceAfterLastEvent(t *testing.T) {
 			opts,
 			map[string]time.Time{},
 			time.Now().Add(-time.Hour),
-			msgs,
-			make(chan error),
+			client.EventsResult{Messages: msgs, Err: make(chan error)},
+			func() {},
 		)
 	}()
 
@@ -278,7 +332,14 @@ func TestListenEvents_ReconnectBeforeAnyEventUsesInitialSince(t *testing.T) {
 	go func() {
 		defer close(done)
 
-		listenEvents(ctx, opts, map[string]time.Time{}, initial, msgs, make(chan error))
+		listenEvents(
+			ctx,
+			opts,
+			map[string]time.Time{},
+			initial,
+			client.EventsResult{Messages: msgs, Err: make(chan error)},
+			func() {},
+		)
 	}()
 
 	waitFor(t, func() bool {
@@ -428,7 +489,14 @@ func TestProcessOne_StartupFailureMatchesEventPath(t *testing.T) {
 	docker := &fakeDocker{containers: []container.Summary{{ID: "bad"}}}
 	processed := map[string]time.Time{}
 
-	err := processExistingContainers(context.Background(), docker, processed, metrics, failingApply)
+	err := processExistingContainers(
+		context.Background(),
+		docker,
+		processed,
+		metrics,
+		failingApply,
+		DockerCallTimeout,
+	)
 	if err != nil {
 		t.Fatalf("processExistingContainers: %v", err)
 	}
@@ -472,6 +540,7 @@ func TestProcessOne_StartupFailureMatchesEventPath(t *testing.T) {
 		new(int64),
 		metrics,
 		failingApply,
+		DockerCallTimeout,
 	)
 
 	assertFailureReported(t, before, readMetrics(t), buf.String(), "could not process container")
@@ -486,7 +555,14 @@ func TestProcessOne_StartupSuccessRecordsMetrics(t *testing.T) {
 	docker := &fakeDocker{containers: []container.Summary{{ID: "good"}}}
 	processed := map[string]time.Time{}
 
-	err := processExistingContainers(context.Background(), docker, processed, metrics, noopApply)
+	err := processExistingContainers(
+		context.Background(),
+		docker,
+		processed,
+		metrics,
+		noopApply,
+		DockerCallTimeout,
+	)
 	if err != nil {
 		t.Fatalf("processExistingContainers: %v", err)
 	}

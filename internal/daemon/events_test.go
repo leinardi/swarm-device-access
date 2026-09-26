@@ -104,6 +104,7 @@ func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
 		new(int64),
 		nil,
 		noopApply,
+		DockerCallTimeout,
 	)
 	if got {
 		t.Error(
@@ -129,6 +130,7 @@ func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
 		new(int64),
 		nil,
 		noopApply,
+		DockerCallTimeout,
 	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on stream error")
@@ -158,6 +160,7 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 		new(int64),
 		nil,
 		noopApply,
+		DockerCallTimeout,
 	)
 	if got {
 		t.Error("consumeEvents should return false when stream error is context.Canceled")
@@ -198,6 +201,7 @@ func TestConsumeEvents_ArbitraryStreamErrorAfterCancelNoReconnect(t *testing.T) 
 		new(int64),
 		nil,
 		noopApply,
+		DockerCallTimeout,
 	)
 	if got {
 		t.Error("consumeEvents should return false when the context is already canceled")
@@ -250,6 +254,7 @@ func TestConsumeEvents_ChannelCloseReturnsReconnect(t *testing.T) {
 		new(int64),
 		nil,
 		noopApply,
+		DockerCallTimeout,
 	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on channel close")
@@ -281,7 +286,18 @@ func TestConsumeEvents_EventCallsApply(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, map[string]time.Time{}, &backoff, nil, new(int64), nil, apply)
+	consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		map[string]time.Time{},
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		apply,
+		DockerCallTimeout,
+	)
 
 	if called.Load() != 2 {
 		t.Errorf("apply called %d times, want 2", called.Load())
@@ -313,7 +329,18 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, processed, &backoff, nil, new(int64), nil, apply)
+	consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		processed,
+		&backoff,
+		nil,
+		new(int64),
+		nil,
+		apply,
+		DockerCallTimeout,
+	)
 
 	if called.Load() != 0 {
 		t.Errorf("apply called %d times for deduplicated ID, want 0", called.Load())
@@ -344,7 +371,18 @@ func TestConsumeEvents_ClearProcessedOnTTL(t *testing.T) {
 		cancel()
 	}()
 
-	consumeEvents(ctx, msgs, errs, processed, &backoff, clearCh, new(int64), nil, noopApply)
+	consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		processed,
+		&backoff,
+		clearCh,
+		new(int64),
+		nil,
+		noopApply,
+		DockerCallTimeout,
+	)
 
 	if len(processed) != 0 {
 		t.Errorf("processed map has %d entries after TTL, want 0", len(processed))
@@ -375,6 +413,7 @@ func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 		new(int64),
 		nil,
 		noopApply,
+		DockerCallTimeout,
 	)
 
 	if backoff != minBackoff {
@@ -422,7 +461,18 @@ func TestConsumeEvents_RestartWithinWindow(t *testing.T) {
 				cancel()
 			}()
 
-			consumeEvents(ctx, msgs, errs, processed, &backoff, nil, new(int64), nil, apply)
+			consumeEvents(
+				ctx,
+				msgs,
+				errs,
+				processed,
+				&backoff,
+				nil,
+				new(int64),
+				nil,
+				apply,
+				DockerCallTimeout,
+			)
 
 			if called.Load() != tc.wantApply {
 				t.Errorf("apply called %d times, want %d", called.Load(), tc.wantApply)
@@ -463,6 +513,7 @@ func TestConsumeEvents_TracksLastEventNano(t *testing.T) {
 		&lastEventNano,
 		nil,
 		noopApply,
+		DockerCallTimeout,
 	)
 
 	if lastEventNano != 300 {

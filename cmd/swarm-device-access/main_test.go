@@ -16,6 +16,39 @@
  * limitations under the License.
  */
 
-// Tests have moved to internal/daemon and internal/processor.
-
 package main
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/moby/moby/client"
+)
+
+// hungInfo blocks Info until its context is done, like a wedged dockerd.
+type hungInfo struct{}
+
+func (hungInfo) Info(ctx context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+	<-ctx.Done()
+
+	return client.SystemInfoResult{}, fmt.Errorf("hung info: %w", ctx.Err())
+}
+
+func TestDetectSwarmManager_HungInfoIsBounded(t *testing.T) {
+	const timeout = 50 * time.Millisecond
+
+	done := make(chan bool, 1)
+
+	go func() { done <- detectSwarmManager(context.Background(), hungInfo{}, timeout) }()
+
+	select {
+	case manager := <-done:
+		if manager {
+			t.Error("a timed-out Info must degrade to worker, got manager")
+		}
+	case <-time.After(20 * timeout):
+		t.Fatal("detectSwarmManager did not return: Info is not bounded")
+	}
+}

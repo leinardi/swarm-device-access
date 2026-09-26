@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/swarm"
@@ -64,7 +65,11 @@ type deviceRuleKey struct {
 // bind-mount /dev/... paths. Inspector and Cfg are required; Metrics may be
 // nil (calls become no-ops). HostRoot is the container-internal path to the
 // host root (typically "/host"). ProcRoot is used for /proc lookups ("/" in
-// production, temp dir in tests).
+// production, temp dir in tests). CallTimeout bounds each Docker call the
+// processor makes, independent of the caller's context, so every entry point
+// (not only the daemon's per-container wrapper) has bounded Docker I/O;
+// production sets it to daemon.DockerCallTimeout, and zero leaves the calls
+// bounded by the caller's context only.
 type Processor struct {
 	Inspector      DockerInspector
 	Cfg            *config.Store
@@ -72,6 +77,7 @@ type Processor struct {
 	HostRoot       string
 	ProcRoot       string
 	IsSwarmManager bool
+	CallTimeout    time.Duration
 }
 
 // ProcessContainer inspects a container and applies cgroup BPF device-allow
@@ -81,11 +87,15 @@ type Processor struct {
 func (p *Processor) ProcessContainer(ctx context.Context, containerID string) error {
 	log := logger.L()
 
+	inspectCtx, cancelInspect := p.callContext(ctx)
 	inspected, inspectErr := p.Inspector.ContainerInspect(
-		ctx,
+		inspectCtx,
 		containerID,
 		client.ContainerInspectOptions{},
 	)
+
+	cancelInspect()
+
 	if inspectErr != nil {
 		return fmt.Errorf("inspect container %q: %w", containerID, inspectErr)
 	}
@@ -202,6 +212,15 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 	return nil
 }
 
+// callContext derives the context for one Docker call.
+func (p *Processor) callContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if p.CallTimeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+
+	return context.WithTimeout(ctx, p.CallTimeout)
+}
+
 // containerRules aggregates the per-mount results for one container.
 type containerRules struct {
 	granted    []cgroup.DeviceRule // deduplicated across mounts
@@ -274,11 +293,15 @@ func (p *Processor) resolveServiceLabels(
 		return svc, nil
 	}
 
+	svcCtx, cancelSvc := p.callContext(ctx)
 	inspected, svcErr := p.Inspector.ServiceInspect(
-		ctx,
+		svcCtx,
 		serviceID,
 		client.ServiceInspectOptions{},
 	)
+
+	cancelSvc()
+
 	if svcErr != nil {
 		log.Warn("could not inspect parent service; using container labels only",
 			"id", containerID,

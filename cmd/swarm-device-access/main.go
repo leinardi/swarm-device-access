@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/moby/moby/client"
 
@@ -109,22 +110,7 @@ func run() int {
 
 	recorder := observability.NewRecorder()
 
-	isSwarmManager := false
-
-	infoResult, infoErr := cli.Info(rootCtx, client.InfoOptions{})
-	if infoErr != nil {
-		log.Warn(
-			"could not query docker info; assuming worker node (service-label inspection disabled)",
-			"err",
-			infoErr,
-		)
-	} else {
-		isSwarmManager = infoResult.Info.Swarm.ControlAvailable
-		log.Info("swarm role detected",
-			"manager", isSwarmManager,
-			"local_node_state", infoResult.Info.Swarm.LocalNodeState,
-		)
-	}
+	isSwarmManager := detectSwarmManager(rootCtx, cli, daemon.DockerCallTimeout)
 
 	// Start optional observability servers before the main loop so they are
 	// reachable during startup enumeration.
@@ -143,6 +129,7 @@ func run() int {
 		HostRoot:       hostRootPath,
 		ProcRoot:       "/",
 		IsSwarmManager: isSwarmManager,
+		CallTimeout:    daemon.DockerCallTimeout,
 	}
 
 	runErr := daemon.Run(rootCtx, daemon.Options{
@@ -159,4 +146,38 @@ func run() int {
 	log.Info("swarm-device-access shutting down")
 
 	return 0
+}
+
+// infoClient is the subset of *client.Client used for role detection.
+type infoClient interface {
+	Info(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error)
+}
+
+// detectSwarmManager reports whether this node is a Swarm manager. The Info
+// call is bounded: an unresponsive dockerd must not stall startup, and a
+// failure or timeout degrades to the worker behavior.
+func detectSwarmManager(ctx context.Context, cli infoClient, timeout time.Duration) bool {
+	log := logger.L()
+
+	infoCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	infoResult, infoErr := cli.Info(infoCtx, client.InfoOptions{})
+	if infoErr != nil {
+		log.Warn(
+			"could not query docker info; assuming worker node (service-label inspection disabled)",
+			"err",
+			infoErr,
+		)
+
+		return false
+	}
+
+	isSwarmManager := infoResult.Info.Swarm.ControlAvailable
+	log.Info("swarm role detected",
+		"manager", isSwarmManager,
+		"local_node_state", infoResult.Info.Swarm.LocalNodeState,
+	)
+
+	return isSwarmManager
 }

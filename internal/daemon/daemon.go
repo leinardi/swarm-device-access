@@ -39,6 +39,7 @@ type dockerAPI interface {
 		options client.ContainerListOptions,
 	) (client.ContainerListResult, error)
 	Events(ctx context.Context, options client.EventsListOptions) client.EventsResult
+	Ping(ctx context.Context, options client.PingOptions) (client.PingResult, error)
 }
 
 // Options bundles the dependencies required by Run.
@@ -46,6 +47,18 @@ type Options struct {
 	Docker  dockerAPI
 	Proc    *processor.Processor
 	Metrics *observability.Recorder
+
+	// callTimeout overrides DockerCallTimeout; zero means the default. Only
+	// tests set it, to exercise hung calls without waiting the full timeout.
+	callTimeout time.Duration
+}
+
+func (o *Options) timeout() time.Duration {
+	if o.callTimeout > 0 {
+		return o.callTimeout
+	}
+
+	return DockerCallTimeout
 }
 
 // Run subscribes to the Docker event stream, enumerates existing containers,
@@ -66,8 +79,13 @@ func run(ctx context.Context, opts Options, startWatcher func(context.Context, O
 
 	// The client delivers messages on an unbuffered channel, so events that
 	// arrive during the enumeration below wait (with backpressure on the
-	// socket) until listenEvents starts consuming them.
-	stream := opts.Docker.Events(ctx, eventListOptions(formatSince(since)))
+	// socket) until listenEvents starts consuming them. A failed subscription
+	// leaves stream empty; listenEvents then resubscribes from since, so the
+	// events of the enumeration window are still replayed.
+	stream, cancelStream, subErr := subscribe(ctx, opts.Docker, formatSince(since), opts.timeout())
+	if subErr != nil {
+		log.Warn("could not subscribe to docker events; will retry", "err", subErr)
+	}
 
 	processed := make(map[string]time.Time)
 
@@ -77,6 +95,7 @@ func run(ctx context.Context, opts Options, startWatcher func(context.Context, O
 		processed,
 		opts.Metrics,
 		processorApply(opts.Proc),
+		opts.timeout(),
 	)
 	if processErr != nil {
 		log.Warn("could not enumerate existing containers", "err", processErr)
@@ -84,7 +103,7 @@ func run(ctx context.Context, opts Options, startWatcher func(context.Context, O
 
 	startWatcher(ctx, opts)
 
-	listenEvents(ctx, opts, processed, since, stream.Messages, stream.Err)
+	listenEvents(ctx, opts, processed, since, stream, cancelStream)
 
 	return nil
 }
@@ -99,10 +118,15 @@ func processExistingContainers(
 	processed map[string]time.Time,
 	metrics *observability.Recorder,
 	apply applyFn,
+	timeout time.Duration,
 ) error {
 	log := logger.L()
 
-	list, err := cli.ContainerList(ctx, client.ContainerListOptions{})
+	listCtx, cancelList := context.WithTimeout(ctx, timeout)
+	list, err := cli.ContainerList(listCtx, client.ContainerListOptions{})
+
+	cancelList()
+
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
@@ -119,6 +143,7 @@ func processExistingContainers(
 			containers[idx].ID,
 			metrics,
 			apply,
+			timeout,
 			"could not process running container",
 		)
 		if processErr != nil {
@@ -171,6 +196,7 @@ func startReloadWatcher(ctx context.Context, opts Options) {
 				fresh,
 				opts.Metrics,
 				processorApply(opts.Proc),
+				opts.timeout(),
 			)
 			if processErr != nil {
 				log.Warn("could not re-apply rules after systemd reload",
