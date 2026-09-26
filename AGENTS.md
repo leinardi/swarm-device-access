@@ -21,6 +21,14 @@ make docker-build
 make docker-run    # runs image locally with required host bind mounts
 ```
 
+Integration tests (need a live Docker daemon; see [`docs/testing.md`](docs/testing.md)):
+
+```bash
+make go-test-integration                   # dry-run tests
+make go-test-integration SDA_IT_ENFORCE=1  # plus the real-enforcement test: attaches BPF, runs systemctl daemon-reload; throwaway hosts only
+make sweep-test-leaks                      # remove containers left behind by killed runs
+```
+
 Single test:
 
 ```bash
