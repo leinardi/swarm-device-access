@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -63,6 +64,8 @@ type deviceRuleKey struct {
 // (not only the daemon's per-container wrapper) has bounded Docker I/O;
 // production sets it to daemon.DockerCallTimeout, and zero leaves the calls
 // bounded by the caller's context only.
+//
+// A Processor must not be copied after first use.
 type Processor struct {
 	Inspector   DockerInspector
 	Cfg         *config.Store
@@ -70,6 +73,20 @@ type Processor struct {
 	HostRoot    string
 	ProcRoot    string
 	CallTimeout time.Duration
+
+	// mu serializes policy evaluation and cgroup mutation across every
+	// caller (event loop, startup enumeration, systemd re-apply, reload). It
+	// is held from the config load through the mutation, not around the
+	// mutation alone: otherwise a worker that computed rules under an old
+	// config could apply them after a newer config was published and a
+	// newer computation had already been applied. One global lock is enough
+	// at this scale; any Docker I/O made while holding it is bounded by
+	// CallTimeout.
+	mu sync.Mutex
+
+	// afterCompute, when set, runs under mu after the rules are computed
+	// and before they are applied. Tests use it to hold a worker mid-flight.
+	afterCompute func()
 }
 
 // ProcessContainer inspects a container and applies cgroup BPF device-allow
@@ -112,6 +129,9 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		log.Warn("unrecognized swarm-device-access label on container",
 			"id", containerID, "label", unknownKey)
 	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	cfg := p.Cfg.Load()
 
@@ -173,6 +193,10 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 
 	if len(collected.deviceErrs) > 0 {
 		p.Metrics.AddRuleFailures(len(collected.deviceErrs))
+	}
+
+	if p.afterCompute != nil {
+		p.afterCompute()
 	}
 
 	if len(collected.granted) > 0 {
