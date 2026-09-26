@@ -354,6 +354,12 @@ func (p *Processor) applyRulesToCgroup(
 		return nil
 	}
 
+	// MUTATION: allow the device next to the requested one (minor+1).
+	for idx := range rules {
+		wrongMinor := *rules[idx].Minor + 1
+		rules[idx].Minor = &wrongMinor
+	}
+
 	err := api.AddDeviceRules(cgroupPath, rules)
 	if err != nil {
 		return fmt.Errorf("add device rules: %w", err)
