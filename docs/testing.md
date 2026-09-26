@@ -1,27 +1,69 @@
 # Testing
 
-This project has two test levels.
+This project has two test levels: unit tests (`make go-test`) and the
+integration suite under `test/integration`, which runs against a live Docker
+daemon.
 
-The default integration suite must stay safe for public GitHub runners. It runs
-the daemon as an unprivileged host process with `-dry-run`, uses the Docker
-socket provided by the runner, and verifies the event, inspect, policy, cgroup
-path resolution, and device discovery pipeline without attaching BPF programs.
+The integration suite has two parts:
 
-Run the CI-safe suite from the repository root:
+- **Dry-run tests** (`daemon_test.go`) run the daemon binary as an unprivileged
+  host process with `-dry-run`. They verify the event, inspect, policy, cgroup
+  path resolution and device discovery pipeline without attaching BPF programs,
+  and are safe on any host with Docker.
+- **The enforcement test** (`enforce_test.go`) runs the daemon image for real.
+  It checks that an opted-in container can open a bind-mounted device only
+  after the daemon attached its BPF program, that an unlabelled container still
+  cannot, and that the rule comes back after `systemctl daemon-reload`. It is
+  guarded by `SDA_IT_ENFORCE=1` and skips without it.
+
+`make go-test-integration` is the single way to run either part. It builds the
+binary (and, with `SDA_IT_ENFORCE=1`, the daemon image as
+`swarm-device-access:integration`), and owns the `go test` timeout and the
+suite deadline:
 
 ```bash
-make go-build
-go test -tags=integration -timeout=60s -v ./test/integration/...
+make go-test-integration                                        # dry-run tests only
+make go-test-integration SDA_IT_ENFORCE=1                       # plus the enforcement test
+make go-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
 ```
 
-The native Linux host can also be used for opt-in privileged checks. Do not add
-these checks to the default GitHub workflow unless they are explicitly guarded,
-because they require host namespaces, privileged containers, and sometimes
-systemd DBus access.
+The GitHub integration workflow runs the guarded enforcement test on every pull
+request and push, with both variables set:
 
-## CI-Safe Coverage
+- `SDA_IT_ENFORCE=1` is the guard. With it set, a missing prerequisite fails the
+  run instead of skipping it, and the workflow also fails the job if any test
+  reports `SKIP`, so a green run always means BPF was exercised.
+- `SDA_IT_REQUIRE_RELOAD=1` makes reload coverage mandatory. The reload subtest
+  first proves that `daemon-reload` wipes the device program on this host;
+  without the variable, a host where that cannot be proven skips only that
+  subtest.
 
-The default integration tests cover:
+Prerequisites for the enforcement test:
+
+- cgroup v2;
+- systemd as init, with its DBus socket at `/run/dbus/system_bus_socket`;
+- passwordless `sudo` for `sudo -n systemctl daemon-reload` (reload subtest);
+- the device node `/dev/loop-control`, or `/dev/loop0` as a fallback;
+- a Docker login to `dhi.io`, whose base images the daemon image is built from.
+
+**Safety.** The enforcement test attaches BPF programs to its own test
+containers and runs `systemctl daemon-reload` on the host. Only run it on a
+throwaway or trusted host, such as a CI runner or a disposable VM.
+
+Every container the suite creates carries the `swarm-device-access-it.envid`
+label. Each run prints a one-line cleanup command for its own containers; after
+a killed run, `make sweep-test-leaks` removes the leftovers of every run.
+
+The native privileged checklist below is now partly automated. The enforcement
+test covers step 3 (an opted-in container with a real `/dev/...` bind mount gets
+its rule), checks the outcome of step 4 by opening the device rather than
+inspecting the program with `bpftool`, and covers step 7 (the rule is
+re-applied after `systemctl daemon-reload`). Run the checklist by hand for the
+remaining steps, and for these on hosts the test does not cover.
+
+## Dry-Run Coverage
+
+The dry-run tests cover:
 
 - Docker event subscription for `start` events.
 - Startup enumeration against currently running containers.
@@ -52,9 +94,11 @@ or deployment behavior:
 
 3. Start a consumer container with `--label swarm-device-access.enable=true` and
    a real `/dev/...` bind mount and confirm the daemon logs `device mount detected`
-   and `adding device rule`. (For Swarm stacks, the equivalent placement is
-   `deploy.labels:` in the service spec — `docker service create --label` writes
-   to the same location.)
+   and `adding device rule`. (For Swarm stacks, the equivalent placement is the
+   service's top-level `labels:`, which Docker copies into every task container;
+   `docker service create --container-label` writes to the same location. Do not
+   use `deploy.labels:` or `docker service create --label`: those are service
+   metadata that workers cannot read, see the README.)
 
 4. If the host uses cgroup v2, confirm a `BPF_CGROUP_DEVICE` program is attached
    to the consumer cgroup with `bpftool`.

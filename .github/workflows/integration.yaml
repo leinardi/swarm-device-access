@@ -26,10 +26,28 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build daemon binary
-        run: make go-build
+      # The daemon image the enforcement test runs is built from dhi.io base
+      # images, which require a login.
+      - name: Log in to Docker Hardened Images (dhi.io)
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: dhi.io
+          username: ${{ vars.DHI_USERNAME }}
+          password: ${{ secrets.DHI_TOKEN }}
 
+      # The Make target builds the daemon binary and, with SDA_IT_ENFORCE=1,
+      # the daemon image first, and owns the go test timeout and the suite
+      # deadline, so CI and local runs share one source of truth. The
+      # enforcement flags turn every missing prerequisite into a failure, and
+      # the SKIP check below makes sure a green run really exercised BPF.
       - name: Run integration tests
         env:
-          SDA_TEST_BINARY: ${{ github.workspace }}/dist/swarm-device-access
-        run: go test -tags=integration -timeout=60s -v ./test/integration/...
+          SDA_IT_ENFORCE: "1"
+          SDA_IT_REQUIRE_RELOAD: "1"
+        run: |
+          set -o pipefail
+          make go-test-integration 2>&1 | tee integration.log
+          if grep -E -- '^[[:space:]]*--- SKIP' integration.log; then
+            echo "::error::integration tests were skipped; SDA_IT_ENFORCE=1 requires every test to run"
+            exit 1
+          fi
