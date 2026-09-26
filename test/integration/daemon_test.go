@@ -246,7 +246,7 @@ func TestDaemon_DryRun_UnpauseEvent(t *testing.T) {
 	}
 
 	// The unpause event must trigger a second processing pass.
-	records := proc.waitN(ctx, t, detectTimeout, "second container processed (unpause)",
+	records := proc.waitN(ctx, t, "second container processed (unpause)",
 		forContainer(msgProcessed, containerID), 2)
 	checkCounts(t, records[1], 1, 0)
 }

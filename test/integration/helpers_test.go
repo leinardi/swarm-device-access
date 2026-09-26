@@ -46,6 +46,10 @@ const (
 	// defaultBinary is the path produced by `make go-build`.
 	defaultBinary = "../../dist/swarm-device-access"
 
+	// envEnforce opts into the real-enforcement test (enforce_test.go) and
+	// makes missing prerequisites fail instead of skip.
+	envEnforce = "SDA_IT_ENFORCE"
+
 	// envSuiteTimeout overrides defaultSuiteTimeout. It must stay below the
 	// `go test -timeout` of the Make target (INTEGRATION_TIMEOUT) so that
 	// cleanups still run before Go's hard timeout panics the binary.
@@ -58,9 +62,8 @@ const (
 	// keys under that prefix.
 	labelEnvID = "swarm-device-access-it.envid"
 
-	// startupTimeout is how long to wait for the daemon to subscribe to events.
-	startupTimeout = 15 * time.Second
-	// detectTimeout is how long to wait for a log record about a container.
+	// detectTimeout is how long to wait for an expected daemon log record,
+	// the startup subscription included.
 	detectTimeout = 15 * time.Second
 	// cleanupTimeout bounds each teardown call. Teardown runs after the test
 	// context is canceled, so it uses its own context.
@@ -184,6 +187,11 @@ func forContainer(msg, containerID string) matcher {
 	}
 }
 
+// count returns how many records match so far.
+func (d *daemonProc) count(match matcher) int {
+	return len(d.matching(match))
+}
+
 func (d *daemonProc) matching(match matcher) []logRecord {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -204,14 +212,13 @@ func (d *daemonProc) matching(match matcher) []logRecord {
 func (d *daemonProc) waitN(
 	ctx context.Context,
 	t *testing.T,
-	timeout time.Duration,
 	what string,
 	match matcher,
 	n int,
 ) []logRecord {
 	t.Helper()
 
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	waitCtx, cancel := context.WithTimeout(ctx, detectTimeout)
 	defer cancel()
 
 	for {
@@ -249,7 +256,7 @@ func (d *daemonProc) waitN(
 func (d *daemonProc) wait(ctx context.Context, t *testing.T, what string, match matcher) logRecord {
 	t.Helper()
 
-	return d.waitN(ctx, t, detectTimeout, what, match, 1)[0]
+	return d.waitN(ctx, t, what, match, 1)[0]
 }
 
 func (d *daemonProc) append(rec logRecord) {
@@ -261,17 +268,17 @@ func (d *daemonProc) append(rec logRecord) {
 	d.changed = make(chan struct{})
 }
 
-// collect parses the daemon's stdout. Lines that are not JSON (a panic, say)
-// are only logged.
-func (d *daemonProc) collect(t *testing.T, r io.Reader) {
-	t.Helper()
-
+// collect parses the daemon's output and passes every line to logf. Lines
+// that are not JSON (a panic, say) are only logged. It takes t.Log rather than
+// t, so the lines are attributed to collect instead of the goroutine's runtime
+// frame, which is what a t.Helper() call here would produce.
+func (d *daemonProc) collect(logf func(args ...any), r io.Reader) {
 	defer close(d.exited)
 
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
-		t.Log("[daemon]", line)
+		logf("[daemon]", line)
 
 		var rec logRecord
 
@@ -307,9 +314,9 @@ func launchDaemon(ctx context.Context, t *testing.T, flags ...string) *daemonPro
 		t.Fatalf("start daemon: %v", err)
 	}
 
-	proc := &daemonProc{changed: make(chan struct{}), exited: make(chan struct{})}
+	proc := newDaemonProc()
 
-	go proc.collect(t, stdout)
+	go proc.collect(t.Log, stdout)
 
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
@@ -319,10 +326,25 @@ func launchDaemon(ctx context.Context, t *testing.T, flags ...string) *daemonPro
 		_ = cmd.Wait()
 	})
 
-	proc.waitN(ctx, t, startupTimeout, "daemon subscription to docker events",
-		func(rec logRecord) bool { return rec.str("msg") == msgReady }, 1)
+	proc.waitReady(ctx, t)
 
 	return proc
+}
+
+func newDaemonProc() *daemonProc {
+	return &daemonProc{changed: make(chan struct{}), exited: make(chan struct{})}
+}
+
+// waitReady blocks until the daemon has subscribed to Docker events.
+func (d *daemonProc) waitReady(ctx context.Context, t *testing.T) {
+	t.Helper()
+
+	d.waitN(ctx, t, "daemon subscription to docker events", withMsg(msgReady), 1)
+}
+
+// withMsg matches records with the given message.
+func withMsg(msg string) matcher {
+	return func(rec logRecord) bool { return rec.str("msg") == msg }
 }
 
 // requireProcessed waits for the daemon to process containerID and checks the
@@ -373,6 +395,29 @@ func requireSkipped(
 	}
 }
 
+// enforceRequested reports whether the run opted into the real-enforcement
+// test. Opting in also makes every missing prerequisite a failure: a run that
+// asked for enforcement must not go green by skipping it.
+func enforceRequested() bool {
+	return os.Getenv(envEnforce) == "1"
+}
+
+// requireOrSkip stops the test when a prerequisite is missing (err != nil). It
+// fails when strict is set and skips otherwise.
+func requireOrSkip(t *testing.T, strict bool, err error) {
+	t.Helper()
+
+	if err == nil {
+		return
+	}
+
+	if strict {
+		t.Fatalf("missing prerequisite (%s=1 makes this a failure): %v", envEnforce, err)
+	}
+
+	t.Skipf("missing prerequisite: %v", err)
+}
+
 func findBinary(ctx context.Context, t *testing.T) string {
 	t.Helper()
 
@@ -383,8 +428,12 @@ func findBinary(ctx context.Context, t *testing.T) string {
 
 	_, err := os.Stat(path)
 	if err != nil {
-		t.Skipf("daemon binary not found at %q (set %s or run make go-build): %v",
-			path, envBinary, err)
+		requireOrSkip(t, enforceRequested(), fmt.Errorf(
+			"daemon binary not found at %q (set %s or run make go-build): %w",
+			path,
+			envBinary,
+			err,
+		))
 	}
 
 	// Probe execability: a cross-compiled Linux binary on macOS returns
@@ -393,8 +442,11 @@ func findBinary(ctx context.Context, t *testing.T) string {
 	if err != nil {
 		if strings.Contains(err.Error(), "exec format error") ||
 			strings.Contains(err.Error(), "cannot execute") {
-			t.Skipf("daemon binary %q is not executable on this platform (cross-compiled?): %v",
-				path, err)
+			requireOrSkip(t, enforceRequested(), fmt.Errorf(
+				"daemon binary %q is not executable on this platform (cross-compiled?): %w",
+				path,
+				err,
+			))
 		}
 		// Non-zero exit is fine: -help exits 0, but any other error means it ran.
 	}
@@ -428,7 +480,7 @@ func requireDocker(t *testing.T) *dockerclient.Client {
 
 	cli, err := dockerclient.New(dockerclient.FromEnv)
 	if err != nil {
-		t.Skipf("Docker client init failed: %v", err)
+		requireOrSkip(t, enforceRequested(), fmt.Errorf("docker client init: %w", err))
 	}
 
 	ctx, cancel := context.WithTimeout(testCtx(t), 5*time.Second)
@@ -436,7 +488,7 @@ func requireDocker(t *testing.T) *dockerclient.Client {
 
 	_, err = cli.Ping(ctx, dockerclient.PingOptions{})
 	if err != nil {
-		t.Skipf("Docker daemon not reachable: %v", err)
+		requireOrSkip(t, enforceRequested(), fmt.Errorf("docker daemon not reachable: %w", err))
 	}
 
 	t.Cleanup(func() { _ = cli.Close() })
@@ -481,31 +533,44 @@ func startTestContainer(
 ) string {
 	t.Helper()
 
+	return startContainer(ctx, t, cli,
+		&container.Config{Image: testImage, Cmd: []string{"sleep", "300"}, Labels: labels},
+		&container.HostConfig{Binds: binds})
+}
+
+// startContainer creates and starts a container from cfg and hostCfg, adding
+// labelEnvID to its labels. It is removed when the test ends.
+func startContainer(
+	ctx context.Context,
+	t *testing.T,
+	cli *dockerclient.Client,
+	cfg *container.Config,
+	hostCfg *container.HostConfig,
+) string {
+	t.Helper()
+
 	allLabels := map[string]string{labelEnvID: envID}
-	maps.Copy(allLabels, labels)
+	maps.Copy(allLabels, cfg.Labels)
+
+	withLabels := *cfg
+	withLabels.Labels = allLabels
 
 	resp, err := cli.ContainerCreate(ctx, dockerclient.ContainerCreateOptions{
-		Config: &container.Config{
-			Image:  testImage,
-			Cmd:    []string{"sleep", "300"},
-			Labels: allLabels,
-		},
-		HostConfig: &container.HostConfig{
-			Binds: binds,
-		},
+		Config:     &withLabels,
+		HostConfig: hostCfg,
 	})
 	if err != nil {
-		t.Fatalf("create test container: %v", err)
+		t.Fatalf("create container from %s: %v", cfg.Image, err)
 	}
 
 	t.Cleanup(func() { removeContainer(ctx, t, cli, resp.ID) })
 
 	_, err = cli.ContainerStart(ctx, resp.ID, dockerclient.ContainerStartOptions{})
 	if err != nil {
-		t.Fatalf("start test container: %v", err)
+		t.Fatalf("start container from %s: %v", cfg.Image, err)
 	}
 
-	t.Logf("started test container %s", shortID(resp.ID))
+	t.Logf("started container %s from %s", shortID(resp.ID), cfg.Image)
 
 	return resp.ID
 }
