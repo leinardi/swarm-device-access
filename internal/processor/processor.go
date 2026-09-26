@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/swarm"
 	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
@@ -35,22 +34,16 @@ import (
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
-const swarmServiceIDLabel = "com.docker.swarm.service.id"
-
 // DockerInspector is the subset of *client.Client used by Processor.
 // It exists solely to allow unit tests to inject a fake without standing up a
-// real Docker daemon.
+// real Docker daemon. Policy comes from the global config and the container's
+// own labels only, so no service or node inspection is part of it.
 type DockerInspector interface {
 	ContainerInspect(
 		ctx context.Context,
 		containerID string,
 		options client.ContainerInspectOptions,
 	) (client.ContainerInspectResult, error)
-	ServiceInspect(
-		ctx context.Context,
-		serviceID string,
-		options client.ServiceInspectOptions,
-	) (client.ServiceInspectResult, error)
 }
 
 // deviceRuleKey is the deduplication key for cgroup device rules collected
@@ -71,13 +64,12 @@ type deviceRuleKey struct {
 // production sets it to daemon.DockerCallTimeout, and zero leaves the calls
 // bounded by the caller's context only.
 type Processor struct {
-	Inspector      DockerInspector
-	Cfg            *config.Store
-	Metrics        *observability.Recorder
-	HostRoot       string
-	ProcRoot       string
-	IsSwarmManager bool
-	CallTimeout    time.Duration
+	Inspector   DockerInspector
+	Cfg         *config.Store
+	Metrics     *observability.Recorder
+	HostRoot    string
+	ProcRoot    string
+	CallTimeout time.Duration
 }
 
 // ProcessContainer inspects a container and applies cgroup BPF device-allow
@@ -114,13 +106,16 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		containerLabels = info.Config.Labels
 	}
 
-	svc, serviceLabels := p.resolveServiceLabels(ctx, containerID, containerLabels)
-
-	effectiveLabels := policy.MergeLabels(serviceLabels, containerLabels)
+	// The container's labels are the only label input, so this is the one
+	// place a misspelled key can be reported instead of silently ignored.
+	for _, unknownKey := range policy.UnknownLabels(containerLabels) {
+		log.Warn("unrecognized swarm-device-access label on container",
+			"id", containerID, "label", unknownKey)
+	}
 
 	cfg := p.Cfg.Load()
 
-	cpol, parseErr := policy.ParseContainer(effectiveLabels)
+	cpol, parseErr := policy.ParseContainer(containerLabels)
 	if parseErr != nil {
 		log.Warn("container skipped: invalid policy labels",
 			"id", containerID, "err", parseErr)
@@ -137,17 +132,6 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		p.Metrics.RecordContainerSkipped("policy")
 
 		return nil
-	}
-
-	if svc.Spec.Name != "" {
-		cpolContainer, _ := policy.ParseContainer(containerLabels)
-		if !cfg.Policy.Enabled(cpolContainer) {
-			log.Info("opt-in granted via service-level label",
-				"id", containerID,
-				"service_id", containerLabels[swarmServiceIDLabel],
-				"service_name", svc.Spec.Name,
-			)
-		}
 	}
 
 	p.Metrics.RecordContainerScanned()
@@ -272,72 +256,6 @@ func collectContainerRules(
 	}
 
 	return result
-}
-
-// resolveServiceLabels fetches parent service labels on manager nodes. On
-// worker nodes (IsSwarmManager=false) it returns immediately with zero values
-// so ProcessContainer can continue using container-level labels only.
-func (p *Processor) resolveServiceLabels(
-	ctx context.Context,
-	containerID string,
-	containerLabels map[string]string,
-) (svc swarm.Service, serviceLabels map[string]string) {
-	log := logger.L()
-
-	if !p.IsSwarmManager {
-		return svc, nil
-	}
-
-	serviceID := containerLabels[swarmServiceIDLabel]
-	if serviceID == "" {
-		return svc, nil
-	}
-
-	svcCtx, cancelSvc := p.callContext(ctx)
-	inspected, svcErr := p.Inspector.ServiceInspect(
-		svcCtx,
-		serviceID,
-		client.ServiceInspectOptions{},
-	)
-
-	cancelSvc()
-
-	if svcErr != nil {
-		log.Warn("could not inspect parent service; using container labels only",
-			"id", containerID,
-			"service_id", serviceID,
-			"err", svcErr,
-		)
-
-		return swarm.Service{}, nil
-	}
-
-	svc = inspected.Service
-	serviceLabels = svc.Spec.Labels
-
-	for _, unknownKey := range policy.UnknownLabels(serviceLabels) {
-		log.Warn("unrecognized swarm-device-access label on parent service",
-			"id", containerID,
-			"service_id", serviceID,
-			"label", unknownKey,
-		)
-	}
-
-	for _, knownKey := range policy.KnownLabels(serviceLabels) {
-		log.Warn(
-			"swarm-device-access label set via deploy.labels on parent service; move to top-level labels: so worker nodes can read it",
-			"id",
-			containerID,
-			"service_id",
-			serviceID,
-			"service",
-			svc.Spec.Name,
-			"label",
-			knownKey,
-		)
-	}
-
-	return svc, serviceLabels
 }
 
 // applyRulesToCgroup logs and (unless dryRun) attaches the collected device

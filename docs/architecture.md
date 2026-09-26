@@ -167,10 +167,11 @@ The daemon uses a two-level policy:
 **Per-container policy** (Docker labels):
 
 Declare these labels under top-level `labels:` in your Swarm stack file.
-Docker copies top-level labels into each task container so the daemon can read
-them on both manager and worker nodes. Do **not** use `deploy.labels:` — those
-are Swarm service metadata only accessible via the manager API; the daemon
-cannot see them on worker nodes and will warn if it finds them on a manager.
+Docker copies top-level labels into each task container, which is the only
+place the daemon reads them. Labels under `deploy.labels:` are Swarm service
+metadata and are ignored: the daemon never inspects the parent service or the
+node's Swarm role, so the policy for a container is the same on every node and
+across daemon restarts.
 
 | Label | Description |
 | --- | --- |

@@ -37,12 +37,9 @@ import (
 // testCallTimeout stands in for DockerCallTimeout so hung calls resolve fast.
 const testCallTimeout = 50 * time.Millisecond
 
-// hangingInspector blocks ContainerInspect (when hangInspect) or
-// ServiceInspect until the call's context is done, and records the context
-// error each hung call observed.
+// hangingInspector blocks ContainerInspect until the call's context is done,
+// and records the context error each hung call observed.
 type hangingInspector struct {
-	hangInspect bool
-
 	mu      sync.Mutex
 	ctxErrs []error
 }
@@ -52,22 +49,7 @@ func (h *hangingInspector) ContainerInspect(
 	_ string,
 	_ client.ContainerInspectOptions,
 ) (client.ContainerInspectResult, error) {
-	if h.hangInspect {
-		return client.ContainerInspectResult{}, h.hang(ctx)
-	}
-
-	return client.ContainerInspectResult{Container: container.InspectResponse{
-		State:  &container.State{Pid: 4242},
-		Config: &container.Config{Labels: map[string]string{"com.docker.swarm.service.id": "svc"}},
-	}}, nil
-}
-
-func (h *hangingInspector) ServiceInspect(
-	ctx context.Context,
-	_ string,
-	_ client.ServiceInspectOptions,
-) (client.ServiceInspectResult, error) {
-	return client.ServiceInspectResult{}, h.hang(ctx)
+	return client.ContainerInspectResult{}, h.hang(ctx)
 }
 
 func (h *hangingInspector) hang(ctx context.Context) error {
@@ -129,7 +111,7 @@ func TestProcessExistingContainers_HungContainerListIsBounded(t *testing.T) {
 }
 
 func TestProcessOne_HungContainerInspectIsBounded(t *testing.T) {
-	insp := &hangingInspector{hangInspect: true}
+	insp := &hangingInspector{}
 	proc := &processor.Processor{Inspector: insp, Cfg: config.NewStore()}
 
 	var err error
@@ -150,58 +132,24 @@ func TestProcessOne_HungContainerInspectIsBounded(t *testing.T) {
 	}
 }
 
-// TestProcessContainer_HungInspectsAreBoundedPerCall calls the processor
+// TestProcessContainer_HungInspectIsBoundedPerCall calls the processor
 // directly with an unbounded context: its own per-call timeout must bound
-// both ContainerInspect and ServiceInspect.
-func TestProcessContainer_HungInspectsAreBoundedPerCall(t *testing.T) {
-	for _, hangInspect := range []bool{true, false} {
-		insp := &hangingInspector{hangInspect: hangInspect}
-		proc := &processor.Processor{
-			Inspector:      insp,
-			Cfg:            config.NewStore(),
-			IsSwarmManager: true,
-			ProcRoot:       t.TempDir(),
-			CallTimeout:    testCallTimeout,
-		}
-
-		assertBounded(t, "ProcessContainer", func() {
-			_ = proc.ProcessContainer(context.Background(), "c1")
-		})
-
-		got := insp.observed()
-		if len(got) != 1 || !errors.Is(got[0], context.DeadlineExceeded) {
-			t.Fatalf(
-				"hangInspect=%v: hung call context errors = %v, want one DeadlineExceeded",
-				hangInspect,
-				got,
-			)
-		}
-	}
-}
-
-func TestProcessOne_HungServiceInspectIsBounded(t *testing.T) {
+// ContainerInspect.
+func TestProcessContainer_HungInspectIsBoundedPerCall(t *testing.T) {
 	insp := &hangingInspector{}
 	proc := &processor.Processor{
-		Inspector:      insp,
-		Cfg:            config.NewStore(),
-		IsSwarmManager: true,
-		ProcRoot:       t.TempDir(),
+		Inspector:   insp,
+		Cfg:         config.NewStore(),
+		CallTimeout: testCallTimeout,
 	}
 
-	assertBounded(t, "processOne", func() {
-		_ = processOne(
-			context.Background(),
-			"c1",
-			nil,
-			processorApply(proc),
-			testCallTimeout,
-			"fail",
-		)
+	assertBounded(t, "ProcessContainer", func() {
+		_ = proc.ProcessContainer(context.Background(), "c1")
 	})
 
 	got := insp.observed()
 	if len(got) != 1 || !errors.Is(got[0], context.DeadlineExceeded) {
-		t.Fatalf("ServiceInspect context errors = %v, want one DeadlineExceeded", got)
+		t.Fatalf("hung call context errors = %v, want one DeadlineExceeded", got)
 	}
 }
 

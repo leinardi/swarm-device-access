@@ -164,14 +164,6 @@ func (r *recordingInspector) ContainerInspect(
 	}, nil
 }
 
-func (*recordingInspector) ServiceInspect(
-	_ context.Context,
-	_ string,
-	_ client.ServiceInspectOptions,
-) (client.ServiceInspectResult, error) {
-	return client.ServiceInspectResult{}, nil
-}
-
 func (r *recordingInspector) inspected() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

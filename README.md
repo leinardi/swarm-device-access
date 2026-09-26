@@ -98,9 +98,8 @@ services:
       - /dev/nvidia0:/dev/nvidia0
       - /dev/nvidiactl:/dev/nvidiactl
       - /dev/nvidia-uvm:/dev/nvidia-uvm
-    # Use top-level labels: so the daemon can read them on both manager and
-    # worker nodes. deploy.labels: are service-level metadata only visible to
-    # the Docker API on manager nodes.
+    # Use top-level labels: so they reach the task container, where the daemon
+    # reads them. Labels under deploy.labels: are ignored.
     labels:
       swarm-device-access.enable: "true"
       swarm-device-access.device-allow: "/dev/nvidia*"
@@ -161,22 +160,20 @@ Declare these labels under top-level `labels:` in your service definition.
 Docker copies top-level labels into each task container, so the daemon can read
 them on every node — including worker nodes.
 
-> **Note:** Do not use `deploy.labels:` for these labels. `deploy.labels:` are
-> Swarm service metadata that only the Docker Swarm API (manager nodes) can
-> read. The daemon cannot see them on worker nodes and will warn you if it
-> detects them on a manager.
+Policy comes from the daemon's own configuration and the container's labels
+only, so every node makes the same decision for the same container, before and
+after a daemon restart. Labels under `deploy.labels:` (Swarm service metadata)
+are **ignored** on every node.
 
-### Worker and Manager Nodes
-
-The daemon auto-detects its role at startup by querying the local Docker API.
-On **worker nodes** it skips the Swarm service inspect entirely (no spurious
-warnings). On **manager nodes** it additionally reads service-level metadata
-for backward compatibility — but emits a warning if it finds
-`swarm-device-access.*` labels under `deploy.labels:`, advising you to move
-them to top-level `labels:`.
-
-If the node role changes (promote/demote), restart the daemon so it re-detects
-its role.
+> **Migrating from earlier versions:** older releases also read
+> `swarm-device-access.*` labels from `deploy.labels:` on manager nodes and
+> warned about them there. That support is removed: service-level labels are
+> never read, and the daemon no longer queries the node's Swarm role or
+> inspects the parent service. A service whose only opt-in (or narrowing
+> `device-allow`/`device-deny`) sits under `deploy.labels:` is now processed as
+> if those labels were absent, which in the default `opt-in` mode means it is
+> skipped. Move the labels to the service's top-level `labels:` so they reach
+> the container.
 
 If you bind-mount a directory (for example `source: /dev/dri`), the
 `device-allow` glob is evaluated **per child node** inside that directory —

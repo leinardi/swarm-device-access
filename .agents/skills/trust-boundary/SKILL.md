@@ -66,9 +66,12 @@ flags, and exits `1` with `invalid config: …` on failure; an unreadable or unp
 
 ## 3. Labels are untrusted input
 
-Anyone who can `docker service create` or `docker run` sets `swarm-device-access.*` labels, and on
-manager nodes service labels are merged in too (`policy.MergeLabels`, container labels winning,
-called from `Processor.ProcessContainer` in `internal/processor/processor.go`). Treat every label
+Anyone who can `docker service create` or `docker run` sets `swarm-device-access.*` labels. The
+container's own labels are the **only** label input: `Processor.ProcessContainer`
+(`internal/processor/processor.go`) parses `Config.Labels` from the container inspect and nothing
+else. Swarm service labels (`deploy.labels:`) are ignored, and the processor never calls
+`ServiceInspect` or `Info` (neither is part of `DockerInspector`), so a decision cannot depend on
+which node runs the daemon or on whether a service inspect happened to succeed. Treat every label
 as attacker-controlled.
 
 - `policy.ParseContainer` rejects a non-boolean `enable` and any malformed glob in `device-allow`
@@ -81,21 +84,17 @@ as attacker-controlled.
 - An empty or all-whitespace `device-allow` label means "inherit the global allow set", not
   "allow nothing" — that is documented in the README label table; keep it that way or change both.
 
-Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`, `TestMergeLabels`
-and `TestProcessContainer_SwarmServiceLabels`.
+Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`,
+`TestProcessContainer_IgnoresServiceLevelLabels` and
+`TestProcessContainer_WarnsOnUnknownContainerLabel`.
 
 - [ ] New label parsing returns an error on malformed input, and the caller skips the container.
 - [ ] A new label can only narrow; a test proves deny still beats allow with it set.
-- [ ] Unknown `swarm-device-access.*` keys keep being reported (`policy.UnknownLabels`), not
-      silently accepted.
-- [ ] **Known gap:** on a manager node, when the parent-service inspect fails,
-      `Processor.resolveServiceLabels` logs `could not inspect parent service; using container
-      labels only` and returns no service labels — so a service-level `device-deny` (set under
-      `deploy.labels:`, which the README already tells users not to do) is silently dropped and
-      the container gets wider access than the deployer asked for. It is not an escalation — the
-      same deployer sets both label sets — but it is the "lost narrowing label means wider access"
-      pattern this item forbids. Do not extend it; the fail-closed fix is to skip the container
-      when a service it belongs to cannot be inspected.
+- [ ] Unknown `swarm-device-access.*` keys on the container keep being reported
+      (`policy.UnknownLabels`, warned by `ProcessContainer`), not silently accepted.
+- [ ] No second label source (service, node, stack) is added back: a label that only some nodes
+      can read, or that disappears when an API call fails, turns a lost narrowing label into wider
+      access.
 
 ## 4. Only `/dev` mount sources become rules
 

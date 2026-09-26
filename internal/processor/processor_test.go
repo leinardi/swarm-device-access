@@ -23,7 +23,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,7 +45,6 @@ type fakeInspector struct {
 	result        container.InspectResponse
 	err           error
 	serviceResult swarm.Service
-	serviceErr    error
 	serviceCalls  int
 }
 
@@ -58,6 +56,9 @@ func (f *fakeInspector) ContainerInspect(
 	return client.ContainerInspectResult{Container: f.result}, f.err
 }
 
+// ServiceInspect is not part of DockerInspector. It stays on the fake, with
+// a call counter, so a test can prove the processor never reaches for the
+// parent service even if the interface were widened again.
 func (f *fakeInspector) ServiceInspect(
 	_ context.Context,
 	_ string,
@@ -65,8 +66,15 @@ func (f *fakeInspector) ServiceInspect(
 ) (client.ServiceInspectResult, error) {
 	f.serviceCalls++
 
-	return client.ServiceInspectResult{Service: f.serviceResult}, f.serviceErr
+	return client.ServiceInspectResult{Service: f.serviceResult}, nil
 }
+
+// testCgroupContent and testMountinfoContent describe a cgroup v2 container,
+// the only layout the processor tests need.
+const (
+	testCgroupContent    = "0::/docker/testcontainer\n"
+	testMountinfoContent = "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+)
 
 // buildProcRoot creates a minimal /proc/<pid>/{cgroup,mountinfo} structure
 // under a temp dir so ProcessContainer can resolve the cgroup path without a
@@ -76,7 +84,6 @@ func (f *fakeInspector) ServiceInspect(
 func buildProcRoot(
 	t *testing.T,
 	pid int,
-	cgroupContent, mountinfoContent string,
 ) string {
 	t.Helper()
 
@@ -90,7 +97,7 @@ func buildProcRoot(
 
 	err = os.WriteFile(
 		filepath.Join(procDir, "cgroup"),
-		[]byte(cgroupContent),
+		[]byte(testCgroupContent),
 		0o600,
 	)
 	if err != nil {
@@ -99,7 +106,7 @@ func buildProcRoot(
 
 	err = os.WriteFile(
 		filepath.Join(procDir, "mountinfo"),
-		[]byte(mountinfoContent),
+		[]byte(testMountinfoContent),
 		0o600,
 	)
 	if err != nil {
@@ -246,10 +253,7 @@ func TestProcessContainer_ZeroPid(t *testing.T) {
 func TestProcessContainer_NoDevMounts(t *testing.T) {
 	const pid = 42
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
-
-	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	root := buildProcRoot(t, pid)
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
@@ -281,10 +285,7 @@ func TestProcessContainer_NoDevMounts(t *testing.T) {
 func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 	const pid = 43
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
-
-	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	root := buildProcRoot(t, pid)
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
@@ -312,10 +313,7 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 func TestProcessContainer_DevMount_DryRunNoError(t *testing.T) {
 	const pid = 44
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
-
-	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	root := buildProcRoot(t, pid)
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
@@ -340,10 +338,7 @@ func TestProcessContainer_DevMount_DryRunNoError(t *testing.T) {
 func TestProcessContainer_DeduplicatesDuplicateMounts(t *testing.T) {
 	const pid = 45
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
-
-	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	root := buildProcRoot(t, pid)
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
@@ -369,10 +364,7 @@ func TestProcessContainer_DeduplicatesDuplicateMounts(t *testing.T) {
 func TestProcessContainer_OptInSkipsUnlabelled(t *testing.T) {
 	const pid = 50
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
-
-	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	root := buildProcRoot(t, pid)
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
@@ -397,10 +389,7 @@ func TestProcessContainer_OptInSkipsUnlabelled(t *testing.T) {
 func TestProcessContainer_OptInProcessesEnabled(t *testing.T) {
 	const pid = 51
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
-
-	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	root := buildProcRoot(t, pid)
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
@@ -791,10 +780,7 @@ func TestCollectMountRules_SingleFileNonDevice(t *testing.T) {
 func TestProcessContainer_DevDirectorySummary(t *testing.T) {
 	const pid = 46
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
-
-	root := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	root := buildProcRoot(t, pid)
 
 	state := &container.State{Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
@@ -864,181 +850,67 @@ func captureLogger(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-//nolint:tparallel // subtests share the global logger via captureLogger; parallel would cause log interleaving
-func TestProcessContainer_SwarmServiceLabels(t *testing.T) {
-	t.Parallel()
+// TestProcessContainer_IgnoresServiceLevelLabels checks that policy comes
+// from the container's own labels only: the parent service is never
+// inspected, and a container whose only opt-in is a service-level (deploy.labels)
+// label is skipped.
+func TestProcessContainer_IgnoresServiceLevelLabels(t *testing.T) {
+	buf := captureLogger(t)
 
-	const (
-		cid       = "abc123"
-		serviceID = "svc456"
-		pid       = 51
-	)
+	const pid = 51
 
-	makeSwarmContainer := func(extraLabels map[string]string) container.InspectResponse {
-		labels := map[string]string{swarmServiceIDLabel: serviceID}
-		maps.Copy(labels, extraLabels)
-
-		return container.InspectResponse{
-			State:  &container.State{Pid: pid},
-			Config: &container.Config{Labels: labels},
-		}
+	inspector := &fakeInspector{
+		result: container.InspectResponse{
+			State: &container.State{Pid: pid},
+			Config: &container.Config{Labels: map[string]string{
+				"com.docker.swarm.service.id": "svc456",
+			}},
+		},
+		serviceResult: swarm.Service{Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{
+			Name:   "my-service",
+			Labels: map[string]string{policy.LabelEnable: "true"},
+		}}},
 	}
 
-	cgroupContent := "0::/docker/testcontainer\n"
-	mountinfoContent := "35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev shared:11 - cgroup2 cgroup2 rw\n" //nolint:dupword // cgroup2 appears twice: fs type and superblock type in mountinfo format
+	proc := &Processor{
+		Inspector: inspector,
+		Cfg:       newStore(policy.ModeOptIn, true),
+	}
 
-	cases := []struct {
-		name            string
-		containerInfo   container.InspectResponse
-		svcResult       swarm.Service
-		svcErr          error
-		store           *config.Store
-		isSwarmManager  bool
-		wantServiceCall bool
-		wantLogMsg      string
-		wantSkip        bool
-	}{
-		{
-			name:          "deploy.labels-only grants opt-in on manager",
-			containerInfo: makeSwarmContainer(nil),
-			svcResult: swarm.Service{
-				Spec: swarm.ServiceSpec{
-					Annotations: swarm.Annotations{
-						Name:   "my-service",
-						Labels: map[string]string{policy.LabelEnable: "true"},
-					},
-				},
-			},
-			store:           newStore(policy.ModeOptIn, true),
-			isSwarmManager:  true,
-			wantServiceCall: true,
-			wantLogMsg:      "opt-in granted via service-level label",
-		},
-		{
-			name: "container labels override service on manager",
-			containerInfo: makeSwarmContainer(map[string]string{
-				policy.LabelEnable: "false",
-			}),
-			svcResult: swarm.Service{
-				Spec: swarm.ServiceSpec{
-					Annotations: swarm.Annotations{
-						Name:   "my-service",
-						Labels: map[string]string{policy.LabelEnable: "true"},
-					},
-				},
-			},
-			store:           newStore(policy.ModeOptIn, true),
-			isSwarmManager:  true,
-			wantServiceCall: true,
-			wantSkip:        true,
-		},
-		{
-			name: "non-Swarm passthrough",
-			containerInfo: container.InspectResponse{
-				State: &container.State{Pid: pid},
-				Config: &container.Config{Labels: map[string]string{
-					policy.LabelEnable: "true",
-				}},
-			},
-			store:           newStore(policy.ModeOptIn, true),
-			isSwarmManager:  true,
-			wantServiceCall: false,
-		},
-		{
-			name: "service inspect error is non-fatal on manager",
-			containerInfo: makeSwarmContainer(map[string]string{
-				policy.LabelEnable: "true",
-			}),
-			svcErr:          errDaemonUnavail,
-			store:           newStore(policy.ModeOptIn, true),
-			isSwarmManager:  true,
-			wantServiceCall: true,
-			wantLogMsg:      "could not inspect parent service",
-		},
-		{
-			name: "typo WARN on service label",
-			containerInfo: makeSwarmContainer(map[string]string{
-				policy.LabelEnable: "true",
-			}),
-			svcResult: swarm.Service{
-				Spec: swarm.ServiceSpec{
-					Annotations: swarm.Annotations{
-						Name:   "my-service",
-						Labels: map[string]string{policy.LabelPrefix + "enabled": "true"},
-					},
-				},
-			},
-			store:           newStore(policy.ModeOptIn, true),
-			isSwarmManager:  true,
-			wantServiceCall: true,
-			wantLogMsg:      "unrecognized swarm-device-access label on parent service",
-		},
-		{
-			name: "worker node skips service inspect",
-			containerInfo: makeSwarmContainer(map[string]string{
-				policy.LabelEnable: "true",
-			}),
-			store:           newStore(policy.ModeOptIn, true),
-			isSwarmManager:  false,
-			wantServiceCall: false,
-		},
-		{
-			name:          "manager warns when known label set via deploy.labels",
-			containerInfo: makeSwarmContainer(nil),
-			svcResult: swarm.Service{
-				Spec: swarm.ServiceSpec{
-					Annotations: swarm.Annotations{
-						Name:   "my-service",
-						Labels: map[string]string{policy.LabelEnable: "true"},
-					},
-				},
-			},
-			store:           newStore(policy.ModeOptIn, true),
-			isSwarmManager:  true,
-			wantServiceCall: true,
-			wantLogMsg:      "swarm-device-access label set via deploy.labels on parent service",
+	err := proc.ProcessContainer(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("ProcessContainer: %v", err)
+	}
+
+	if inspector.serviceCalls != 0 {
+		t.Errorf("ServiceInspect called %d times, want never", inspector.serviceCalls)
+	}
+
+	if !strings.Contains(buf.String(), "skipped by policy") {
+		t.Errorf("service-level opt-in must not enable the container; log:\n%s", buf.String())
+	}
+}
+
+func TestProcessContainer_WarnsOnUnknownContainerLabel(t *testing.T) {
+	buf := captureLogger(t)
+
+	inspector := &fakeInspector{
+		result: container.InspectResponse{
+			State: &container.State{Pid: 51},
+			Config: &container.Config{Labels: map[string]string{
+				policy.LabelPrefix + "enabled": "true",
+			}},
 		},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			buf := captureLogger(t)
+	proc := &Processor{Inspector: inspector, Cfg: newStore(policy.ModeOptIn, true)}
 
-			procRoot := buildProcRoot(t, pid, cgroupContent, mountinfoContent)
+	err := proc.ProcessContainer(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("ProcessContainer: %v", err)
+	}
 
-			inspector := &fakeInspector{
-				result:        tc.containerInfo,
-				serviceResult: tc.svcResult,
-				serviceErr:    tc.svcErr,
-			}
-
-			proc := &Processor{
-				Inspector:      inspector,
-				Cfg:            tc.store,
-				HostRoot:       t.TempDir(),
-				ProcRoot:       procRoot,
-				IsSwarmManager: tc.isSwarmManager,
-			}
-
-			_ = proc.ProcessContainer(context.Background(), cid)
-
-			logOutput := buf.String()
-
-			if tc.wantServiceCall && inspector.serviceCalls == 0 {
-				t.Error("expected ServiceInspect to be called, was not")
-			}
-
-			if !tc.wantServiceCall && inspector.serviceCalls > 0 {
-				t.Errorf("expected no ServiceInspect call, got %d", inspector.serviceCalls)
-			}
-
-			if tc.wantLogMsg != "" && !strings.Contains(logOutput, tc.wantLogMsg) {
-				t.Errorf("expected log to contain %q, got:\n%s", tc.wantLogMsg, logOutput)
-			}
-
-			if tc.wantSkip && !strings.Contains(logOutput, "skipped by policy") {
-				t.Errorf("expected skip-by-policy log, got:\n%s", logOutput)
-			}
-		})
+	if !strings.Contains(buf.String(), "unrecognized swarm-device-access label on container") {
+		t.Errorf("expected unknown-label warning, got:\n%s", buf.String())
 	}
 }

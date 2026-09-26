@@ -19,7 +19,7 @@ services:
       - /dev/nvidiactl:/dev/nvidiactl
       - /dev/nvidia-uvm:/dev/nvidia-uvm
     command: [ "nvidia-smi" ]
-    # Use top-level labels: — deploy.labels: are only visible on manager nodes.
+    # Use top-level labels: so they reach the container; deploy.labels: are ignored.
     # Required when daemon runs in opt-in mode (the default).
     labels:
       swarm-device-access.enable: "true"

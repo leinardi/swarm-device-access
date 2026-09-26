@@ -18,6 +18,13 @@ The security boundary is the host Docker socket: any process that can create
 containers with `/dev/...` bind mounts can influence which device-allow rules
 this daemon applies. Do not expose the daemon's host socket to untrusted callers.
 
+**Policy inputs.** Which devices a container may open is decided only by the
+daemon's own configuration (flags and config file) and the container's own
+`swarm-device-access.*` labels. Swarm service-level labels (`deploy.labels:`)
+are ignored, and the daemon does not inspect services or the node's Swarm role,
+so a decision cannot differ between manager and worker nodes or change after a
+daemon restart.
+
 **Opt-in default.** The daemon defaults to `-policy-mode=opt-in`, processing only
 containers that carry `swarm-device-access.enable: "true"`. This minimises blast
 radius — containers that happen to bind-mount `/dev/...` paths are not silently

@@ -15,7 +15,7 @@ services:
       # /dev/snd is a directory; the daemon walks it and applies a rule per device.
       - /dev/snd:/dev/snd
     command: [ "aplay", "-l" ]
-    # Use top-level labels: — deploy.labels: are only visible on manager nodes.
+    # Use top-level labels: so they reach the container; deploy.labels: are ignored.
     labels:
       swarm-device-access.enable: "true"
       swarm-device-access.device-allow: "/dev/snd/*"

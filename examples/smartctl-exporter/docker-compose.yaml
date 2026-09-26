@@ -31,7 +31,7 @@ services:
       - SYS_ADMIN
     security_opt:
       - no-new-privileges=true
-    # Use top-level labels: — deploy.labels: are only visible on manager nodes.
+    # Use top-level labels: so they reach the container; deploy.labels: are ignored.
     labels:
       swarm-device-access.enable: "true"
       swarm-device-access.device-allow: "/dev/sd*,/dev/nvme*,/dev/sg*,/dev/disk/*"
