@@ -75,7 +75,7 @@ func Run(ctx context.Context, opts Options) error {
 func run(
 	ctx context.Context,
 	opts Options,
-	startWatcher func(context.Context, Options, func()),
+	startWatcher func(ctx context.Context, onReload, onSubscribed func()),
 ) error {
 	since := time.Now()
 
@@ -101,21 +101,31 @@ func run(
 
 	// Waited for before Run returns, so shutdown does not cut off a
 	// reconcile in the middle of its cgroup mutation.
-	var coordinator sync.WaitGroup
-	defer coordinator.Wait()
+	var background sync.WaitGroup
+	defer background.Wait()
 
-	coordinator.Go(func() { coord.run(ctx) })
+	background.Go(func() { coord.run(ctx) })
+
+	// The reload watcher starts before the startup pass, on its own
+	// goroutine so a wedged system bus never delays the pass or the event
+	// loop. Every time it subscribes, the first time included, it requests
+	// a pass: a daemon-reload that completed before it was listening (for
+	// example during the startup pass) was not seen.
+	background.Go(func() {
+		startWatcher(ctx,
+			func() {
+				opts.Metrics.IncReloadReapply()
+				coord.request(opts.Proc.Cfg.Generation())
+			},
+			func() { coord.request(opts.Proc.Cfg.Generation()) },
+		)
+	})
 
 	// The startup pass reconciles every running container under the
 	// startup config. In live mode that replaces or strips grants a
 	// previous instance left behind.
 	coord.request(opts.Proc.Cfg.Generation())
 	coord.awaitFirstPass(ctx)
-
-	startWatcher(ctx, opts, func() {
-		opts.Metrics.IncReloadReapply()
-		coord.request(opts.Proc.Cfg.Generation())
-	})
 
 	listenEvents(ctx, opts, coord, since, stream, cancelStream)
 
@@ -129,27 +139,12 @@ func processorApply(proc *processor.Processor) applyFn {
 	}
 }
 
-// startReloadWatcher tries to subscribe to systemd's DBus Reloading signal so
-// that when daemon-reload wipes the cgroup BPF programs, trigger requests a
-// pass that re-applies rules to every running container. DBus is optional —
-// on hosts without systemd or without the DBus socket mounted, this logs a
-// warning and returns.
-func startReloadWatcher(ctx context.Context, _ Options, trigger func()) {
-	watcher, err := systemd.Open()
-	if err != nil {
-		logger.L().Warn("systemd reload handling disabled", "err", err)
-
-		return
-	}
-
-	go func() {
-		defer func() {
-			closeErr := watcher.Close()
-			if closeErr != nil {
-				logger.L().Warn("close systemd watcher", "err", closeErr)
-			}
-		}()
-
-		watcher.Watch(ctx, trigger)
-	}()
+// startReloadWatcher keeps a subscription to systemd's DBus Reloading
+// signal until ctx is done (see systemd.Supervise). daemon-reload can wipe
+// the cgroup BPF programs, so each completed reload requests a pass that
+// re-applies rules to every running container. DBus is optional: on hosts
+// without systemd or without the DBus socket mounted, this warns once and
+// keeps retrying in the background.
+func startReloadWatcher(ctx context.Context, onReload, onSubscribed func()) {
+	systemd.Supervise(ctx, onReload, onSubscribed)
 }

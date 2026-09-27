@@ -22,8 +22,10 @@ package systemd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 
@@ -43,7 +45,18 @@ const (
 	nameOwnerChangedFullName = busDaemonName + "." + nameOwnerChangedMember
 
 	signalChanBuffer = 16
+
+	// setupTimeout bounds one attempt to connect and subscribe: none of the
+	// DBus calls involved take a deadline of their own.
+	setupTimeout = 10 * time.Second
+	// minRetry and maxRetry bound the pause between subscription attempts.
+	minRetry = time.Second
+	maxRetry = 5 * time.Minute
 )
+
+// errSetupTimeout reports a subscription attempt that did not finish within
+// setupTimeout.
+var errSetupTimeout = errors.New("connecting to the system bus timed out")
 
 // Watcher holds a DBus connection subscribed to systemd's Reloading signal.
 // systemctl daemon-reload clears cgroup BPF programs, so any container that
@@ -58,12 +71,171 @@ type Watcher struct {
 	owner string
 }
 
+// Supervise keeps a Watcher subscribed until ctx is done, invoking onReload
+// on each completed systemd reload. It never blocks its caller's other work
+// on DBus: run it on its own goroutine. Each attempt to connect and
+// subscribe is bounded by setupTimeout; a failed attempt, or a connection
+// that is lost later (a DBus restart), is retried with backoff up to
+// maxRetry.
+//
+// onSubscribed runs after every successful subscription, the first one
+// included: a reload that completed while no watcher was subscribed (during
+// startup, or while the bus was unreachable) was not seen, so the caller
+// must reconcile everything once.
+func Supervise(ctx context.Context, onReload, onSubscribed func()) {
+	sup := supervisor{
+		open:         Open,
+		setupTimeout: setupTimeout,
+		minRetry:     minRetry,
+		maxRetry:     maxRetry,
+	}
+	sup.run(ctx, onReload, onSubscribed)
+}
+
+// supervisor is Supervise with its seams: tests replace open and shorten
+// the timings.
+type supervisor struct {
+	open         func() (*Watcher, error)
+	setupTimeout time.Duration
+	minRetry     time.Duration
+	maxRetry     time.Duration
+}
+
+func (s *supervisor) run(ctx context.Context, onReload, onSubscribed func()) {
+	retry := s.minRetry
+	failures := 0
+
+	for {
+		watcher, err := s.openBounded(ctx)
+		if ctx.Err() != nil {
+			closeWatcher(watcher)
+
+			return
+		}
+
+		if err != nil {
+			// Hosts without systemd or without the socket mounted fail
+			// every attempt; say so once, then keep trying quietly.
+			if failures == 0 {
+				logger.L().Warn("systemd reload handling unavailable; retrying in the background",
+					"err", err, "retry_in", retry)
+			} else {
+				logger.L().Debug("systemd reload watcher still unavailable",
+					"err", err, "retry_in", retry)
+			}
+
+			failures++
+
+			if !sleepCtx(ctx, retry) {
+				return
+			}
+
+			retry = min(retry*2, s.maxRetry)
+
+			continue
+		}
+
+		if failures > 0 {
+			logger.L().Info("systemd reload handling available again")
+		}
+
+		failures = 0
+		subscribedAt := time.Now()
+
+		// Signals are buffered from here on, so none is lost while the
+		// caller reconciles.
+		onSubscribed()
+		watcher.Watch(ctx, onReload)
+		closeWatcher(watcher)
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		// A subscription that held for a while starts the backoff over;
+		// one that keeps dropping right away backs off like a failure, so
+		// a flapping bus does not request a pass every minRetry.
+		if time.Since(subscribedAt) >= s.maxRetry {
+			retry = s.minRetry
+		}
+
+		logger.L().Warn("systemd reload watcher disconnected; resubscribing", "retry_in", retry)
+
+		if !sleepCtx(ctx, retry) {
+			return
+		}
+
+		retry = min(retry*2, s.maxRetry)
+	}
+}
+
+// openBounded runs open, giving up after setupTimeout or when ctx is done.
+// An attempt given up on keeps running in the background and closes its
+// watcher if it ever succeeds, so nothing leaks a subscription.
+func (s *supervisor) openBounded(ctx context.Context) (*Watcher, error) {
+	type attempt struct {
+		watcher *Watcher
+		err     error
+	}
+
+	result := make(chan attempt, 1)
+
+	go func() {
+		watcher, err := s.open()
+		result <- attempt{watcher, err}
+	}()
+
+	abandon := func() {
+		go func() { closeWatcher((<-result).watcher) }()
+	}
+
+	timer := time.NewTimer(s.setupTimeout)
+	defer timer.Stop()
+
+	select {
+	case got := <-result:
+		return got.watcher, got.err
+	case <-timer.C:
+		abandon()
+
+		return nil, errSetupTimeout
+	case <-ctx.Done():
+		abandon()
+
+		return nil, fmt.Errorf("subscribe to systemd reloads: %w", ctx.Err())
+	}
+}
+
+func closeWatcher(watcher *Watcher) {
+	if watcher == nil {
+		return
+	}
+
+	err := watcher.Close()
+	if err != nil {
+		logger.L().Warn("close systemd watcher", "err", err)
+	}
+}
+
+// sleepCtx waits for duration and reports whether ctx is still live.
+func sleepCtx(ctx context.Context, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 // Open connects to the system DBus, resolves the unique name that owns
 // org.freedesktop.systemd1, and registers signal matches for systemd's
 // Reloading signal (from systemd's name and object path only) and for
 // changes of that name's owner. Returns an error if DBus is unavailable (no
-// socket bind-mount, no systemd, daemon running off-host). Callers should
-// treat this as non-fatal and continue without reload handling.
+// socket bind-mount, no systemd, daemon running off-host). Supervise
+// retries it; the daemon runs without reload handling meanwhile.
 func Open() (*Watcher, error) {
 	conn, err := dbus.ConnectSystemBus()
 	if err != nil {
@@ -173,7 +345,7 @@ func watch(ctx context.Context, sigCh <-chan *dbus.Signal, owner string, onReloa
 
 		case sig, ok := <-sigCh:
 			if !ok {
-				logger.L().Warn("systemd signal channel closed; reload watcher exiting")
+				logger.L().Debug("systemd signal channel closed")
 
 				return
 			}

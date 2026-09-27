@@ -206,7 +206,7 @@ func waitForWithin(t *testing.T, limit time.Duration, cond func() bool) {
 	t.Fatal("condition not met before deadline")
 }
 
-func noopWatcher(context.Context, Options, func()) {}
+func noopWatcher(context.Context, func(), func()) {}
 
 // newTestStore returns a store holding the zero config.
 func newTestStore() *config.Store {
@@ -267,6 +267,55 @@ func TestRun_SubscribesBeforeEnumerating(t *testing.T) {
 	if got := insp.inspected(); !slices.Equal(got, []string{"listed", "unlisted"}) {
 		t.Errorf("inspected = %v, want [listed unlisted]", got)
 	}
+}
+
+// TestRun_WatcherRunsBesideStartupAndEvents checks that the reload watcher
+// cannot hold up the startup pass or the event loop (it blocks here for the
+// whole run, like a wedged system bus), and that each subscription it
+// reports requests a pass, covering a reload it could not have seen.
+func TestRun_WatcherRunsBesideStartupAndEvents(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msgs := make(chan events.Message, 1)
+	docker := &fakeDocker{
+		containers: []container.Summary{{ID: "listed"}},
+		firstMsgs:  msgs,
+		firstErrs:  make(chan error),
+	}
+
+	insp := &recordingInspector{}
+	opts := Options{
+		Docker: docker,
+		Proc:   &processor.Processor{Inspector: insp, Cfg: newTestStore()},
+	}
+
+	subscribed := make(chan func(), 1)
+	blockingWatcher := func(ctx context.Context, _, onSubscribed func()) {
+		subscribed <- onSubscribed
+
+		<-ctx.Done()
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		_ = run(ctx, opts, blockingWatcher)
+	}()
+
+	msgs <- events.Message{Actor: events.Actor{ID: "started"}, TimeNano: time.Now().UnixNano()}
+
+	waitFor(t, func() bool { return slices.Contains(insp.inspected(), "started") })
+
+	before := docker.listCalls()
+
+	(<-subscribed)()
+
+	waitFor(t, func() bool { return docker.listCalls() > before })
+	cancel()
+	<-done
 }
 
 // TestListenEvents_ReconnectSinceAfterLastEvent checks that a re-subscription

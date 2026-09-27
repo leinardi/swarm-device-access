@@ -32,7 +32,8 @@ Docker daemon
 |    │    passes: list running containers, reconcile each        |
 |    │    (startup, SIGHUP via PublishAndReconcile, systemd      |
 |    │    reload), retries with backoff, lifecycle sweep         |
-|    ├─ startReloadWatcher (systemd DBus)   ← requests a pass    |
+|    ├─ startReloadWatcher (systemd DBus)   ← own goroutine,     |
+|    │    requests a pass per subscription and per reload        |
 |    └─ listenEvents → consumeEvents        ← reconnect loop     |
 |         └─ coordinator.handleEvent                             |
 |              start/unpause → reconcileContainer → processOne   |
@@ -122,8 +123,14 @@ not cut off a reconcile in the middle of its cgroup mutation.
 `org.freedesktop.systemd1.Manager.Reloading` and requests a pass when it receives the completion edge (`active=false`). Any client on the
 system bus can emit a signal with that name, so the watcher only counts one sent from `/org/freedesktop/systemd1` by the unique bus name that
 owns `org.freedesktop.systemd1` (resolved with `GetNameOwner` at startup and followed through the bus daemon's `NameOwnerChanged`). Re-applies
-are coalesced: reloads that complete while one runs lead to a single trailing run. It gracefully degrades to a warning when the DBus socket is
-not mounted.
+are coalesced: reloads that complete while one runs lead to a single trailing run.
+
+The watcher runs in its own goroutine, started before the startup pass, so connecting to the bus never delays the pass or the event loop.
+Each connection attempt is bounded (10 s). An attempt that fails, and a subscription that is lost later (the bus daemon restarting, for
+one), is retried with a backoff of 1 s doubling to 5 min, which starts over once a subscription has held for 5 min; the first failure is logged
+at `Warn`, later ones at `Debug`. Every successful
+subscription requests a pass, because a reload that completed while the watcher was not subscribed, including one during the startup
+pass, sent a signal nobody received.
 
 ## BPF program structure
 
@@ -351,7 +358,7 @@ level=INFO msg="dry-run: would set device rules" id=abc rules=1
 
 ### Daemon does not re-apply rules after `systemctl daemon-reload`
 
-Ensure the host DBus socket is bind-mounted as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`. Without it, the reload watcher is disabled (logged at `Warn` on startup). The container-side path must be `/var/run/dbus/system_bus_socket` — `dhi.io/static` has no `/var/run → /run` symlink.
+Ensure the host DBus socket is bind-mounted as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`. Without it, the reload watcher cannot subscribe: the first failure is logged at `Warn` (`systemd reload handling unavailable; retrying in the background`) and it keeps retrying at `Debug`. The container-side path must be `/var/run/dbus/system_bus_socket` — `dhi.io/static` has no `/var/run → /run` symlink.
 
 ### Daemon cannot connect to Docker
 

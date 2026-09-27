@@ -23,8 +23,10 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 
@@ -272,5 +274,183 @@ func TestWatch_UsesTheCurrentLogger(t *testing.T) {
 			before.String(),
 			after.String(),
 		)
+	}
+}
+
+// fakeOpens scripts successive Open results for a supervisor.
+type fakeOpens struct {
+	mu    sync.Mutex
+	steps []func() (*Watcher, error)
+	calls int
+}
+
+func (f *fakeOpens) open() (*Watcher, error) {
+	f.mu.Lock()
+	step := f.steps[min(f.calls, len(f.steps)-1)]
+	f.calls++
+	f.mu.Unlock()
+
+	return step()
+}
+
+func failOpen() (*Watcher, error) { return nil, errSetupTimeout }
+
+func openOn(sigCh chan *dbus.Signal) func() (*Watcher, error) {
+	return func() (*Watcher, error) { return &Watcher{sigCh: sigCh, owner: testOwner}, nil }
+}
+
+// startSupervisor runs a supervisor with millisecond timings and returns
+// channels that receive one value per onSubscribed and onReload call. It
+// is stopped, and must return promptly, when the test ends.
+func startSupervisor(
+	t *testing.T,
+	opens *fakeOpens,
+) (subscribed, reloaded <-chan struct{}) {
+	t.Helper()
+
+	subCh := make(chan struct{}, 16)
+	reloadCh := make(chan struct{}, 16)
+
+	sup := &supervisor{
+		open:         opens.open,
+		setupTimeout: 50 * time.Millisecond,
+		minRetry:     time.Millisecond,
+		maxRetry:     4 * time.Millisecond,
+	}
+
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		sup.run(ctx,
+			func() { reloadCh <- struct{}{} },
+			func() { subCh <- struct{}{} },
+		)
+	}()
+
+	t.Cleanup(func() {
+		cancelCtx()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("supervisor did not return after cancel")
+		}
+	})
+
+	return subCh, reloadCh
+}
+
+func receive(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
+// A system bus that is not reachable yet is retried; the first
+// subscription requests a pass and reloads are delivered from then on.
+func TestSupervise_RetriesUntilSubscribed(t *testing.T) {
+	t.Parallel()
+
+	sigCh := make(chan *dbus.Signal)
+	opens := &fakeOpens{steps: []func() (*Watcher, error){failOpen, failOpen, openOn(sigCh)}}
+	subscribed, reloaded := startSupervisor(t, opens)
+
+	receive(t, subscribed, "the first subscription")
+
+	sigCh <- completed(testOwner, systemdObjectPath)
+
+	receive(t, reloaded, "the reload")
+}
+
+// A lost connection (the signal channel closes, as on a DBus restart) is
+// resubscribed, and the new subscription requests a pass again: reloads
+// during the outage were not seen.
+func TestSupervise_ResubscribesAfterDisconnect(t *testing.T) {
+	t.Parallel()
+
+	first := make(chan *dbus.Signal)
+	second := make(chan *dbus.Signal)
+	opens := &fakeOpens{steps: []func() (*Watcher, error){openOn(first), openOn(second)}}
+	subscribed, reloaded := startSupervisor(t, opens)
+
+	receive(t, subscribed, "the first subscription")
+	close(first)
+	receive(t, subscribed, "the resubscription")
+
+	second <- completed(testOwner, systemdObjectPath)
+
+	receive(t, reloaded, "the reload on the new subscription")
+}
+
+// An attempt stuck on a wedged bus is given up after setupTimeout and the
+// next one proceeds; canceling returns even while an attempt hangs.
+func TestSupervise_BoundsAHungAttempt(t *testing.T) {
+	t.Parallel()
+
+	hang := make(chan struct{})
+
+	t.Cleanup(func() { close(hang) })
+
+	sigCh := make(chan *dbus.Signal)
+	opens := &fakeOpens{steps: []func() (*Watcher, error){
+		func() (*Watcher, error) {
+			<-hang
+
+			return nil, errSetupTimeout
+		},
+		openOn(sigCh),
+	}}
+	subscribed, _ := startSupervisor(t, opens)
+
+	receive(t, subscribed, "the subscription after the hung attempt")
+}
+
+func TestSupervise_CancelWhileAttemptHangs(t *testing.T) {
+	t.Parallel()
+
+	hang := make(chan struct{})
+
+	t.Cleanup(func() { close(hang) })
+
+	entered := make(chan struct{})
+	opens := &fakeOpens{steps: []func() (*Watcher, error){
+		func() (*Watcher, error) {
+			close(entered)
+			<-hang
+
+			return nil, errSetupTimeout
+		},
+	}}
+
+	sup := &supervisor{
+		open:         opens.open,
+		setupTimeout: time.Hour,
+		minRetry:     time.Hour,
+		maxRetry:     time.Hour,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		sup.run(ctx, func() {}, func() { t.Error("subscribed without a watcher") })
+	}()
+
+	<-entered
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("supervisor did not return after cancel while an attempt hung")
 	}
 }
