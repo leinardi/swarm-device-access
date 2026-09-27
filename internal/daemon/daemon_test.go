@@ -538,16 +538,15 @@ func TestProcessOne_StartupFailureMatchesEventPath(t *testing.T) {
 
 	msgs <- events.Message{Actor: events.Actor{ID: "bad"}, TimeNano: time.Now().UnixNano()}
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
+	// The failure is recorded before consumeEvents returns, so ending from
+	// inside the one expected apply loses nothing.
+	failOnce, _ := cancelAfter(1, cancel, errApplyFailed)
 
 	consumeEvents(
 		ctx,
 		msgs,
 		errs,
-		testCoordinatorWith(failingApply, metrics, nil),
+		testCoordinatorWith(failOnce, metrics, nil),
 		&backoff,
 		new(int64),
 		metrics,

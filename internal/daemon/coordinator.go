@@ -357,6 +357,9 @@ func (c *coordinator) handleEvent(ctx context.Context, msg *events.Message) {
 		c.terminateContainer(ctx, containerID, eventTime)
 	default:
 		if c.skipEvent(containerID, eventTime) {
+			logger.L().Debug("event already covered by a pass; skipped",
+				"id", containerID, "action", string(msg.Action))
+
 			return
 		}
 
