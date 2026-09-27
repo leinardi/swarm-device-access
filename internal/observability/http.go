@@ -19,8 +19,11 @@ package observability
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/pprof"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,7 +32,15 @@ import (
 	"github.com/leinardi/swarm-device-access/internal/logger"
 )
 
-const shutdownTimeout = 5 * time.Second
+const (
+	shutdownTimeout   = 5 * time.Second
+	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 10 * time.Second
+	idleTimeout       = 60 * time.Second
+	// metricsWriteTimeout bounds a scrape. The debug server has none: a
+	// CPU profile or trace streams for as long as the caller asks.
+	metricsWriteTimeout = 30 * time.Second
+)
 
 // ready tracks whether the daemon is subscribed to the Docker event stream.
 var ready atomic.Bool
@@ -37,13 +48,51 @@ var ready atomic.Bool
 // SetReady updates the daemon readiness state reflected by the /readyz endpoint.
 func SetReady(val bool) { ready.Store(val) }
 
-// StartMetricsServer starts an HTTP server on addr exposing:
+// StartMetricsServer binds addr and serves, until ctx is done or stop is
+// called:
 //
 //	/metrics  — Prometheus text format (default registry)
 //	/healthz  — 200 OK always (liveness)
 //	/readyz   — 200 OK once subscribed to Docker events (readiness)
-func StartMetricsServer(ctx context.Context, addr string) {
-	log := logger.L()
+//
+// The address is bound before it returns, so a busy or invalid address is
+// an error rather than a log line from a goroutine. stop shuts the server
+// down and waits for it; it is safe to call more than once.
+func StartMetricsServer(ctx context.Context, addr string) (stop func(), err error) {
+	listener, err := listen(ctx, addr)
+	if err != nil {
+		return nil, fmt.Errorf("metrics server: %w", err)
+	}
+
+	return serve(ctx, "metrics", listener, newMetricsServer()), nil
+}
+
+// StartDebugServer binds addr and serves the pprof endpoints until ctx is
+// done or stop is called (see StartMetricsServer). The server has no write
+// timeout, because profiles and traces stream for as long as the caller
+// asks, so it must stay on a loopback address.
+func StartDebugServer(ctx context.Context, addr string) (stop func(), err error) {
+	listener, err := listen(ctx, addr)
+	if err != nil {
+		return nil, fmt.Errorf("debug server: %w", err)
+	}
+
+	return serve(ctx, "debug", listener, newDebugServer()), nil
+}
+
+// listen binds addr now, so the caller learns about a busy address.
+func listen(ctx context.Context, addr string) (net.Listener, error) {
+	var config net.ListenConfig
+
+	listener, err := config.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", addr, err)
+	}
+
+	return listener, nil
+}
+
+func newMetricsServer() *http.Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/healthz", func(resp http.ResponseWriter, _ *http.Request) {
@@ -60,37 +109,16 @@ func StartMetricsServer(ctx context.Context, addr string) {
 		}
 	})
 
-	srv := &http.Server{
-		Addr:              addr,
+	return &http.Server{
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      metricsWriteTimeout,
+		IdleTimeout:       idleTimeout,
 	}
-
-	go func() {
-		log.Info("metrics server listening", "addr", addr)
-
-		err := srv.ListenAndServe()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("metrics server error", "err", err)
-		}
-	}()
-
-	go func() {
-		<-ctx.Done()
-
-		shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
-		defer cancel()
-
-		err := srv.Shutdown(shutCtx)
-		if err != nil {
-			log.Warn("metrics server shutdown error", "err", err)
-		}
-	}()
 }
 
-// StartDebugServer starts an HTTP server on addr exposing pprof endpoints.
-func StartDebugServer(ctx context.Context, addr string) {
-	log := logger.L()
+func newDebugServer() *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -98,30 +126,49 @@ func StartDebugServer(ctx context.Context, addr string) {
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
-	srv := &http.Server{
-		Addr:              addr,
+	return &http.Server{
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
 	}
+}
+
+// serve runs srv on ln until ctx is done or the returned stop is called.
+func serve(ctx context.Context, name string, listener net.Listener, srv *http.Server) func() {
+	log := logger.L()
+	served := make(chan struct{})
+
+	log.Info(name+" server listening", "addr", listener.Addr().String())
 
 	go func() {
-		log.Info("debug server listening", "addr", addr)
+		defer close(served)
 
-		err := srv.ListenAndServe()
+		err := srv.Serve(listener)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("debug server error", "err", err)
+			log.Error(name+" server error", "err", err)
 		}
 	}()
 
-	go func() {
-		<-ctx.Done()
-
+	stop := sync.OnceFunc(func() {
 		shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 		defer cancel()
 
 		err := srv.Shutdown(shutCtx)
 		if err != nil {
-			log.Warn("debug server shutdown error", "err", err)
+			log.Warn(name+" server shutdown error", "err", err)
+		}
+
+		<-served
+	})
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			stop()
+		case <-served:
 		}
 	}()
+
+	return stop
 }

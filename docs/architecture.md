@@ -308,7 +308,12 @@ Metrics exposed:
 
 ### pprof debug server (`--debug-addr`)
 
-When `-debug-addr=127.0.0.1:6060` is set, the standard Go pprof endpoints are available at `/debug/pprof/*`. Only bind to localhost in production.
+When `-debug-addr=127.0.0.1:6060` is set, the standard Go pprof endpoints are available at `/debug/pprof/*`. The server has a 10 s read
+timeout and a 60 s idle timeout but no write timeout, because a CPU profile or trace streams for as long as the caller asks; keep it on a
+loopback address.
+
+Both servers bind their address before the daemon goes on, and a busy or invalid address makes the daemon exit with an error (the metrics
+server is stopped again if the debug server then fails). The metrics server has a 10 s read, 30 s write and 60 s idle timeout.
 
 ## Dry-run mode
 

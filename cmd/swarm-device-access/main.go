@@ -73,6 +73,36 @@ func startupSettings(flags *settings, cliSet map[string]bool) (settings, error) 
 	return effective, nil
 }
 
+// startServers starts the configured metrics and debug servers. A busy or
+// invalid address is an error; if the second server fails, the first is
+// stopped again. The returned stop shuts down whatever was started.
+func startServers(ctx context.Context, effective *settings) (stop func(), err error) {
+	stopMetrics := func() {}
+
+	if effective.MetricsAddr != "" {
+		stopMetrics, err = observability.StartMetricsServer(ctx, effective.MetricsAddr)
+		if err != nil {
+			return nil, fmt.Errorf("start metrics server: %w", err)
+		}
+	}
+
+	stopDebug := func() {}
+
+	if effective.DebugAddr != "" {
+		stopDebug, err = observability.StartDebugServer(ctx, effective.DebugAddr)
+		if err != nil {
+			stopMetrics()
+
+			return nil, fmt.Errorf("start debug server: %w", err)
+		}
+	}
+
+	return func() {
+		stopDebug()
+		stopMetrics()
+	}, nil
+}
+
 func run() int {
 	flag.Parse()
 
@@ -157,13 +187,13 @@ func run() int {
 
 	// Start optional observability servers before the main loop so they are
 	// reachable during startup enumeration.
-	if effective.MetricsAddr != "" {
-		observability.StartMetricsServer(rootCtx, effective.MetricsAddr)
-	}
+	stopServers, err := startServers(rootCtx, &effective)
+	if err != nil {
+		log.Error("could not start observability server", "err", err)
 
-	if effective.DebugAddr != "" {
-		observability.StartDebugServer(rootCtx, effective.DebugAddr)
+		return 1
 	}
+	defer stopServers()
 
 	proc := &processor.Processor{
 		Inspector:   cli,

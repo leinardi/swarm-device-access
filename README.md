@@ -268,8 +268,8 @@ value is set in both places, the CLI flag wins.
 | `-policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
 | `-device-allow` | `""` | Glob for `/dev/...` paths to allow, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Empty means allow all. |
 | `-device-deny` | `""` | Glob for `/dev/...` paths to deny, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Deny takes priority over allow. |
-| `-metrics-addr` | `""` | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. |
-| `-debug-addr` | `""` | `host:port` for pprof `/debug/pprof/*`. Empty disables it. |
+| `-metrics-addr` | `""` | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. A busy or invalid address stops startup. |
+| `-debug-addr` | `""` | `host:port` for pprof `/debug/pprof/*`. Empty disables it. Keep it on a loopback address such as `127.0.0.1:6060`: it has no write timeout, since profiles stream for as long as requested. A busy or invalid address stops startup. |
 | `-config` | `""` | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |
 | `-help` |  | Print this flag list and exit |
 
