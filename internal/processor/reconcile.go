@@ -101,13 +101,30 @@ func (p *Processor) applyPinned(
 		return cgroupPath, err
 	}
 
+	identity := handle.Identity()
+
+	// The same run can move to another cgroup: a container running systemd
+	// moves its processes into a child cgroup, and a grant left on the
+	// parent keeps applying to every descendant. The grants at the recorded
+	// cgroup go before the record is replaced; if they cannot, the record
+	// keeps naming that cgroup and the container is retried. On cgroup v1 a
+	// child cannot be granted what its parent denies, so such a run ends
+	// up with no grants at all: fail closed.
+	moved, ok := p.lifecycleStore().lookup(containerID, state.StartedAt)
+	if ok && moved.HasIdentity() && moved.Identity != identity {
+		err = p.revokeMoved(&moved, identity)
+		if err != nil {
+			return cgroupPath, err
+		}
+	}
+
 	// Recorded after verification, so an identity resolved through a
 	// recycled pid is never kept, and before the mutation, so a failed or
 	// partial one can still be revoked here later.
 	p.lifecycleStore().verify(&LifecycleRecord{
 		ContainerID: containerID,
 		StartedAt:   state.StartedAt,
-		Identity:    handle.Identity(),
+		Identity:    identity,
 		Version:     resolved.Version,
 		Privileged:  privileged,
 	})
@@ -337,24 +354,18 @@ func cgroupGone(identity cgroup.Identity) (bool, error) {
 func (p *Processor) revokeAt(rec *LifecycleRecord, mayRun bool) error {
 	log := logger.L()
 
-	handle, err := cgroup.OpenCgroup(rec.Identity.Path)
-	if errors.Is(err, fs.ErrNotExist) {
-		p.release(rec, "cgroup removed")
-
-		return nil
+	handle, goneWhy, err := openRecorded(rec)
+	if err != nil {
+		return err
 	}
 
-	if err != nil {
-		return fmt.Errorf("revoke container %q: %w", rec.ContainerID, err)
+	if goneWhy != "" {
+		p.release(rec, goneWhy)
+
+		return nil
 	}
 
 	defer closeHandle(handle)
-
-	if handle.Identity() != rec.Identity {
-		p.release(rec, "cgroup recreated")
-
-		return nil
-	}
 
 	api, err := p.cgroupAPI(rec.Version)
 	if err != nil {
@@ -385,6 +396,68 @@ func (p *Processor) revokeAt(rec *LifecycleRecord, mayRun bool) error {
 	log.Debug("device grants revoked", "id", rec.ContainerID, "cgroup", rec.Identity.Path)
 
 	return nil
+}
+
+// revokeMoved applies the empty set at the cgroup a still-running run was
+// recorded in, once the run is verified in another one (current). The
+// cgroup API then forgets that directory: no record names it any more.
+// A missing filter means nothing attached there holds a grant.
+func (p *Processor) revokeMoved(prev *LifecycleRecord, current cgroup.Identity) error {
+	log := logger.L()
+
+	handle, goneWhy, err := openRecorded(prev)
+	if err != nil {
+		return err
+	}
+
+	if goneWhy == "" {
+		defer closeHandle(handle)
+
+		api, err := p.cgroupAPI(prev.Version)
+		if err != nil {
+			return err
+		}
+
+		err = api.SetDeviceRules(handle, nil)
+		if err != nil && !errors.Is(err, cgroup.ErrFilterMissing) {
+			return fmt.Errorf(
+				"revoke container %q in its previous cgroup %q: %w",
+				prev.ContainerID,
+				prev.Identity.Path,
+				err,
+			)
+		}
+	}
+
+	log.Info("container moved to another cgroup; previous grants revoked",
+		"id", prev.ContainerID, "from", prev.Identity.Path, "to", current.Path)
+
+	p.ledger.Forget(prev.Identity)
+	p.filterCache.Forget(prev.Identity)
+
+	return nil
+}
+
+// openRecorded re-opens the cgroup a record names. goneWhy is set, and
+// the handle nil, when the directory is gone or was recreated at the same
+// path (another inode): either way it holds none of the run's grants.
+func openRecorded(rec *LifecycleRecord) (handle *cgroup.CgroupHandle, goneWhy string, err error) {
+	handle, err = cgroup.OpenCgroup(rec.Identity.Path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, "cgroup removed", nil
+	}
+
+	if err != nil {
+		return nil, "", fmt.Errorf("revoke container %q: %w", rec.ContainerID, err)
+	}
+
+	if handle.Identity() != rec.Identity {
+		closeHandle(handle)
+
+		return nil, "cgroup recreated", nil
+	}
+
+	return handle, "", nil
 }
 
 // release forgets a run whose cgroup is verified gone, together with what

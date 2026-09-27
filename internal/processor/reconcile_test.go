@@ -346,6 +346,104 @@ func TestReconcile_ExitAfterCgroupRemovedReleases(t *testing.T) {
 	}
 }
 
+// moveToChildCgroup moves the test container's process into a child of its
+// cgroup, as systemd running inside it does, and returns the child's path.
+func moveToChildCgroup(t *testing.T, env *reconcileEnv) string {
+	t.Helper()
+
+	child := filepath.Join(testCgroupDir(env.proc.HostRoot), "init.scope")
+
+	err := os.Mkdir(child, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = os.WriteFile(
+		filepath.Join(child, "cgroup.procs"),
+		[]byte(strconv.Itoa(reconcilePid)+"\n"),
+		0o600,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeProcs(t, env.proc.HostRoot)
+
+	err = os.WriteFile(
+		filepath.Join(env.proc.ProcRoot, "proc", strconv.Itoa(reconcilePid), "cgroup"),
+		[]byte("0::/docker/testcontainer/init.scope\n"),
+		0o600,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return child
+}
+
+// TestReconcile_MovedRunRevokesPreviousCgroup: a run found in another
+// cgroup than the one it was granted in loses the grants there before it
+// is granted in the new one, since a grant on a parent cgroup applies to
+// every descendant.
+func TestReconcile_MovedRunRevokesPreviousCgroup(t *testing.T) {
+	env := newReconcileEnv(t, policy.ModeAll, false)
+	env.grantOnce(t)
+
+	parent := env.fake.identity
+	child := moveToChildCgroup(t, env)
+
+	err := env.reconcile()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env.fake.calls != 3 ||
+		env.fake.identities[1] != parent || len(env.fake.rules[1]) != 0 ||
+		env.fake.identities[2].Path != child || len(env.fake.rules[2]) != 1 {
+		t.Fatalf(
+			"calls = %d, identities = %+v, rules = %v; want the empty set on %s, then the grant on %s",
+			env.fake.calls,
+			env.fake.identities,
+			env.fake.rules,
+			parent.Path,
+			child,
+		)
+	}
+
+	recs := verifiedRecords(env.proc)
+	if len(recs) != 1 || recs[0].Identity.Path != child {
+		t.Errorf("records = %+v, want one naming %s", recs, child)
+	}
+}
+
+// TestReconcile_MovedRunRevokeFailureKeepsRecord: when the previous cgroup
+// cannot be revoked, the new one is not granted and the record keeps
+// naming the previous cgroup, so a retry revokes it again.
+func TestReconcile_MovedRunRevokeFailureKeepsRecord(t *testing.T) {
+	env := newReconcileEnv(t, policy.ModeAll, false)
+	env.grantOnce(t)
+
+	parent := env.fake.identity
+	moveToChildCgroup(t, env)
+
+	env.fake.err = errRevokeFailed
+
+	err := env.reconcile()
+	if !errors.Is(err, errRevokeFailed) {
+		t.Fatalf("err = %v, want the revoke failure", err)
+	}
+
+	if env.fake.calls != 2 || env.fake.identities[1] != parent || len(env.fake.rules[1]) != 0 {
+		t.Fatalf("calls = %d, identities = %+v, rules = %v; want only the revoke attempt on %s",
+			env.fake.calls, env.fake.identities, env.fake.rules, parent.Path)
+	}
+
+	recs := verifiedRecords(env.proc)
+	if len(recs) != 1 || recs[0].Identity != parent {
+		t.Errorf("records = %+v, want the one naming %s kept", recs, parent.Path)
+	}
+}
+
 // TestReconcile_InspectFailureRevokesKnownIdentity: without a pid the
 // container's grants are revoked where its lifecycle was verified, and the
 // container stays pending. With no known identity it is pending only.

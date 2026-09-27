@@ -147,6 +147,10 @@ that cgroup. A recycled pid therefore never directs grants to another cgroup.
 Once a container has exited, or when Docker cannot be asked about it, its
 grants are revoked in the cgroup the daemon last verified for it, and only if
 that directory is still the same one (same inode) and was not recreated.
+A running container found in another cgroup than the one it was granted in
+(systemd inside the container moving its processes into a child cgroup, for
+example) loses the grants in the previous cgroup before it is granted in the
+new one, since a grant on a parent cgroup applies to every cgroup below it.
 
 The daemon keeps a short history of each container's runs. A `die` or
 `destroy` event revokes the grants of the run it ended (the latest run that

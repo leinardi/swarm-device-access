@@ -42,10 +42,11 @@ import (
 type failingCgroup struct {
 	cgroup.Interface
 
-	err      error
-	calls    int
-	identity cgroup.Identity
-	rules    [][]cgroup.DeviceRule
+	err        error
+	calls      int
+	identity   cgroup.Identity
+	identities []cgroup.Identity
+	rules      [][]cgroup.DeviceRule
 }
 
 func (f *failingCgroup) SetDeviceRules(
@@ -54,6 +55,7 @@ func (f *failingCgroup) SetDeviceRules(
 ) error {
 	f.calls++
 	f.identity = handle.Identity()
+	f.identities = append(f.identities, f.identity)
 	f.rules = append(f.rules, rules)
 
 	return f.err

@@ -69,7 +69,10 @@ cgroup is gone).
 
 Before changing a cgroup the processor pins the container's process with a pidfd, resolves the cgroup from `/proc/<pid>/cgroup`, opens it as a
 directory handle, and re-checks that the process is alive, that Docker still reports it as the container's process with the same start time and,
-for a grant, that it is in that cgroup. All mutation goes through the handle, never the path again.
+for a grant, that it is in that cgroup. All mutation goes through the handle, never the path again. A run found in another cgroup than the one
+it was last verified in (systemd inside the container moving its processes into a child cgroup, for one) first has the empty set applied at the
+previous cgroup, since a grant on a parent applies to every descendant; until that succeeds the new cgroup is not granted and the container is
+retried. On cgroup v1 a child cannot hold what its parent denies, so such a container gets no grants there.
 
 ### Coordinator
 
