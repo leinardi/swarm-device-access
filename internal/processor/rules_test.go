@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -759,8 +760,8 @@ func TestCollect_IncompleteEnumeration(t *testing.T) {
 			info := &container.InspectResponse{
 				State: &container.State{Running: true, Pid: 1},
 				Mounts: []container.MountPoint{
-					{Source: "/dev/null", Destination: "/dev/null"},
-					{Source: "/dev/dri", Destination: "/dev/dri"},
+					{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+					{Source: "/dev/dri", Destination: "/dev/dri", Type: mount.TypeBind},
 				},
 			}
 
@@ -864,13 +865,81 @@ func TestCollect_ExclusionWarnDoesNotAliasTheGlobalPolicy(t *testing.T) {
 	}
 }
 
+// Only a bind mount's Source is a host path under /dev. A volume or tmpfs
+// mount that reports such a Source is never walked: /dev is not even
+// opened for it.
+func TestCollect_OnlyBindMountsAreWalked(t *testing.T) {
+	t.Parallel()
+
+	dev := newFakeDevFS(t)
+	dev.device("sda", devSda, "sda")
+
+	nonBind := []container.MountPoint{
+		{Type: mount.TypeVolume, Source: "/dev/sda", Destination: "/data"},
+		{Type: mount.TypeTmpfs, Source: "/dev/sda", Destination: "/tmp"},
+		{Type: mount.TypeNamedPipe, Source: "/dev/sda", Destination: "/pipe"},
+		{Source: "/dev/sda", Destination: "/untyped"},
+	}
+
+	got := collectContainerRules(
+		dev,
+		"abc",
+		1,
+		nonBind,
+		policy.Global{Mode: policy.ModeAll},
+		policy.Container{},
+		nil,
+	)
+	if got.devMounts != 0 || len(got.granted) != 0 || len(got.deviceErrs) != 0 {
+		t.Errorf("collected %+v from non-bind mounts, want nothing", got)
+	}
+
+	proc := &Processor{devfs: func() (devFS, error) {
+		t.Error("/dev opened for a container without a /dev bind mount")
+
+		return nil, unix.ENOSYS
+	}}
+	info := &container.InspectResponse{
+		State:  &container.State{Running: true, Pid: 1},
+		Mounts: nonBind,
+	}
+
+	desired := proc.computeDesired(
+		"abc",
+		info,
+		config.Runtime{Policy: policy.Global{Mode: policy.ModeAll}},
+	)
+	if len(desired.rules) != 0 || desired.incomplete != nil {
+		t.Errorf("desired = %+v, want an empty, complete set", desired)
+	}
+
+	bind := slices.Concat(nonBind, []container.MountPoint{
+		{Type: mount.TypeBind, Source: "/dev/sda", Destination: "/dev/sda"},
+	})
+	wantRules(
+		t,
+		collectContainerRules(
+			dev,
+			"abc",
+			1,
+			bind,
+			policy.Global{Mode: policy.ModeAll},
+			policy.Container{},
+			nil,
+		),
+		devSda,
+	)
+}
+
 func TestProcessor_DevFSOpenFailureEmptiesTheSet(t *testing.T) {
 	t.Parallel()
 
 	proc := &Processor{devfs: func() (devFS, error) { return nil, unix.ENOSYS }}
 	info := &container.InspectResponse{
-		State:  &container.State{Running: true, Pid: 1},
-		Mounts: []container.MountPoint{{Source: "/dev/null", Destination: "/dev/null"}},
+		State: &container.State{Running: true, Pid: 1},
+		Mounts: []container.MountPoint{
+			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+		},
 	}
 
 	desired := proc.computeDesired(
@@ -896,8 +965,8 @@ func TestProcessor_UnresolvedCandidateEmptiesTheSet(t *testing.T) {
 	info := &container.InspectResponse{
 		State: &container.State{Running: true, Pid: 1},
 		Mounts: []container.MountPoint{
-			{Source: "/dev/null", Destination: "/dev/null"},
-			{Source: "/dev/sda", Destination: "/dev/sda"},
+			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
+			{Source: "/dev/sda", Destination: "/dev/sda", Type: mount.TypeBind},
 		},
 	}
 

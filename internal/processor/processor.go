@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
@@ -425,6 +426,13 @@ type containerRules struct {
 	devMounts  int
 }
 
+// isDeviceMount reports whether mnt bind-mounts something from /dev. Only a
+// bind mount's Source is a host path; a volume or tmpfs mount is never
+// walked, whatever its Source says.
+func isDeviceMount(mnt *container.MountPoint) bool {
+	return mnt.Type == mount.TypeBind && IsMountSource(mnt.Source)
+}
+
 // collectDevices opens /dev for this pass and collects the container's
 // rules. Failing to open it leaves every device unresolved.
 func (p *Processor) collectDevices(
@@ -435,7 +443,7 @@ func (p *Processor) collectDevices(
 	cpol policy.Container,
 ) containerRules {
 	if !slices.ContainsFunc(mounts, func(mnt container.MountPoint) bool {
-		return IsMountSource(mnt.Source)
+		return isDeviceMount(&mnt)
 	}) {
 		return containerRules{}
 	}
@@ -485,7 +493,7 @@ func collectContainerRules(
 	)
 
 	for _, mnt := range mounts {
-		if !IsMountSource(mnt.Source) {
+		if !isDeviceMount(&mnt) {
 			continue
 		}
 

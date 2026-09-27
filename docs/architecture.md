@@ -166,7 +166,8 @@ look like for this to work.
 
 ## Device mount collection
 
-For every bind mount whose source is `/dev` or lives under `/dev/`, the processor collects one device rule per device node:
+For every bind mount (`Type: bind`) whose source is `/dev` or lives under `/dev/`, the processor collects one device rule per device node.
+Other mount types (volumes, tmpfs) are never walked, whatever their `Source` says: only a bind mount's source is a host path.
 
 - **Single-file mount** (e.g. `/dev/nvidia0`): the source is one candidate. A missing or non-device source is an error, because it was mounted
   explicitly.
