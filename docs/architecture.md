@@ -229,8 +229,9 @@ is judged by what it is when opened, not by its name:
 2. It is opened with `openat2(O_PATH, RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` beneath the `/dev` descriptor: symlinks are followed, but no
    step may leave `/dev`. The kernel also refuses an absolute symlink back into `/dev` (`EXDEV`); the link itself is then read and, if its
    target is under `/dev`, followed by hand (at most 40 hops). A link that leaves `/dev` (`/dev/log -> /run/...`, `/dev/stdin ->
-   /proc/self/fd/0`) is skipped as `outside_dev`; a dangling name is skipped as `dangling` (`Warn` `device symlink matches allow policy but
-   cannot be resolved` when an explicit allow glob names it, `Debug` otherwise).
+   /proc/self/fd/0`) is skipped as `outside_dev` (`Warn` `device path resolves outside /dev` when an explicit allow glob names it, `Debug`
+   otherwise: every whole-`/dev` mount holds such links); a dangling name is skipped as `dangling` (`Warn` `device symlink matches allow
+   policy but cannot be resolved` when an explicit allow glob names it, `Debug` otherwise).
 3. `fstat` on the descriptor gives the type and `major:minor`; a directory or a non-device entry is skipped at `Debug`.
 4. The device's kernel name is read from `<sysfs>/dev/{char,block}/<major>:<minor>/uevent`: exactly one `DEVNAME=` line with a clean relative
    value. The canonical name is `/dev/` plus that value. sysfs is `/host/sys` when mounted, else `/sys`.

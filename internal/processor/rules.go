@@ -341,7 +341,7 @@ func evaluateCandidate(
 		return found
 	}
 
-	node, skip, err := openCandidate(dev, alias)
+	node, skip, err := openCandidate(dev, alias, gpol, cpol)
 	if err != nil || skip != "" {
 		found.skip = skip
 		found.err = err
@@ -398,7 +398,12 @@ func evaluateCandidate(
 // that names nothing under /dev.
 //
 //nolint:ireturn // devNode is the devFS seam
-func openCandidate(dev devFS, alias string) (devNode, string, error) {
+func openCandidate(
+	dev devFS,
+	alias string,
+	gpol policy.Global,
+	cpol policy.Container,
+) (devNode, string, error) {
 	rel := relToDev(alias)
 
 	for range maxLinkHops {
@@ -419,8 +424,7 @@ func openCandidate(dev devFS, alias string) (devNode, string, error) {
 		}
 
 		if next == "" {
-			logger.L().Warn("device path resolves outside /dev",
-				"path", alias, "target", target, "reason", skipOutsideDev)
+			skipOutside(alias, target, gpol, cpol)
 
 			return nil, skipOutsideDev, nil
 		}
@@ -544,6 +548,23 @@ func skipUnresolvable(alias string, gpol policy.Global, cpol policy.Container) {
 	}
 
 	logger.L().Debug("unresolvable symlink skipped", "path", alias)
+}
+
+// skipOutside logs a symlink that leads outside /dev: a WARN when an
+// explicit allow glob names it, since the operator expected a device there.
+// Otherwise DEBUG: every whole-/dev mount holds such links (/dev/stdin ->
+// /proc/self/fd/0, /dev/log -> /run/systemd/journal/dev-log), and a warning
+// for each of them on every pass buries the warnings that matter.
+func skipOutside(alias, target string, gpol policy.Global, cpol policy.Container) {
+	if gpol.ExplicitlyAllowed(cpol, alias) {
+		logger.L().Warn("device path resolves outside /dev",
+			"path", alias, "target", target, "reason", skipOutsideDev)
+
+		return
+	}
+
+	logger.L().Debug("device path resolves outside /dev",
+		"path", alias, "target", target, "reason", skipOutsideDev)
 }
 
 // deviceVotes aggregates every candidate that resolved to one device.
