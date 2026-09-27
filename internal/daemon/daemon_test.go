@@ -143,7 +143,7 @@ func (f *fakeDocker) snapshot() (calls, sinces []string, listTime time.Time) {
 }
 
 // recordingInspector is a processor.DockerInspector that records inspected IDs
-// and reports containers without a live pid, so ProcessContainer succeeds
+// and reports containers without a live pid, so Reconcile succeeds
 // without touching cgroups.
 type recordingInspector struct {
 	mu  sync.Mutex

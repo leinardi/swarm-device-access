@@ -34,6 +34,15 @@ type Ledger struct {
 	entries map[Identity]map[devBit]struct{}
 }
 
+// Forget drops the record for id. Only call it once the grants it lists are
+// known to be gone (revoked, or the cgroup no longer exists).
+func (l *Ledger) Forget(id Identity) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	delete(l.entries, id)
+}
+
 // owned returns a copy of the bits recorded for id.
 func (l *Ledger) owned(id Identity) map[devBit]struct{} {
 	l.mu.Lock()

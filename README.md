@@ -57,6 +57,11 @@ uses the host Docker socket to launch the real privileged daemon container.
 
 ### Host Requirements
 
+On every host the daemon needs Linux 5.3 or newer: it pins each running
+container's process with `pidfd_open(2)` before changing its cgroup (see
+below). On an older kernel no running container is changed, not even to
+revoke a grant, and each attempt fails with a `pidfd_open` error.
+
 On cgroup v2 hosts the daemon adds its grants to the device filter the
 container runtime already attached, replacing that program in place rather
 than removing it first, so the container is never left unfiltered. That needs:
@@ -123,6 +128,23 @@ never revokes one the runtime made. A restarted daemon has lost that memory:
 exceptions granted by the previous instance are then indistinguishable from the
 runtime's and are not revoked when policy narrows, until the container is
 restarted. cgroup v2 hosts do not have this gap.
+
+Every time the daemon looks at a container (start, unpause, startup, systemd
+reload) it sets the container's grants to the complete set the current
+configuration allows, including none at all. A container that policy disables
+or does not opt in, one with invalid labels, and one where any mounted device
+cannot be resolved all get the empty set, so an earlier grant is revoked rather
+than kept. The price is that a transient error (an unreadable device node, for
+example) revokes the container's grants until the retry that grants them again.
+
+The daemon pins the container's process with a pidfd (Linux 5.3+) before it
+resolves the cgroup, and immediately before changing anything checks that the
+process is still alive, that Docker still reports it as the container's
+running process with the same start time and, for a grant, that it is still in
+that cgroup. A recycled pid therefore never directs grants to another cgroup.
+Once a container has exited, or when Docker cannot be asked about it, its
+grants are revoked in the cgroup the daemon last verified for it, and only if
+that directory is still the same one (same inode) and was not recreated.
 
 ### Docker Compose for Swarm
 
@@ -191,7 +213,7 @@ value is set in both places, the CLI flag wins.
 | `-log-format` | `text` | `text`, `json`, `plain` |
 | `-log-time` | `false` | Include timestamps in log lines |
 | `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
-| `-dry-run` | `false` | Log device rules that would be applied without writing to the cgroup |
+| `-dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything |
 | `-policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
 | `-device-allow` | `""` | Glob for `/dev/...` paths to allow, repeatable. Empty means allow all. |
 | `-device-deny` | `""` | Glob for `/dev/...` paths to deny, repeatable. Deny takes priority over allow. |

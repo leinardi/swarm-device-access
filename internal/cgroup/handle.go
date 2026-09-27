@@ -20,6 +20,11 @@ package cgroup
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"slices"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -75,4 +80,23 @@ func (h *CgroupHandle) Close() error {
 	}
 
 	return nil
+}
+
+// HasProcess reports whether pid is listed in the cgroup's cgroup.procs,
+// read through the handle's descriptor.
+func (h *CgroupHandle) HasProcess(pid int) (bool, error) {
+	fd, err := unix.Openat(h.fd, "cgroup.procs", unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return false, fmt.Errorf("open cgroup.procs of %q: %w", h.identity.Path, err)
+	}
+
+	file := os.NewFile(uintptr(fd), "cgroup.procs")
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return false, fmt.Errorf("read cgroup.procs of %q: %w", h.identity.Path, err)
+	}
+
+	return slices.Contains(strings.Fields(string(data)), strconv.Itoa(pid)), nil
 }

@@ -48,15 +48,18 @@ func (c *countingInspector) ContainerInspect(
 	return client.ContainerInspectResult{Container: c.result}, nil
 }
 
-// TestProcessContainer_SerializesConfigLoadThroughApply holds one worker
+// TestReconcile_SerializesConfigLoadThroughApply holds one worker
 // between computing its rules and applying them, then starts a second worker
 // for the same container and publishes a new config. The second worker must
 // not load the config or compute anything until the first has finished, so
-// no computation can be overtaken by an older one.
-func TestProcessContainer_SerializesConfigLoadThroughApply(t *testing.T) {
+// no computation can be overtaken by an older one, and must then compute
+// under the new config.
+func TestReconcile_SerializesConfigLoadThroughApply(t *testing.T) {
 	const pid = 60
 
-	insp := &countingInspector{result: container.InspectResponse{State: &container.State{Pid: pid}}}
+	insp := &countingInspector{
+		result: container.InspectResponse{State: &container.State{Running: true, Pid: pid}},
+	}
 	store := newStore(policy.ModeAll, true)
 	proc := &Processor{
 		Inspector: insp,
@@ -87,11 +90,11 @@ func TestProcessContainer_SerializesConfigLoadThroughApply(t *testing.T) {
 
 	var workers sync.WaitGroup
 
-	workers.Go(func() { _ = proc.ProcessContainer(context.Background(), "c1") })
+	workers.Go(func() { _ = proc.Reconcile(context.Background(), "c1") })
 
 	<-firstInside
 
-	workers.Go(func() { _ = proc.ProcessContainer(context.Background(), "c1") })
+	workers.Go(func() { _ = proc.Reconcile(context.Background(), "c1") })
 
 	// Positive signal first: the second worker has finished its inspect, so it
 	// is at (or past) the lock.
@@ -117,13 +120,9 @@ func TestProcessContainer_SerializesConfigLoadThroughApply(t *testing.T) {
 	close(release)
 	workers.Wait()
 
-	if got := computed.Load(); got != 1 {
-		// The second worker loads the new opt-in config and skips the
-		// unlabeled container before computing anything.
-		t.Fatalf("computed = %d after release, want 1 (second run must see the new config)", got)
-	}
-
-	if len(modes) != 1 || modes[0] != policy.ModeAll {
-		t.Fatalf("modes seen by computing workers = %v, want [all]", modes)
+	// The second worker computes (the empty set, for an unlabeled container
+	// under opt-in) from the config published while it waited.
+	if len(modes) != 2 || modes[0] != policy.ModeAll || modes[1] != policy.ModeOptIn {
+		t.Fatalf("modes seen by computing workers = %v, want [all opt-in]", modes)
 	}
 }

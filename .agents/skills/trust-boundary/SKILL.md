@@ -67,7 +67,7 @@ flags, and exits `1` with `invalid config: …` on failure; an unreadable or unp
 ## 3. Labels are untrusted input
 
 Anyone who can `docker service create` or `docker run` sets `swarm-device-access.*` labels. The
-container's own labels are the **only** label input: `Processor.ProcessContainer`
+container's own labels are the **only** label input: `Processor.Reconcile`
 (`internal/processor/processor.go`) parses `Config.Labels` from the container inspect and nothing
 else. Swarm service labels (`deploy.labels:`) are ignored, and the processor never calls
 `ServiceInspect` or `Info` (neither is part of `DockerInspector`), so a decision cannot depend on
@@ -75,9 +75,10 @@ which node runs the daemon or on whether a service inspect happened to succeed. 
 as attacker-controlled.
 
 - `policy.ParseContainer` rejects a non-boolean `enable` and any malformed glob in `device-allow`
-  or `device-deny`, naming the label. `ProcessContainer` then **skips the container** (warns,
-  records `invalid_labels`) rather than falling back to the global policy — a typo in a narrowing
-  label must never widen access to "whatever the global allows".
+  or `device-deny`, naming the label. `Reconcile` then gives the container the **empty** device
+  set (warns, records `invalid_labels`, revokes any earlier grant) rather than falling back to the
+  global policy — a typo in a narrowing label must never widen access to "whatever the global
+  allows", nor keep what an earlier, valid label granted.
 - Labels can only narrow: `policy.Global.DeviceAllowed` checks the global deny, the container deny,
   the global allow and the container allow, in that order. **Deny wins over allow**, and a
   per-container allow can never re-admit a path the global allow excludes.
@@ -85,13 +86,13 @@ as attacker-controlled.
   "allow nothing" — that is documented in the README label table; keep it that way or change both.
 
 Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`,
-`TestProcessContainer_IgnoresServiceLevelLabels` and
-`TestProcessContainer_WarnsOnUnknownContainerLabel`.
+`TestReconcile_IgnoresServiceLevelLabels` and
+`TestReconcile_WarnsOnUnknownContainerLabel`.
 
-- [ ] New label parsing returns an error on malformed input, and the caller skips the container.
+- [ ] New label parsing returns an error on malformed input, and the caller applies the empty set.
 - [ ] A new label can only narrow; a test proves deny still beats allow with it set.
 - [ ] Unknown `swarm-device-access.*` keys on the container keep being reported
-      (`policy.UnknownLabels`, warned by `ProcessContainer`), not silently accepted.
+      (`policy.UnknownLabels`, warned by `Reconcile`), not silently accepted.
 - [ ] No second label source (service, node, stack) is added back: a label that only some nodes
       can read, or that disappears when an API call fails, turns a lost narrowing label into wider
       access.
@@ -108,8 +109,9 @@ for a character or block device. Unresolvable symlinks get two different treatme
   warning only when an explicit allow glob names it (`skipUnresolvable`, the fix merged in commit
   `244d2a5`);
 - a mount **source** that is itself an unresolvable symlink returns an error in
-  `MountResult.Errs`, which `ProcessContainer` logs as a rule failure — no rule is emitted for it
-  either way.
+  `MountResult.Errs`, which `Reconcile` logs as a rule failure. Any entry in `Errs` makes the
+  container's whole desired set empty (reason `incomplete_device_set`) until a retry resolves every
+  device: a partly resolved set is never applied.
 Covered by `TestIsDeviceMountSource`, `TestCollectMountRules_*` and
 `TestCollectMountRules_UnresolvableSymlinks_ExplicitAllow` / `_NoAllowGlobs`.
 

@@ -77,7 +77,7 @@ const (
 )
 
 // buildProcRoot creates a minimal /proc/<pid>/{cgroup,mountinfo} structure
-// under a temp dir so ProcessContainer can resolve the cgroup path without a
+// under a temp dir so Reconcile can resolve the cgroup path without a
 // real /proc filesystem.
 //
 
@@ -198,9 +198,9 @@ func TestHostCGroupPath(t *testing.T) {
 	}
 }
 
-// ---- ProcessContainer tests ----
+// ---- Reconcile tests ----
 
-func TestProcessContainer_InspectError(t *testing.T) {
+func TestReconcile_InspectError(t *testing.T) {
 	insp := &fakeInspector{err: errDaemonUnavail}
 	proc := &Processor{
 		Inspector: insp,
@@ -209,13 +209,13 @@ func TestProcessContainer_InspectError(t *testing.T) {
 		ProcRoot:  "/",
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err == nil {
 		t.Fatal("expected error from inspect failure, got nil")
 	}
 }
 
-func TestProcessContainer_NilState(t *testing.T) {
+func TestReconcile_NilState(t *testing.T) {
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: nil,
 	}}
@@ -226,14 +226,14 @@ func TestProcessContainer_NilState(t *testing.T) {
 		ProcRoot:  "/",
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
 		t.Fatalf("expected nil error for nil state, got %v", err)
 	}
 }
 
-func TestProcessContainer_ZeroPid(t *testing.T) {
-	state := &container.State{Pid: 0}
+func TestReconcile_ZeroPid(t *testing.T) {
+	state := &container.State{Running: true, Pid: 0}
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: state,
 	}}
@@ -244,18 +244,18 @@ func TestProcessContainer_ZeroPid(t *testing.T) {
 		ProcRoot:  "/",
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
 		t.Fatalf("expected nil error for pid=0, got %v", err)
 	}
 }
 
-func TestProcessContainer_NoDevMounts(t *testing.T) {
+func TestReconcile_NoDevMounts(t *testing.T) {
 	const pid = 42
 
 	root := buildProcRoot(t, pid)
 
-	state := &container.State{Pid: pid}
+	state := &container.State{Running: true, Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: state,
 		Mounts: []container.MountPoint{
@@ -263,18 +263,31 @@ func TestProcessContainer_NoDevMounts(t *testing.T) {
 			{Source: "/var/log", Destination: "/logs", Type: mount.TypeBind},
 		},
 	}}
+	fake := &failingCgroup{}
 	proc := &Processor{
 		Inspector: insp,
 		Cfg:       newStore(policy.ModeAll, false),
-		HostRoot:  "/host",
+		HostRoot:  hostRootWithCgroup(t, pid),
 		ProcRoot:  root,
+		pinner:    &fakePinner{},
+		newCgroup: func(int, *cgroup.Ledger, *cgroup.FilterCache) (cgroup.Interface, error) {
+			return fake, nil
+		},
 	}
 
 	buf := captureLogger(t)
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
 		t.Fatalf("expected nil error for container with no /dev mounts, got %v", err)
+	}
+
+	if fake.calls != 1 || len(fake.rules[0]) != 0 {
+		t.Errorf(
+			"SetDeviceRules calls = %d with %v, want one call with the empty set",
+			fake.calls,
+			fake.rules,
+		)
 	}
 
 	if strings.Contains(buf.String(), "container processed") {
@@ -282,12 +295,12 @@ func TestProcessContainer_NoDevMounts(t *testing.T) {
 	}
 }
 
-func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
+func TestReconcile_DevMountFilterApplied(t *testing.T) {
 	const pid = 43
 
 	root := buildProcRoot(t, pid)
 
-	state := &container.State{Pid: pid}
+	state := &container.State{Running: true, Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: state,
 		Mounts: []container.MountPoint{
@@ -300,22 +313,23 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 		Cfg:       newStore(policy.ModeAll, false),
 		HostRoot:  "/host",
 		ProcRoot:  root,
+		pinner:    &fakePinner{},
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err == nil {
 		t.Fatal(
-			"ProcessContainer should return error when the cgroup path cannot be opened",
+			"Reconcile should return error when the cgroup path cannot be opened",
 		)
 	}
 }
 
-func TestProcessContainer_DevMount_DryRunNoError(t *testing.T) {
+func TestReconcile_DevMount_DryRunNoError(t *testing.T) {
 	const pid = 44
 
 	root := buildProcRoot(t, pid)
 
-	state := &container.State{Pid: pid}
+	state := &container.State{Running: true, Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: state,
 		Mounts: []container.MountPoint{
@@ -329,18 +343,18 @@ func TestProcessContainer_DevMount_DryRunNoError(t *testing.T) {
 		ProcRoot:  root,
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
-		t.Fatalf("dry-run ProcessContainer should not error: %v", err)
+		t.Fatalf("dry-run Reconcile should not error: %v", err)
 	}
 }
 
-func TestProcessContainer_DeduplicatesDuplicateMounts(t *testing.T) {
+func TestReconcile_DeduplicatesDuplicateMounts(t *testing.T) {
 	const pid = 45
 
 	root := buildProcRoot(t, pid)
 
-	state := &container.State{Pid: pid}
+	state := &container.State{Running: true, Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: state,
 		Mounts: []container.MountPoint{
@@ -355,43 +369,18 @@ func TestProcessContainer_DeduplicatesDuplicateMounts(t *testing.T) {
 		ProcRoot:  root,
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
 		t.Fatalf("dry-run with duplicate mounts should not error: %v", err)
 	}
 }
 
-func TestProcessContainer_OptInSkipsUnlabelled(t *testing.T) {
-	const pid = 50
-
-	root := buildProcRoot(t, pid)
-
-	state := &container.State{Pid: pid}
-	insp := &fakeInspector{result: container.InspectResponse{
-		State: state,
-		Mounts: []container.MountPoint{
-			{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
-		},
-	}}
-	proc := &Processor{
-		Inspector: insp,
-		Cfg:       newStore(policy.ModeOptIn, false),
-		HostRoot:  "/host",
-		ProcRoot:  root,
-	}
-
-	err := proc.ProcessContainer(context.Background(), "abc")
-	if err != nil {
-		t.Fatalf("opt-in skip should return nil, got: %v", err)
-	}
-}
-
-func TestProcessContainer_OptInProcessesEnabled(t *testing.T) {
+func TestReconcile_OptInProcessesEnabled(t *testing.T) {
 	const pid = 51
 
 	root := buildProcRoot(t, pid)
 
-	state := &container.State{Pid: pid}
+	state := &container.State{Running: true, Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: state,
 		Config: &container.Config{
@@ -408,7 +397,7 @@ func TestProcessContainer_OptInProcessesEnabled(t *testing.T) {
 		ProcRoot:  root,
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
 		t.Fatalf("opt-in dry-run with enable=true should not error: %v", err)
 	}
@@ -775,14 +764,14 @@ func TestCollectMountRules_SingleFileNonDevice(t *testing.T) {
 	}
 }
 
-// TestProcessContainer_DevDirectorySummary checks that a whole-/dev mount is
+// TestReconcile_DevDirectorySummary checks that a whole-/dev mount is
 // processed without a container-level error and emits one INFO summary.
-func TestProcessContainer_DevDirectorySummary(t *testing.T) {
+func TestReconcile_DevDirectorySummary(t *testing.T) {
 	const pid = 46
 
 	root := buildProcRoot(t, pid)
 
-	state := &container.State{Pid: pid}
+	state := &container.State{Running: true, Pid: pid}
 	insp := &fakeInspector{result: container.InspectResponse{
 		State: state,
 		Mounts: []container.MountPoint{
@@ -805,9 +794,9 @@ func TestProcessContainer_DevDirectorySummary(t *testing.T) {
 
 	buf := captureLogger(t)
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
-		t.Fatalf("ProcessContainer returned error: %v", err)
+		t.Fatalf("Reconcile returned error: %v", err)
 	}
 
 	logOutput := buf.String()
@@ -850,18 +839,18 @@ func captureLogger(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// TestProcessContainer_IgnoresServiceLevelLabels checks that policy comes
+// TestReconcile_IgnoresServiceLevelLabels checks that policy comes
 // from the container's own labels only: the parent service is never
 // inspected, and a container whose only opt-in is a service-level (deploy.labels)
 // label is skipped.
-func TestProcessContainer_IgnoresServiceLevelLabels(t *testing.T) {
+func TestReconcile_IgnoresServiceLevelLabels(t *testing.T) {
 	buf := captureLogger(t)
 
 	const pid = 51
 
 	inspector := &fakeInspector{
 		result: container.InspectResponse{
-			State: &container.State{Pid: pid},
+			State: &container.State{Running: true, Pid: pid},
 			Config: &container.Config{Labels: map[string]string{
 				"com.docker.swarm.service.id": "svc456",
 			}},
@@ -877,9 +866,9 @@ func TestProcessContainer_IgnoresServiceLevelLabels(t *testing.T) {
 		Cfg:       newStore(policy.ModeOptIn, true),
 	}
 
-	err := proc.ProcessContainer(context.Background(), "abc123")
+	err := proc.Reconcile(context.Background(), "abc123")
 	if err != nil {
-		t.Fatalf("ProcessContainer: %v", err)
+		t.Fatalf("Reconcile: %v", err)
 	}
 
 	if inspector.serviceCalls != 0 {
@@ -891,12 +880,12 @@ func TestProcessContainer_IgnoresServiceLevelLabels(t *testing.T) {
 	}
 }
 
-func TestProcessContainer_WarnsOnUnknownContainerLabel(t *testing.T) {
+func TestReconcile_WarnsOnUnknownContainerLabel(t *testing.T) {
 	buf := captureLogger(t)
 
 	inspector := &fakeInspector{
 		result: container.InspectResponse{
-			State: &container.State{Pid: 51},
+			State: &container.State{Running: true, Pid: 51},
 			Config: &container.Config{Labels: map[string]string{
 				policy.LabelPrefix + "enabled": "true",
 			}},
@@ -905,9 +894,9 @@ func TestProcessContainer_WarnsOnUnknownContainerLabel(t *testing.T) {
 
 	proc := &Processor{Inspector: inspector, Cfg: newStore(policy.ModeOptIn, true)}
 
-	err := proc.ProcessContainer(context.Background(), "abc123")
+	err := proc.Reconcile(context.Background(), "abc123")
 	if err != nil {
-		t.Fatalf("ProcessContainer: %v", err)
+		t.Fatalf("Reconcile: %v", err)
 	}
 
 	if !strings.Contains(buf.String(), "unrecognized swarm-device-access label on container") {

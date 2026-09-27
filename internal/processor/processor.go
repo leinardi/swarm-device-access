@@ -93,43 +93,172 @@ type Processor struct {
 	// cgroup, so a filter wiped by systemd's daemon-reload can be rebuilt.
 	filterCache cgroup.FilterCache
 
+	// known maps each container lifecycle to the cgroup it was last
+	// verified in (guarded by mu). It is how grants are revoked once the
+	// process is gone or Docker cannot be asked: see revokeKnown.
+	known map[lifecycleKey]knownCgroup
+
+	// pinner pins container processes; nil means pidfds. Tests replace it.
+	pinner processPinner
+
 	// newCgroup builds the cgroup API for a version; nil means cgroup.New.
 	// Tests replace it to observe or fail the mutation without a kernel.
 	newCgroup func(version int, ledger *cgroup.Ledger, cache *cgroup.FilterCache) (cgroup.Interface, error)
 
-	// afterCompute, when set, runs under mu after the rules are computed
-	// and before they are applied. Tests use it to hold a worker mid-flight.
+	// afterCompute, when set, runs under mu after the desired rules are
+	// computed and before they are applied. Tests use it to hold a worker
+	// mid-flight.
 	afterCompute func()
 }
 
-// ProcessContainer inspects a container and applies cgroup BPF device-allow
-// rules for every bind mount sourced from /dev/...
+// lifecycleKey names one run of a container. A restart under the same ID
+// has a new StartedAt, so what is known about the old run never applies to
+// the new one.
+type lifecycleKey struct {
+	containerID string
+	startedAt   string
+}
+
+// knownCgroup is the cgroup a lifecycle was last verified in: the identity
+// of the directory its handle was opened on, the cgroup version, and
+// whether the container is privileged (it then has no device filter).
+type knownCgroup struct {
+	identity   cgroup.Identity
+	version    int
+	privileged bool
+}
+
+// desiredSet is the outcome of evaluating a container's labels, the
+// current policy and its /dev mounts.
+type desiredSet struct {
+	// rules is what the container's cgroup must hold. It is empty whenever
+	// the set cannot be established with confidence.
+	rules     []cgroup.DeviceRule
+	enabled   bool
+	collected containerRules
+	// incomplete is non-nil when some device of an enabled container could
+	// not be resolved; the container is then retried.
+	incomplete error
+}
+
+// Reconcile makes the device grants of a container's cgroup equal exactly
+// what the current config allows it. Start, unpause, startup enumeration,
+// systemd re-apply and reload all run this one idempotent path.
 //
-//nolint:cyclop,gocyclo,funlen // inherent: policy-check + inspect + version-detect + path-resolve + mount-filter + collect + apply
-func (p *Processor) ProcessContainer(ctx context.Context, containerID string) error {
+// Every outcome that cannot establish the desired set with confidence
+// (policy disabled or not opted in, invalid labels, an unresolved device)
+// is the empty set, and the empty set is applied like any other: returning
+// early would keep grants the current config no longer allows. The cost is
+// that a transient error revokes the container's grants until a retry
+// grants them again.
+//
+// The container's process is pinned (see applyPinned), so a recycled pid
+// cannot direct the rules to another cgroup. A container that is no longer
+// running, or that Docker cannot report on, has its grants revoked in the
+// cgroup its lifecycle was last verified in.
+func (p *Processor) Reconcile(ctx context.Context, containerID string) error {
 	log := logger.L()
 
-	inspectCtx, cancelInspect := p.callContext(ctx)
-	inspected, inspectErr := p.Inspector.ContainerInspect(
-		inspectCtx,
-		containerID,
-		client.ContainerInspectOptions{},
-	)
+	info, inspectErr := p.inspect(ctx, containerID)
 
-	cancelInspect()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	cfg := p.Cfg.Load()
 
 	if inspectErr != nil {
-		return fmt.Errorf("inspect container %q: %w", containerID, inspectErr)
+		// The caller canceled (daemon shutdown), not Docker: nothing would
+		// retry and grant again, so a running container keeps its grants.
+		// A deadline is Docker not answering in time, and does revoke.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return inspectErr
+		}
+
+		return p.revokeAfterInspectFailure(containerID, cfg.DryRun, inspectErr)
 	}
 
-	info := inspected.Container
-
-	if info.State == nil || info.State.Pid == 0 {
+	if info.State == nil || !info.State.Running || info.State.Pid == 0 {
 		log.Debug("container has no live pid; skipping", "id", containerID)
 		p.Metrics.RecordContainerSkipped("no_pid")
 
-		return nil
+		if cfg.DryRun {
+			return nil
+		}
+
+		return p.revokeKnown(
+			lifecycleKey{containerID: containerID, startedAt: startedAt(info.State)},
+		)
 	}
+
+	desired := p.computeDesired(containerID, &info, cfg)
+
+	if p.afterCompute != nil {
+		p.afterCompute()
+	}
+
+	if cfg.DryRun {
+		p.logDryRun(containerID, desired.rules)
+	} else {
+		privileged := info.HostConfig != nil && info.HostConfig.Privileged
+
+		cgroupPath, applyErr := p.applyPinned(
+			ctx,
+			containerID,
+			info.State,
+			privileged,
+			desired.rules,
+		)
+		if applyErr != nil {
+			// A container skipped for good still reports an incomplete set.
+			return errors.Join(
+				p.classifyApplyError(containerID, cgroupPath, privileged, applyErr),
+				desired.incomplete,
+			)
+		}
+	}
+
+	if desired.enabled && desired.collected.devMounts > 0 {
+		log.Info("container processed",
+			"id", containerID,
+			"pid", info.State.Pid,
+			"devices_granted", len(desired.rules),
+			"skipped", desired.collected.skipped,
+			"errors", len(desired.collected.deviceErrs),
+			"dry_run", cfg.DryRun,
+		)
+	}
+
+	return desired.incomplete
+}
+
+// inspect runs one bounded ContainerInspect.
+func (p *Processor) inspect(
+	ctx context.Context,
+	containerID string,
+) (container.InspectResponse, error) {
+	callCtx, cancel := p.callContext(ctx)
+	defer cancel()
+
+	inspected, err := p.Inspector.ContainerInspect(
+		callCtx,
+		containerID,
+		client.ContainerInspectOptions{},
+	)
+	if err != nil {
+		return container.InspectResponse{}, fmt.Errorf("inspect container %q: %w", containerID, err)
+	}
+
+	return inspected.Container, nil
+}
+
+// computeDesired evaluates the container's labels and /dev mounts under
+// cfg. It never touches the container's cgroup.
+func (p *Processor) computeDesired(
+	containerID string,
+	info *container.InspectResponse,
+	cfg config.Runtime,
+) desiredSet {
+	log := logger.L()
 
 	var containerLabels map[string]string
 	if info.Config != nil {
@@ -143,18 +272,13 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 			"id", containerID, "label", unknownKey)
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	cfg := p.Cfg.Load()
-
 	cpol, parseErr := policy.ParseContainer(containerLabels)
 	if parseErr != nil {
 		log.Warn("container skipped: invalid policy labels",
 			"id", containerID, "err", parseErr)
 		p.Metrics.RecordContainerSkipped("invalid_labels")
 
-		return nil
+		return desiredSet{}
 	}
 
 	if !cfg.Policy.Enabled(cpol) {
@@ -164,44 +288,12 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		)
 		p.Metrics.RecordContainerSkipped("policy")
 
-		return nil
+		return desiredSet{}
 	}
 
 	p.Metrics.RecordContainerScanned()
 
-	pid := info.State.Pid
-
-	cgroupVersion, versionErr := cgroup.GetDeviceCGroupVersion(p.ProcRoot, pid)
-	if versionErr != nil {
-		return fmt.Errorf("detect cgroup version for pid %d: %w", pid, versionErr)
-	}
-
-	log.Debug("cgroup version detected", "pid", pid, "version", cgroupVersion)
-
-	newCgroup := p.newCgroup
-	if newCgroup == nil {
-		newCgroup = cgroup.New
-	}
-
-	api, apiErr := newCgroup(cgroupVersion, &p.ledger, &p.filterCache)
-	if apiErr != nil {
-		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
-	}
-
-	cgroupPrefix, sysfsPath, mountErr := api.GetDeviceCGroupMountPath(p.ProcRoot, pid)
-	if mountErr != nil {
-		return fmt.Errorf("resolve cgroup mount path: %w", mountErr)
-	}
-
-	cgroupRoot, rootErr := api.GetDeviceCGroupRootPath(p.ProcRoot, cgroupPrefix, pid)
-	if rootErr != nil {
-		return fmt.Errorf("resolve cgroup root path: %w", rootErr)
-	}
-
-	cgroupPath := hostCGroupPath(p.HostRoot, sysfsPath, cgroupPrefix, cgroupRoot)
-	log.Debug("cgroup path resolved", "pid", pid, "path", cgroupPath)
-
-	collected := collectContainerRules(containerID, pid, info.Mounts, cfg.Policy, cpol)
+	collected := collectContainerRules(containerID, info.State.Pid, info.Mounts, cfg.Policy, cpol)
 
 	for _, deviceErr := range collected.deviceErrs {
 		log.Warn("device rule failed", "id", containerID, "err", deviceErr)
@@ -209,35 +301,41 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 
 	p.Metrics.AddDeviceFilesDiscovered(len(collected.granted))
 
-	if len(collected.deviceErrs) > 0 {
-		p.Metrics.AddRuleFailures(len(collected.deviceErrs))
+	if len(collected.deviceErrs) == 0 {
+		return desiredSet{rules: collected.granted, enabled: true, collected: collected}
 	}
 
-	if p.afterCompute != nil {
-		p.afterCompute()
+	p.Metrics.AddRuleFailures(len(collected.deviceErrs))
+	log.Warn("device set incomplete; no devices are granted until every device resolves",
+		"id", containerID, "errors", len(collected.deviceErrs), "reason", "incomplete_device_set")
+
+	return desiredSet{
+		enabled:   true,
+		collected: collected,
+		incomplete: fmt.Errorf(
+			"container %q (reason incomplete_device_set, retryable): %w",
+			containerID,
+			errors.Join(collected.deviceErrs...),
+		),
 	}
+}
 
-	if len(collected.granted) > 0 {
-		applyErr := p.applyRulesToCgroup(api, collected.granted, cgroupPath, pid, cfg.DryRun)
-		if applyErr != nil {
-			privileged := info.HostConfig != nil && info.HostConfig.Privileged
+// logDryRun reports what a real run would set. Dry-run stays unprivileged:
+// it reads neither /proc nor the cgroup.
+func (p *Processor) logDryRun(containerID string, rules []cgroup.DeviceRule) {
+	log := logger.L()
 
-			return p.classifyApplyError(containerID, cgroupPath, privileged, applyErr)
-		}
-	}
-
-	if collected.devMounts > 0 {
-		log.Info("container processed",
+	for _, rule := range rules {
+		log.Info("dry-run: would add device rule",
 			"id", containerID,
-			"pid", pid,
-			"devices_granted", len(collected.granted),
-			"skipped", collected.skipped,
-			"errors", len(collected.deviceErrs),
-			"dry_run", cfg.DryRun,
+			"type", rule.Type,
+			"major", *rule.Major,
+			"minor", *rule.Minor,
 		)
 	}
 
-	return nil
+	log.Info("dry-run: would set device rules", "id", containerID, "rules", len(rules))
+	p.Metrics.AddDryRunSkips(len(rules))
 }
 
 // callContext derives the context for one Docker call.
@@ -384,65 +482,6 @@ func collectContainerRules(
 	}
 
 	return result
-}
-
-// applyRulesToCgroup logs and (unless dryRun) sets the collected device rules
-// on the cgroup at cgroupPath. The directory is opened once here; the cgroup
-// API then works on that descriptor only, so the rules cannot land in a
-// different cgroup recreated at the same path.
-func (p *Processor) applyRulesToCgroup(
-	api cgroup.Interface,
-	rules []cgroup.DeviceRule,
-	cgroupPath string,
-	pid int,
-	dryRun bool,
-) error {
-	log := logger.L()
-
-	for _, rule := range rules {
-		if dryRun {
-			log.Info("dry-run: would add device rule",
-				"pid", pid,
-				"cgroup", cgroupPath,
-				"type", rule.Type,
-				"major", *rule.Major,
-				"minor", *rule.Minor,
-			)
-		} else {
-			log.Debug("adding device rule",
-				"pid", pid,
-				"cgroup", cgroupPath,
-				"type", rule.Type,
-				"major", *rule.Major,
-				"minor", *rule.Minor,
-			)
-		}
-	}
-
-	if dryRun {
-		p.Metrics.AddDryRunSkips(len(rules))
-
-		return nil
-	}
-
-	handle, err := cgroup.OpenCgroup(cgroupPath)
-	if err != nil {
-		return fmt.Errorf("set device rules: %w", err)
-	}
-
-	defer func() {
-		closeErr := handle.Close()
-		if closeErr != nil {
-			log.Warn("close cgroup handle", "cgroup", cgroupPath, "err", closeErr)
-		}
-	}()
-
-	err = api.SetDeviceRules(handle, rules)
-	if err != nil {
-		return fmt.Errorf("set device rules: %w", err)
-	}
-
-	return nil
 }
 
 func hostCGroupPath(hostRoot, sysfsPath, cgroupPrefix, cgroupRoot string) string {

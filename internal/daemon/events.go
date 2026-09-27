@@ -45,7 +45,7 @@ const (
 var errSubscribeTimeout = errors.New("docker event stream not established before timeout")
 
 // applyFn is the per-container rule-application callback injected into consumeEvents.
-// In production this wraps Processor.ProcessContainer; in tests it is replaced by a fake.
+// In production this wraps Processor.Reconcile; in tests it is replaced by a fake.
 type applyFn func(ctx context.Context, id string) error
 
 // eventListOptions returns the Docker event subscription options: "start"

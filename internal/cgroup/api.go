@@ -20,6 +20,7 @@ package cgroup
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -103,6 +104,62 @@ func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
 	defer file.Close()
 
 	return scanCGroupVersion(file, path)
+}
+
+// ProcCgroup is where a process's device cgroup lives, as described by its
+// /proc/<pid>/cgroup and /proc/<pid>/mountinfo.
+type ProcCgroup struct {
+	Version     int
+	MountPrefix string // root of the cgroup mount, from mountinfo
+	MountPoint  string // where the hierarchy is mounted, from mountinfo
+	Root        string // the process's cgroup below MountPrefix
+}
+
+// ParseProcCgroup resolves the device cgroup from the contents of a
+// process's cgroup and mountinfo files. Taking contents rather than a pid
+// lets the caller read them through a /proc/<pid> descriptor it has pinned.
+func ParseProcCgroup(cgroupData, mountinfoData []byte) (ProcCgroup, error) {
+	const cgroupName, mountinfoName = "cgroup", "mountinfo"
+
+	version, err := scanCGroupVersion(bytes.NewReader(cgroupData), cgroupName)
+	if err != nil {
+		return ProcCgroup{}, err
+	}
+
+	result := ProcCgroup{Version: version}
+
+	switch version {
+	case 1:
+		result.MountPrefix, result.MountPoint, err = scanMountInfoV1(
+			bytes.NewReader(mountinfoData),
+			mountinfoName,
+		)
+		if err == nil {
+			result.Root, err = scanProcCgroupV1(
+				bytes.NewReader(cgroupData),
+				cgroupName,
+				result.MountPrefix,
+			)
+		}
+	default:
+		result.MountPrefix, result.MountPoint, err = scanMountInfoV2(
+			bytes.NewReader(mountinfoData),
+			mountinfoName,
+		)
+		if err == nil {
+			result.Root, err = scanProcCgroupV2(
+				bytes.NewReader(cgroupData),
+				cgroupName,
+				result.MountPrefix,
+			)
+		}
+	}
+
+	if err != nil {
+		return ProcCgroup{}, err
+	}
+
+	return result, nil
 }
 
 // scanCGroupVersion parses the cgroup hierarchy file and returns 1 (v1) or 2 (v2).

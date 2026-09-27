@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -35,36 +36,94 @@ import (
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
-// failingCgroup is a cgroup.Interface whose mutation returns err. The path
-// lookups delegate to the real v2 implementation, which reads the fake /proc.
+// failingCgroup is a cgroup.Interface that records every SetDeviceRules
+// call and returns err. The processor resolves cgroup paths itself, so the
+// embedded Interface is never called.
 type failingCgroup struct {
 	cgroup.Interface
 
 	err      error
 	calls    int
 	identity cgroup.Identity
+	rules    [][]cgroup.DeviceRule
 }
 
-func (f *failingCgroup) SetDeviceRules(handle *cgroup.CgroupHandle, _ []cgroup.DeviceRule) error {
+func (f *failingCgroup) SetDeviceRules(
+	handle *cgroup.CgroupHandle,
+	rules []cgroup.DeviceRule,
+) error {
 	f.calls++
 	f.identity = handle.Identity()
+	f.rules = append(f.rules, rules)
 
 	return f.err
 }
 
+// fakePinner pins nothing: every pinned process is alive unless gone is set.
+type fakePinner struct {
+	pins []int
+	gone bool
+}
+
+//nolint:ireturn // implements processPinner
+func (f *fakePinner) pin(pid int) (pinnedProcess, error) {
+	f.pins = append(f.pins, pid)
+
+	return fakePinned{gone: f.gone}, nil
+}
+
+type fakePinned struct{ gone bool }
+
+func (fakePinned) Close() error { return nil }
+
+func (f fakePinned) alive() error {
+	if f.gone {
+		return errPinnedProcessGone
+	}
+
+	return nil
+}
+
+// testCgroupDir is where buildProcRoot's /proc places the container, below
+// a host root.
+func testCgroupDir(hostRoot string) string {
+	return filepath.Join(hostRoot, "sys", "fs", "cgroup", "docker", "testcontainer")
+}
+
 // hostRootWithCgroup returns a host root holding the cgroup directory that
-// buildProcRoot's /proc resolves to, so the processor can open it.
-func hostRootWithCgroup(t *testing.T) string {
+// buildProcRoot's /proc resolves to, with pid listed in its cgroup.procs.
+func hostRootWithCgroup(t *testing.T, pid int) string {
 	t.Helper()
 
 	root := t.TempDir()
 
-	err := os.MkdirAll(filepath.Join(root, "sys", "fs", "cgroup", "docker", "testcontainer"), 0o755)
+	err := os.MkdirAll(testCgroupDir(root), 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	writeProcs(t, root, pid)
+
 	return root
+}
+
+// writeProcs replaces the test cgroup's cgroup.procs with pids.
+func writeProcs(t *testing.T, hostRoot string, pids ...int) {
+	t.Helper()
+
+	var content strings.Builder
+	for _, pid := range pids {
+		content.WriteString(strconv.Itoa(pid) + "\n")
+	}
+
+	err := os.WriteFile(
+		filepath.Join(testCgroupDir(hostRoot), "cgroup.procs"),
+		[]byte(content.String()),
+		0o600,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
@@ -72,42 +131,36 @@ func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
 
 	const pid = 70
 
-	real2, err := cgroup.New(2, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fake.Interface = real2
-
 	return &Processor{
 		Inspector: &fakeInspector{result: container.InspectResponse{
-			State: &container.State{Pid: pid},
+			State: &container.State{Running: true, Pid: pid},
 			Mounts: []container.MountPoint{
 				{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
 			},
 		}},
 		Cfg:      newStore(policy.ModeAll, false),
-		HostRoot: hostRootWithCgroup(t),
+		HostRoot: hostRootWithCgroup(t, pid),
 		ProcRoot: buildProcRoot(t, pid),
+		pinner:   &fakePinner{},
 		newCgroup: func(int, *cgroup.Ledger, *cgroup.FilterCache) (cgroup.Interface, error) {
 			return fake, nil
 		},
 	}
 }
 
-// TestProcessContainer_SetsRulesThroughOpenedHandle checks that the
+// TestReconcile_SetsRulesThroughOpenedHandle checks that the
 // processor opens the resolved cgroup directory itself and hands the cgroup
 // API a handle carrying that directory's inode.
-func TestProcessContainer_SetsRulesThroughOpenedHandle(t *testing.T) {
+func TestReconcile_SetsRulesThroughOpenedHandle(t *testing.T) {
 	fake := &failingCgroup{}
 	proc := devNullProcessor(t, fake)
 
-	err := proc.ProcessContainer(context.Background(), "abc")
+	err := proc.Reconcile(context.Background(), "abc")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wantPath := filepath.Join(proc.HostRoot, "sys", "fs", "cgroup", "docker", "testcontainer")
+	wantPath := testCgroupDir(proc.HostRoot)
 
 	info, err := os.Stat(wantPath)
 	if err != nil {
@@ -124,13 +177,13 @@ func TestProcessContainer_SetsRulesThroughOpenedHandle(t *testing.T) {
 	}
 }
 
-func TestProcessContainer_UnsupportedAttachModeSkipsContainer(t *testing.T) {
+func TestReconcile_UnsupportedAttachModeSkipsContainer(t *testing.T) {
 	buf := captureLogger(t)
 	fake := &failingCgroup{
 		err: fmt.Errorf("%w: attach mode none (exclusive)", cgroup.ErrUnsupportedAttachMode),
 	}
 
-	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	err := devNullProcessor(t, fake).Reconcile(context.Background(), "abc")
 	if err != nil {
 		t.Fatalf("unsupported attach mode must skip, not fail: %v", err)
 	}
@@ -146,10 +199,10 @@ func TestProcessContainer_UnsupportedAttachModeSkipsContainer(t *testing.T) {
 	}
 }
 
-func TestProcessContainer_InaccessibleFiltersIsRetryableError(t *testing.T) {
+func TestReconcile_InaccessibleFiltersIsRetryableError(t *testing.T) {
 	fake := &failingCgroup{err: fmt.Errorf("%w: 1 of 2 programs", cgroup.ErrFiltersInaccessible)}
 
-	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	err := devNullProcessor(t, fake).Reconcile(context.Background(), "abc")
 	if !errors.Is(err, cgroup.ErrFiltersInaccessible) {
 		t.Fatalf("err = %v, want ErrFiltersInaccessible", err)
 	}
@@ -159,11 +212,11 @@ func TestProcessContainer_InaccessibleFiltersIsRetryableError(t *testing.T) {
 	}
 }
 
-func TestProcessContainer_OwnedBlockConflictIsLoggedWithRemedy(t *testing.T) {
+func TestReconcile_OwnedBlockConflictIsLoggedWithRemedy(t *testing.T) {
 	buf := captureLogger(t)
 	fake := &failingCgroup{err: fmt.Errorf("%w: trailer missing", cgroup.ErrOwnedBlockConflict)}
 
-	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	err := devNullProcessor(t, fake).Reconcile(context.Background(), "abc")
 	if !errors.Is(err, cgroup.ErrOwnedBlockConflict) ||
 		!strings.Contains(err.Error(), "owned_block_conflict") {
 		t.Fatalf("err = %v, want a retryable ErrOwnedBlockConflict carrying the reason", err)
@@ -176,17 +229,17 @@ func TestProcessContainer_OwnedBlockConflictIsLoggedWithRemedy(t *testing.T) {
 	}
 }
 
-func TestProcessContainer_NotWrappableIsRetryableError(t *testing.T) {
+func TestReconcile_NotWrappableIsRetryableError(t *testing.T) {
 	fake := &failingCgroup{err: fmt.Errorf("%w: uses maps", cgroup.ErrProgramNotWrappable)}
 
-	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	err := devNullProcessor(t, fake).Reconcile(context.Background(), "abc")
 	if !errors.Is(err, cgroup.ErrProgramNotWrappable) ||
 		!strings.Contains(err.Error(), "program_not_wrappable") {
 		t.Fatalf("err = %v, want ErrProgramNotWrappable with its reason", err)
 	}
 }
 
-func TestProcessContainer_FilterMissing(t *testing.T) {
+func TestReconcile_FilterMissing(t *testing.T) {
 	for _, privileged := range []bool{true, false} {
 		buf := captureLogger(t)
 		fake := &failingCgroup{err: cgroup.ErrFilterMissing}
@@ -199,7 +252,7 @@ func TestProcessContainer_FilterMissing(t *testing.T) {
 
 		insp.result.HostConfig = &container.HostConfig{Privileged: privileged}
 
-		err := proc.ProcessContainer(context.Background(), "abc")
+		err := proc.Reconcile(context.Background(), "abc")
 
 		switch {
 		case privileged && err != nil:

@@ -132,10 +132,10 @@ func TestProcessOne_HungContainerInspectIsBounded(t *testing.T) {
 	}
 }
 
-// TestProcessContainer_HungInspectIsBoundedPerCall calls the processor
+// TestReconcile_HungInspectIsBoundedPerCall calls the processor
 // directly with an unbounded context: its own per-call timeout must bound
 // ContainerInspect.
-func TestProcessContainer_HungInspectIsBoundedPerCall(t *testing.T) {
+func TestReconcile_HungInspectIsBoundedPerCall(t *testing.T) {
 	insp := &hangingInspector{}
 	proc := &processor.Processor{
 		Inspector:   insp,
@@ -143,8 +143,8 @@ func TestProcessContainer_HungInspectIsBoundedPerCall(t *testing.T) {
 		CallTimeout: testCallTimeout,
 	}
 
-	assertBounded(t, "ProcessContainer", func() {
-		_ = proc.ProcessContainer(context.Background(), "c1")
+	assertBounded(t, "Reconcile", func() {
+		_ = proc.Reconcile(context.Background(), "c1")
 	})
 
 	got := insp.observed()

@@ -156,10 +156,10 @@ func processExistingContainers(
 	return nil
 }
 
-// processorApply adapts Processor.ProcessContainer to applyFn.
+// processorApply adapts Processor.Reconcile to applyFn.
 func processorApply(proc *processor.Processor) applyFn {
 	return func(ctx context.Context, id string) error {
-		return proc.ProcessContainer(ctx, id)
+		return proc.Reconcile(ctx, id)
 	}
 }
 

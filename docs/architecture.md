@@ -237,11 +237,12 @@ When `-debug-addr=:6060` is set, the standard Go pprof endpoints are available a
 
 ## Dry-run mode
 
-`-dry-run` logs what rules _would_ be written (at `Info` level) without calling `bpf(2)` or writing to `devices.allow`. Useful for auditing policy and
-CI smoke tests.
+`-dry-run` logs the complete device set each container _would_ get (at `Info` level) without pinning its process, reading its `/proc` entry,
+querying its cgroup, calling `bpf(2)` or writing to `devices.allow`/`devices.deny`. Useful for auditing policy and CI smoke tests.
 
 ```
-level=INFO msg="dry-run: would add device rule" pid=1234 cgroup=/host/sys/fs/cgroup/docker/abc type=c major=195 minor=0
+level=INFO msg="dry-run: would add device rule" id=abc type=c major=195 minor=0
+level=INFO msg="dry-run: would set device rules" id=abc rules=1
 ```
 
 ## Troubleshooting
