@@ -55,7 +55,6 @@ const (
 	// mounted under /var/run inside the container.
 	containerDBusSocket = "/var/run/dbus/system_bus_socket"
 
-	msgWatcherStarted  = "systemd reload watcher started"
 	msgDryRunLeftovers = "dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run"
 	msgEPERM           = "Operation not permitted"
 
@@ -243,6 +242,10 @@ func testReloadReapply(
 		reloadUnsupported(t, fmt.Errorf("daemon-reload did not wipe the device program: %w", err))
 	}
 
+	// Denied, not open: the reload removed the daemon's wrapper, but systemd
+	// attached the unit's own device filter again, so the cgroup is not left
+	// without one. A restarted daemon, whose filter cache is empty, can wrap
+	// that filter; it never reaches the filter_missing path here.
 	_, proc := startDaemonContainer(ctx, t, cli, image)
 	proc.wait(ctx, t, "systemd reload watcher", withMsg(msgWatcherStarted))
 
