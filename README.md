@@ -213,7 +213,7 @@ value is set in both places, the CLI flag wins.
 | `-log-format` | `text` | `text`, `json`, `plain` |
 | `-log-time` | `false` | Include timestamps in log lines |
 | `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
-| `-dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything |
+| `-dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay (see [Config File](#config-file)) |
 | `-policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
 | `-device-allow` | `""` | Glob for `/dev/...` paths to allow, repeatable. Empty means allow all. |
 | `-device-deny` | `""` | Glob for `/dev/...` paths to deny, repeatable. Deny takes priority over allow. |
@@ -236,6 +236,22 @@ kill -HUP $(docker inspect --format '{{.State.Pid}}' swarm-device-access)
 
 Some settings are only read at startup and still require a restart:
 `docker-socket`, `metrics-addr`, and `debug-addr`.
+
+A reload, a daemon start and a `systemctl daemon-reload` each reconcile every
+running container under the current config, so narrowing the policy revokes
+grants the new policy no longer allows. Until a pass has reached every running
+container, `sda_reload_incomplete` is 1; containers whose reconcile failed are
+retried with backoff and counted in `sda_reconcile_pending_containers`. The
+daemon warns while either is non-zero and logs `config reload complete` once
+both are zero for the latest config.
+
+Restarting the daemon **live** is also a cleanup: the startup pass replaces or
+strips the grants a previous instance left on running containers (on cgroup v1
+only within the limits described under [Host Requirements](#host-requirements)).
+Restarting into **dry-run** is not: dry-run never looks at cgroups, so grants a
+previous live run left stay in place until a live start or a container
+restart. The daemon logs `dry-run: grants left by a previous live run cannot be
+detected or cleaned in dry-run` at every dry-run start.
 
 ### Container Labels
 

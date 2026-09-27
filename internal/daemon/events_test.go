@@ -98,9 +98,8 @@ func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		noopApply,
@@ -124,9 +123,8 @@ func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		noopApply,
@@ -154,9 +152,8 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		noopApply,
@@ -195,9 +192,8 @@ func TestConsumeEvents_ArbitraryStreamErrorAfterCancelNoReconnect(t *testing.T) 
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		noopApply,
@@ -248,9 +244,8 @@ func TestConsumeEvents_ChannelCloseReturnsReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		noopApply,
@@ -290,9 +285,8 @@ func TestConsumeEvents_EventCallsApply(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		apply,
@@ -333,9 +327,8 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		processed,
+		testCoordinator(processed),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		apply,
@@ -351,41 +344,25 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 	}
 }
 
-func TestConsumeEvents_ClearProcessedOnTTL(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// TestCoordinator_ProcessedEntriesExpire checks that an enumeration entry
+// older than processedTTL neither suppresses an event nor survives a prune.
+func TestCoordinator_ProcessedEntriesExpire(t *testing.T) {
+	inspectedAt := time.Now()
+	coord := testCoordinator(map[string]time.Time{
+		"stale-a": inspectedAt,
+		"stale-b": inspectedAt,
+		"fresh":   inspectedAt.Add(processedTTL),
+	})
+	coord.now = func() time.Time { return inspectedAt.Add(processedTTL + time.Second) }
 
-	msgs, errs := makeChans(0, 0)
-	backoff := minBackoff
-	processed := map[string]time.Time{
-		"stale-a": time.Now(),
-		"stale-b": time.Now(),
+	if coord.skipEvent("stale-a", inspectedAt.Add(-time.Second)) {
+		t.Error("an expired entry must not suppress an event")
 	}
 
-	// Fire the TTL immediately via a closed channel.
-	clearCh := make(chan time.Time)
-	close(clearCh)
+	coord.pruneProcessed()
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
-
-	consumeEvents(
-		ctx,
-		msgs,
-		errs,
-		processed,
-		&backoff,
-		clearCh,
-		new(int64),
-		nil,
-		noopApply,
-		DockerCallTimeout,
-	)
-
-	if len(processed) != 0 {
-		t.Errorf("processed map has %d entries after TTL, want 0", len(processed))
+	if _, ok := coord.processed["stale-b"]; ok || len(coord.processed) != 1 {
+		t.Errorf("processed = %v after prune, want only the fresh entry", coord.processed)
 	}
 }
 
@@ -407,9 +384,8 @@ func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
 		noopApply,
@@ -465,9 +441,8 @@ func TestConsumeEvents_RestartWithinWindow(t *testing.T) {
 				ctx,
 				msgs,
 				errs,
-				processed,
+				testCoordinator(processed),
 				&backoff,
-				nil,
 				new(int64),
 				nil,
 				apply,
@@ -507,9 +482,8 @@ func TestConsumeEvents_TracksLastEventNano(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		&lastEventNano,
 		nil,
 		noopApply,
@@ -545,4 +519,15 @@ func TestResubscribeSince(t *testing.T) {
 	if !parsed.Equal(last.Add(time.Nanosecond)) {
 		t.Errorf("resubscribeSince = %v, want %v", parsed, last.Add(time.Nanosecond))
 	}
+}
+
+// testCoordinator returns a coordinator for consumer tests, with processed
+// as its enumeration entries when non-nil.
+func testCoordinator(processed map[string]time.Time) *coordinator {
+	coord := newCoordinator(nil, noopApply, nil, DockerCallTimeout)
+	if processed != nil {
+		coord.processed = processed
+	}
+
+	return coord
 }

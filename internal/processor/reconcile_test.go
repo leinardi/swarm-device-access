@@ -21,6 +21,7 @@ package processor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -28,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -562,4 +564,64 @@ func TestReconcile_InspectFailureOfPrivilegedDoesNotWarn(t *testing.T) {
 	if strings.Contains(buf.String(), "restart the container") {
 		t.Errorf("privileged container must not get the filter_missing warning:\n%s", buf.String())
 	}
+}
+
+var errRevokeFailed = errors.New("revoke failed")
+
+// TestReconcile_NotFoundIsContainerGone: a container Docker does not know
+// is reported gone, so it is not retried forever, but only once nothing is
+// left to revoke for it.
+func TestReconcile_NotFoundIsContainerGone(t *testing.T) {
+	notFound := inspectReply{err: fmt.Errorf("no such container: %w", cerrdefs.ErrNotFound)}
+
+	t.Run("unknown", func(t *testing.T) {
+		env := newReconcileEnv(t, policy.ModeAll, false)
+		env.insp.then(notFound)
+
+		err := env.reconcile()
+		if !errors.Is(err, ErrContainerGone) || env.fake.calls != 0 {
+			t.Fatalf(
+				"err = %v, calls = %d; want ErrContainerGone and no mutation",
+				err,
+				env.fake.calls,
+			)
+		}
+	})
+
+	t.Run("dry-run", func(t *testing.T) {
+		env := newReconcileEnv(t, policy.ModeAll, true)
+		env.insp.then(notFound)
+
+		err := env.reconcile()
+		if !errors.Is(err, ErrContainerGone) {
+			t.Fatalf("err = %v, want ErrContainerGone", err)
+		}
+	})
+
+	t.Run("known and revoked", func(t *testing.T) {
+		env := newReconcileEnv(t, policy.ModeAll, false)
+		env.grantOnce(t)
+		env.insp.then(notFound)
+
+		err := env.reconcile()
+		if !errors.Is(err, ErrContainerGone) || env.fake.calls != 2 || len(env.fake.rules[1]) != 0 {
+			t.Fatalf(
+				"err = %v, rules = %v; want the revoke, then ErrContainerGone",
+				err,
+				env.fake.rules,
+			)
+		}
+	})
+
+	t.Run("known and revoke failed", func(t *testing.T) {
+		env := newReconcileEnv(t, policy.ModeAll, false)
+		env.grantOnce(t)
+		env.insp.then(notFound)
+		env.fake.err = errRevokeFailed
+
+		err := env.reconcile()
+		if errors.Is(err, ErrContainerGone) || !errors.Is(err, errRevokeFailed) {
+			t.Fatalf("err = %v, want the revoke failure and the container kept pending", err)
+		}
+	})
 }

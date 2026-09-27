@@ -88,7 +88,7 @@ func resubscribeSince(initial time.Time, lastEventNano int64) string {
 func listenEvents(
 	ctx context.Context,
 	opts Options,
-	processed map[string]time.Time,
+	coord *coordinator,
 	since time.Time,
 	stream client.EventsResult,
 	cancelStream context.CancelFunc,
@@ -98,12 +98,6 @@ func listenEvents(
 	timeout := opts.timeout()
 
 	var lastEventNano int64
-
-	// The processed map guards the overlap window between startup enumeration
-	// and the live event stream. After 2×maxBackoff (60s) the window has
-	// certainly passed; any remaining entries are from containers that exited
-	// before producing a start event and will never be drained normally.
-	clearProcessed := time.After(2 * maxBackoff)
 
 	for {
 		if ctx.Err() != nil {
@@ -144,9 +138,8 @@ func listenEvents(
 			ctx,
 			stream.Messages,
 			stream.Err,
-			processed,
+			coord,
 			&backoff,
-			clearProcessed,
 			&lastEventNano,
 			opts.Metrics,
 			processorApply(opts.Proc),
@@ -224,18 +217,16 @@ func subscribe(
 // caller should reconnect, false on context cancellation. lastEventNano is
 // updated with the timestamp of every received event.
 //
-// An event is skipped only when processed holds an entry for the container
-// and the event is not newer than that entry: Docker emits "start" after the
-// container is running, so an earlier event was already visible to the
-// startup inspect. A newer event (restart, unpause) has a new cgroup and is
-// applied. The entry is removed on the first event for that ID either way.
+// An event already covered by an enumeration is skipped (see
+// coordinator.skipEvent); a newer one (restart, unpause) has a new cgroup and
+// is applied. A failed apply leaves the container to the coordinator's
+// retries.
 func consumeEvents(
 	ctx context.Context,
 	msgs <-chan events.Message,
 	errs <-chan error,
-	processed map[string]time.Time,
+	coord *coordinator,
 	backoff *time.Duration,
-	clearProcessed <-chan time.Time,
 	lastEventNano *int64,
 	metrics *observability.Recorder,
 	apply applyFn,
@@ -247,16 +238,6 @@ func consumeEvents(
 		select {
 		case <-ctx.Done():
 			return false
-
-		case <-clearProcessed:
-			// Overlap window expired; discard any startup entries that were
-			// never matched by a live event (containers that exited during the
-			// window). Reassign to a nil channel so the case never fires again.
-			for key := range processed {
-				delete(processed, key)
-			}
-
-			clearProcessed = nil
 
 		case streamErr := <-errs:
 			if streamErr == nil {
@@ -304,16 +285,12 @@ func consumeEvents(
 
 			metrics.RecordEvent(string(msg.Action))
 
-			recordedAt, alreadyProcessed := processed[msg.Actor.ID]
-			if alreadyProcessed {
-				delete(processed, msg.Actor.ID)
-
-				if !time.Unix(0, msg.TimeNano).After(recordedAt) {
-					continue
-				}
+			if coord.skipEvent(msg.Actor.ID, time.Unix(0, msg.TimeNano)) {
+				continue
 			}
 
-			_ = processOne(
+			key := coord.current()
+			applyErr := processOne(
 				ctx,
 				msg.Actor.ID,
 				metrics,
@@ -321,6 +298,7 @@ func consumeEvents(
 				timeout,
 				"could not process container",
 			)
+			coord.eventApplied(msg.Actor.ID, key, applyErr)
 		}
 	}
 }

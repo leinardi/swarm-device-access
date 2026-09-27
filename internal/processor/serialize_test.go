@@ -60,7 +60,7 @@ func TestReconcile_SerializesConfigLoadThroughApply(t *testing.T) {
 	insp := &countingInspector{
 		result: container.InspectResponse{State: &container.State{Running: true, Pid: pid}},
 	}
-	store := newStore(policy.ModeAll, true)
+	store, publisher := newPublishedStore(policy.ModeAll, true)
 	proc := &Processor{
 		Inspector: insp,
 		Cfg:       store,
@@ -107,7 +107,10 @@ func TestReconcile_SerializesConfigLoadThroughApply(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	store.Set(config.Runtime{Policy: policy.Global{Mode: policy.ModeOptIn}, DryRun: true})
+	// Published directly, not through PublishAndReconcile: this test is
+	// about the lock ordering between workers, and the publication must
+	// land while the first worker holds the lock.
+	publisher.Publish(config.Runtime{Policy: policy.Global{Mode: policy.ModeOptIn}, DryRun: true})
 
 	// Negative assertion: nothing can be polled for "did not happen", so give
 	// the second worker a bounded window to (wrongly) get past the lock.
@@ -124,5 +127,77 @@ func TestReconcile_SerializesConfigLoadThroughApply(t *testing.T) {
 	// under opt-in) from the config published while it waited.
 	if len(modes) != 2 || modes[0] != policy.ModeAll || modes[1] != policy.ModeOptIn {
 		t.Fatalf("modes seen by computing workers = %v, want [all opt-in]", modes)
+	}
+}
+
+// TestPublishAndReconcile_StalePolicyRace pauses a worker after it computed
+// a grant under the old config, publishes a narrower config through
+// PublishAndReconcile, then releases the worker. The publication waits for
+// the worker, and the pass it requests runs afterwards, so the cgroup ends
+// with the narrower (empty) set rather than the stale grant.
+func TestPublishAndReconcile_StalePolicyRace(t *testing.T) {
+	env := newReconcileEnv(t, policy.ModeAll, false)
+
+	store, publisher := newPublishedStore(policy.ModeAll, false)
+	env.proc.Cfg = store
+	env.proc.Publisher = publisher
+
+	var (
+		held    = make(chan struct{})
+		release = make(chan struct{})
+		once    sync.Once
+	)
+
+	env.proc.afterCompute = func() {
+		once.Do(func() {
+			close(held)
+			<-release
+		})
+	}
+
+	// The pass the coordinator would run: reconcile the one container.
+	passErrs := make(chan error, 1)
+
+	env.proc.SetPassRequester(func(ctx context.Context, _ uint64) {
+		passErrs <- env.proc.Reconcile(ctx, "abc")
+	})
+
+	var workers sync.WaitGroup
+
+	workers.Go(func() { _ = env.reconcile() })
+
+	<-held
+
+	published := make(chan uint64, 1)
+
+	workers.Go(func() {
+		published <- env.proc.PublishAndReconcile(
+			context.Background(),
+			config.Runtime{Policy: policy.Global{Mode: policy.ModeOptIn}},
+		)
+	})
+
+	// Negative assertion: the publication must wait for the worker.
+	select {
+	case <-published:
+		t.Fatal("PublishAndReconcile published while a worker held the lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	workers.Wait()
+
+	if gen := <-published; gen != 2 {
+		t.Errorf("generation = %d, want 2", gen)
+	}
+
+	passErr := <-passErrs
+	if passErr != nil {
+		t.Fatalf("pass: %v", passErr)
+	}
+
+	last := env.fake.rules[len(env.fake.rules)-1]
+	if env.fake.calls != 2 || len(env.fake.rules[0]) != 1 || len(last) != 0 {
+		t.Fatalf("rules = %v, want the stale grant replaced by the empty set", env.fake.rules)
 	}
 }

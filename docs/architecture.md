@@ -230,6 +230,8 @@ Metrics exposed:
 | `sda_rule_failures_total` | counter | — | Per-device rule failures (including walk errors); the per-device failure signal |
 | `sda_dry_run_skips_total` | counter | — | Rules skipped in dry-run mode |
 | `sda_last_event_timestamp_seconds` | gauge | — | Unix timestamp of last container processed successfully (event, startup or reload) |
+| `sda_reconcile_pending_containers` | gauge | — | Containers whose last reconcile failed and are retried with backoff |
+| `sda_reload_incomplete` | gauge | — | 1 until a pass for the latest config and trigger has reached every running container, else 0 |
 
 ### pprof debug server (`--debug-addr`)
 

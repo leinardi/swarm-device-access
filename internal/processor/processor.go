@@ -57,8 +57,9 @@ type deviceRuleKey struct {
 }
 
 // Processor applies cgroup BPF device-allow rules to containers that
-// bind-mount /dev/... paths. Inspector and Cfg are required; Metrics may be
-// nil (calls become no-ops). HostRoot is the container-internal path to the
+// bind-mount /dev/... paths. Inspector and Cfg are required; Publisher is
+// required for PublishAndReconcile; Metrics may be nil (calls become
+// no-ops). HostRoot is the container-internal path to the
 // host root (typically "/host"). ProcRoot is used for /proc lookups ("/" in
 // production, temp dir in tests). CallTimeout bounds each Docker call the
 // processor makes, independent of the caller's context, so every entry point
@@ -70,6 +71,7 @@ type deviceRuleKey struct {
 type Processor struct {
 	Inspector   DockerInspector
 	Cfg         *config.Store
+	Publisher   *config.Publisher
 	Metrics     *observability.Recorder
 	HostRoot    string
 	ProcRoot    string
@@ -97,6 +99,10 @@ type Processor struct {
 	// verified in (guarded by mu). It is how grants are revoked once the
 	// process is gone or Docker cannot be asked: see revokeKnown.
 	known map[lifecycleKey]knownCgroup
+
+	// requestPass receives each generation PublishAndReconcile publishes
+	// (guarded by mu).
+	requestPass PassRequester
 
 	// pinner pins container processes; nil means pidfds. Tests replace it.
 	pinner processPinner

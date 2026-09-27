@@ -30,7 +30,6 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
-	"github.com/leinardi/swarm-device-access/internal/config"
 	"github.com/leinardi/swarm-device-access/internal/processor"
 )
 
@@ -89,30 +88,24 @@ func assertBounded(t *testing.T, name string, fn func()) {
 	}
 }
 
-func TestProcessExistingContainers_HungContainerListIsBounded(t *testing.T) {
+func TestCoordinatorPass_HungContainerListIsBounded(t *testing.T) {
 	docker := &fakeDocker{hangList: true}
+	coord := newCoordinator(docker, noopApply, nil, testCallTimeout)
 
-	var err error
+	var outcome passOutcome
 
-	assertBounded(t, "processExistingContainers", func() {
-		err = processExistingContainers(
-			context.Background(),
-			docker,
-			map[string]time.Time{},
-			nil,
-			noopApply,
-			testCallTimeout,
-		)
+	assertBounded(t, "coordinator pass", func() {
+		outcome = coord.pass(context.Background(), coord.current())
 	})
 
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+	if outcome != passListFailed {
+		t.Fatalf("outcome = %v, want passListFailed", outcome)
 	}
 }
 
 func TestProcessOne_HungContainerInspectIsBounded(t *testing.T) {
 	insp := &hangingInspector{}
-	proc := &processor.Processor{Inspector: insp, Cfg: config.NewStore()}
+	proc := &processor.Processor{Inspector: insp, Cfg: newTestStore()}
 
 	var err error
 
@@ -139,7 +132,7 @@ func TestReconcile_HungInspectIsBoundedPerCall(t *testing.T) {
 	insp := &hangingInspector{}
 	proc := &processor.Processor{
 		Inspector:   insp,
-		Cfg:         config.NewStore(),
+		Cfg:         newTestStore(),
 		CallTimeout: testCallTimeout,
 	}
 
@@ -216,7 +209,7 @@ func TestRun_InitialEventsHangStillEnumeratesAndResubscribes(t *testing.T) {
 	insp := &recordingInspector{}
 	opts := Options{
 		Docker:      docker,
-		Proc:        &processor.Processor{Inspector: insp, Cfg: config.NewStore()},
+		Proc:        &processor.Processor{Inspector: insp, Cfg: newTestStore()},
 		callTimeout: testCallTimeout,
 	}
 
@@ -260,7 +253,7 @@ func TestListenEvents_ReconnectEventsHangRetries(t *testing.T) {
 	docker := &fakeDocker{hangEvents: map[int]bool{1: true}}
 	opts := Options{
 		Docker:      docker,
-		Proc:        &processor.Processor{Inspector: &recordingInspector{}, Cfg: config.NewStore()},
+		Proc:        &processor.Processor{Inspector: &recordingInspector{}, Cfg: newTestStore()},
 		callTimeout: testCallTimeout,
 	}
 
@@ -274,7 +267,7 @@ func TestListenEvents_ReconnectEventsHangRetries(t *testing.T) {
 		listenEvents(
 			ctx,
 			opts,
-			map[string]time.Time{},
+			testCoordinator(nil),
 			time.Now(),
 			client.EventsResult{},
 			func() {},

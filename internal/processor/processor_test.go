@@ -119,10 +119,13 @@ func buildProcRoot(
 var errDaemonUnavail = errors.New("daemon unavailable")
 
 func newStore(mode policy.Mode, dryRun bool) *config.Store {
-	s := config.NewStore()
-	s.Set(config.Runtime{Policy: policy.Global{Mode: mode}, DryRun: dryRun})
+	store, _ := newPublishedStore(mode, dryRun)
 
-	return s
+	return store
+}
+
+func newPublishedStore(mode policy.Mode, dryRun bool) (*config.Store, *config.Publisher) {
+	return config.NewStore(config.Runtime{Policy: policy.Global{Mode: mode}, DryRun: dryRun})
 }
 
 func TestIsDeviceMountSource(t *testing.T) {
@@ -779,8 +782,7 @@ func TestReconcile_DevDirectorySummary(t *testing.T) {
 		},
 	}}
 
-	store := config.NewStore()
-	store.Set(config.Runtime{
+	store, _ := config.NewStore(config.Runtime{
 		Policy: policy.Global{Mode: policy.ModeAll, DeviceAllow: []string{"/dev/null"}},
 		DryRun: true,
 	})

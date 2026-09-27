@@ -54,8 +54,6 @@ func run() int {
 		return 0
 	}
 
-	store := config.NewStore()
-
 	// Load config file; CLI flags override file values.
 	fileCfg, fileErr := config.LoadFile(*configFile)
 	if fileErr != nil {
@@ -64,7 +62,14 @@ func run() int {
 		return 1
 	}
 
-	applyFileConfig(&fileCfg, store)
+	store, publisher := config.NewStore(applyFileConfig(&fileCfg))
+
+	// Registered before anything slow, so a SIGHUP during startup is queued
+	// for watchSIGHUP instead of terminating the process (its default).
+	sighup := make(chan os.Signal, 1)
+
+	signal.Notify(sighup, syscall.SIGHUP)
+	defer signal.Stop(sighup)
 
 	startupValidationErr := store.Load().Policy.Validate()
 	if startupValidationErr != nil {
@@ -89,6 +94,14 @@ func run() int {
 		"device_deny", cfg.Policy.DeviceDeny,
 	)
 
+	if cfg.DryRun {
+		// Dry-run has no cgroup view and no saved ownership state, so it
+		// cannot even count what a previous live run left behind.
+		log.Warn(
+			"dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run",
+		)
+	}
+
 	// Lift RLIMIT_MEMLOCK once for the process so BPF_PROG_LOAD does not fail
 	// on kernels that still charge BPF memory to it (no-op from Linux 5.11,
 	// where memcg accounting replaced it). The limit is not inherited by
@@ -108,9 +121,6 @@ func run() int {
 		syscall.SIGTERM,
 	)
 	defer cancelRoot()
-
-	// SIGHUP: reload the config file and update hot settings + logger.
-	go watchSIGHUP(rootCtx, store)
 
 	// API version negotiation is the client default; it runs lazily on the first request.
 	cli, err := client.New(client.WithHost("unix://" + *dockerSocket))
@@ -136,11 +146,16 @@ func run() int {
 	proc := &processor.Processor{
 		Inspector:   cli,
 		Cfg:         store,
+		Publisher:   publisher,
 		Metrics:     recorder,
 		HostRoot:    hostRootPath,
 		ProcRoot:    "/",
 		CallTimeout: daemon.DockerCallTimeout,
 	}
+
+	// SIGHUP: reload the config file, update the logger and publish the
+	// new config through the processor.
+	go watchSIGHUP(rootCtx, sighup, proc)
 
 	runErr := daemon.Run(rootCtx, daemon.Options{
 		Docker:  cli,

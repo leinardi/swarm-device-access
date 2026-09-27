@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -56,6 +57,7 @@ type fakeDocker struct {
 	firstErrs      chan error
 	onList         func()
 	hangList       bool
+	listFailures   int
 	hangEvents     map[int]bool
 	eventsReturned int
 	eventsCtx      context.Context //nolint:containedctx // records the stream context so tests can assert its lifetime
@@ -74,6 +76,18 @@ func (f *fakeDocker) ContainerList(
 		<-ctx.Done()
 
 		return client.ContainerListResult{}, fmt.Errorf("hung list: %w", ctx.Err())
+	}
+
+	f.mu.Lock()
+
+	failing := f.listFailures > 0
+	if failing {
+		f.listFailures--
+	}
+	f.mu.Unlock()
+
+	if failing {
+		return client.ContainerListResult{}, errListFailed
 	}
 
 	if f.onList != nil {
@@ -192,7 +206,14 @@ func waitForWithin(t *testing.T, limit time.Duration, cond func() bool) {
 	t.Fatal("condition not met before deadline")
 }
 
-func noopWatcher(context.Context, Options) {}
+func noopWatcher(context.Context, Options, func()) {}
+
+// newTestStore returns a store holding the zero config.
+func newTestStore() *config.Store {
+	store, _ := config.NewStore(config.Runtime{})
+
+	return store
+}
 
 // TestRun_SubscribesBeforeEnumerating checks that the event stream is opened
 // (with Since not after the list time) before containers are listed, and that
@@ -214,7 +235,7 @@ func TestRun_SubscribesBeforeEnumerating(t *testing.T) {
 	insp := &recordingInspector{}
 	opts := Options{
 		Docker: docker,
-		Proc:   &processor.Processor{Inspector: insp, Cfg: config.NewStore()},
+		Proc:   &processor.Processor{Inspector: insp, Cfg: newTestStore()},
 	}
 
 	done := make(chan struct{})
@@ -265,7 +286,7 @@ func TestListenEvents_ReconnectSinceAfterLastEvent(t *testing.T) {
 	insp := &recordingInspector{}
 	opts := Options{
 		Docker: docker,
-		Proc:   &processor.Processor{Inspector: insp, Cfg: config.NewStore()},
+		Proc:   &processor.Processor{Inspector: insp, Cfg: newTestStore()},
 	}
 
 	done := make(chan struct{})
@@ -276,7 +297,7 @@ func TestListenEvents_ReconnectSinceAfterLastEvent(t *testing.T) {
 		listenEvents(
 			ctx,
 			opts,
-			map[string]time.Time{},
+			testCoordinator(nil),
 			time.Now().Add(-time.Hour),
 			client.EventsResult{Messages: msgs, Err: make(chan error)},
 			func() {},
@@ -316,7 +337,7 @@ func TestListenEvents_ReconnectBeforeAnyEventUsesInitialSince(t *testing.T) {
 	initial := time.Now().Add(-time.Hour)
 	opts := Options{
 		Docker: docker,
-		Proc:   &processor.Processor{Inspector: &recordingInspector{}, Cfg: config.NewStore()},
+		Proc:   &processor.Processor{Inspector: &recordingInspector{}, Cfg: newTestStore()},
 	}
 
 	done := make(chan struct{})
@@ -327,7 +348,7 @@ func TestListenEvents_ReconnectBeforeAnyEventUsesInitialSince(t *testing.T) {
 		listenEvents(
 			ctx,
 			opts,
-			map[string]time.Time{},
+			testCoordinator(nil),
 			initial,
 			client.EventsResult{Messages: msgs, Err: make(chan error)},
 			func() {},
@@ -410,13 +431,21 @@ func readMetrics(t *testing.T) metricsSnapshot {
 func captureLogs(t *testing.T) *bytes.Buffer {
 	t.Helper()
 
-	prev := logger.L()
-
 	var buf bytes.Buffer
-	logger.Set(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { logger.Set(prev) })
+
+	setTestLogger(t, &buf)
 
 	return &buf
+}
+
+// setTestLogger sends logger.L() to sink until the test ends.
+func setTestLogger(t *testing.T, sink io.Writer) {
+	t.Helper()
+
+	prev := logger.L()
+
+	logger.Set(slog.New(slog.NewTextHandler(sink, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { logger.Set(prev) })
 }
 
 func assertFailureReported(t *testing.T, before, after metricsSnapshot, logOutput, wantMsg string) {
@@ -479,21 +508,13 @@ func TestProcessOne_StartupFailureMatchesEventPath(t *testing.T) {
 	before := readMetrics(t)
 
 	docker := &fakeDocker{containers: []container.Summary{{ID: "bad"}}}
-	processed := map[string]time.Time{}
+	coord := newCoordinator(docker, failingApply, metrics, DockerCallTimeout)
 
-	err := processExistingContainers(
-		context.Background(),
-		docker,
-		processed,
-		metrics,
-		failingApply,
-		DockerCallTimeout,
-	)
-	if err != nil {
-		t.Fatalf("processExistingContainers: %v", err)
+	if outcome := coord.pass(context.Background(), coord.current()); outcome != passDone {
+		t.Fatalf("pass outcome = %v, want passDone", outcome)
 	}
 
-	if _, recorded := processed["bad"]; recorded {
+	if _, recorded := coord.processed["bad"]; recorded {
 		t.Error("failed container must not be recorded as processed")
 	}
 
@@ -526,9 +547,8 @@ func TestProcessOne_StartupFailureMatchesEventPath(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinator(nil),
 		&backoff,
-		nil,
 		new(int64),
 		metrics,
 		failingApply,
@@ -545,18 +565,10 @@ func TestProcessOne_StartupSuccessRecordsMetrics(t *testing.T) {
 	before := readMetrics(t)
 
 	docker := &fakeDocker{containers: []container.Summary{{ID: "good"}}}
-	processed := map[string]time.Time{}
+	coord := newCoordinator(docker, noopApply, metrics, DockerCallTimeout)
 
-	err := processExistingContainers(
-		context.Background(),
-		docker,
-		processed,
-		metrics,
-		noopApply,
-		DockerCallTimeout,
-	)
-	if err != nil {
-		t.Fatalf("processExistingContainers: %v", err)
+	if outcome := coord.pass(context.Background(), coord.current()); outcome != passDone {
+		t.Fatalf("pass outcome = %v, want passDone", outcome)
 	}
 
 	after := readMetrics(t)
@@ -576,7 +588,7 @@ func TestProcessOne_StartupSuccessRecordsMetrics(t *testing.T) {
 		t.Error("last_event_timestamp not set after successful startup apply")
 	}
 
-	if _, recorded := processed["good"]; !recorded {
+	if _, recorded := coord.processed["good"]; !recorded {
 		t.Error("successful container should be recorded as processed")
 	}
 }

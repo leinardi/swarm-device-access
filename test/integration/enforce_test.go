@@ -53,8 +53,9 @@ const (
 	// mounted under /var/run inside the container.
 	containerDBusSocket = "/var/run/dbus/system_bus_socket"
 
-	msgWatcherStarted = "systemd reload watcher started"
-	msgEPERM          = "Operation not permitted"
+	msgWatcherStarted  = "systemd reload watcher started"
+	msgDryRunLeftovers = "dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run"
+	msgEPERM           = "Operation not permitted"
 
 	// wipeTimeout bounds how long daemon-reload may take to remove the
 	// device program after systemctl returns.
@@ -134,6 +135,78 @@ func TestEnforce_GrantsDeviceAccess(t *testing.T) {
 	t.Run("reload", func(t *testing.T) {
 		testReloadReapply(t, cli, image, daemonID, proc, target, device)
 	})
+}
+
+// TestEnforce_RestartReconcilesLeftoverGrants kills a daemon that granted a
+// device, so it cannot clean up, then restarts it. A dry-run restart must
+// leave the grant alone (dry-run never touches cgroups) and say so; a live
+// restart under a policy that denies the device must revoke it.
+//
+// It attaches BPF programs on this host, so it only runs with
+// SDA_IT_ENFORCE=1.
+func TestEnforce_RestartReconcilesLeftoverGrants(t *testing.T) {
+	if !enforceRequested() {
+		t.Skipf("set %s=1 to run: it attaches BPF programs on this host", envEnforce)
+	}
+
+	cli := requireDocker(t)
+	ensureTestImage(t, cli)
+
+	ctx := testCtx(t)
+	image := requireDaemonImage(ctx, t, cli)
+
+	requireEnforceHost(t)
+
+	device := pickDevice(ctx, t, cli)
+	target := startTestContainer(
+		ctx,
+		t,
+		cli,
+		map[string]string{policy.LabelEnable: "true"},
+		[]string{device + ":" + device},
+	)
+
+	firstID, first := startDaemonContainer(ctx, t, cli, image)
+	requireProcessed(ctx, t, first, target, 1, 0)
+	requireAllowed(ctx, t, cli, target, device, "after the first daemon granted it")
+	killDaemonContainer(ctx, t, cli, firstID, first)
+
+	dryID, dry := startDaemonContainer(ctx, t, cli, image, "-dry-run")
+	dry.wait(ctx, t, "the dry-run leftover warning", withMsg(msgDryRunLeftovers))
+	requireProcessed(ctx, t, dry, target, 1, 0)
+	requireAllowed(ctx, t, cli, target, device, "after a dry-run restart (not a cleanup path)")
+	killDaemonContainer(ctx, t, cli, dryID, dry)
+
+	_, narrow := startDaemonContainer(ctx, t, cli, image, "-device-deny="+device)
+	requireProcessed(ctx, t, narrow, target, 0, 1)
+	requireDenied(ctx, t, cli, target, device, "after a live restart with a policy that denies it")
+}
+
+// killDaemonContainer kills the daemon with SIGKILL, so it cannot clean up,
+// and waits until its log stream ends.
+func killDaemonContainer(
+	ctx context.Context,
+	t *testing.T,
+	cli *dockerclient.Client,
+	daemonID string,
+	proc *daemonProc,
+) {
+	t.Helper()
+
+	_, err := cli.ContainerKill(ctx, daemonID, dockerclient.ContainerKillOptions{Signal: "KILL"})
+	if err != nil {
+		t.Fatalf("kill daemon container %s: %v", shortID(daemonID), err)
+	}
+
+	select {
+	case <-proc.exited:
+	case <-ctx.Done():
+		t.Fatalf(
+			"daemon container %s log stream did not end: %v",
+			shortID(daemonID),
+			context.Cause(ctx),
+		)
+	}
 }
 
 // testReloadReapply first proves that daemon-reload wipes the device program
@@ -341,20 +414,24 @@ func pickDevice(ctx context.Context, t *testing.T, cli *dockerclient.Client) str
 // ---- daemon container ----
 
 // startDaemonContainer runs the daemon image with the runtime options of
-// .mk/docker-run.mk, waits until it subscribes to Docker events and returns
-// its ID and log collector. It is removed when the test ends.
+// .mk/docker-run.mk and extraArgs, waits until it subscribes to Docker events
+// and returns its ID and log collector. It is removed when the test ends.
 func startDaemonContainer(
 	ctx context.Context,
 	t *testing.T,
 	cli *dockerclient.Client,
 	image string,
+	extraArgs ...string,
 ) (string, *daemonProc) {
 	t.Helper()
 
 	daemonID := startContainer(ctx, t, cli,
 		&container.Config{
 			Image: image,
-			Cmd:   []string{"-policy-mode=opt-in", "-log-format=json", "-log-level=debug"},
+			Cmd: append(
+				[]string{"-policy-mode=opt-in", "-log-format=json", "-log-level=debug"},
+				extraArgs...,
+			),
 		},
 		&container.HostConfig{
 			Privileged:   true,

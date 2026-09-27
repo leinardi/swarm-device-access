@@ -58,4 +58,8 @@ Expected response time: acknowledgment within 7 days, patch or mitigation plan w
   restarted. Within one daemon run, narrowing revokes exactly what was granted and never touches the
   runtime's own exceptions. cgroup v1 is deprecated by Docker and systemd; cgroup v2 hosts are not
   affected by this gap.
+- **Restarting into dry-run does not revoke anything.** Dry-run never queries or mutates cgroups
+  (it runs unprivileged in tests), so grants left by a previous live run stay until a live start
+  or a container restart; the daemon warns about this at every dry-run start. Restart live with a
+  narrower policy, or restart the affected containers, to take grants back.
 - The cgroup BPF code in `internal/cgroup/` is derived from [NVIDIA's container toolkit](https://github.com/NVIDIA/libnvidia-container) (Apache 2.0). Security issues in that code should also be reported to NVIDIA.

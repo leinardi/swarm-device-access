@@ -39,6 +39,8 @@ type Recorder struct {
 	ruleFailures          prometheus.Counter
 	dryRunSkips           prometheus.Counter
 	lastEventTimestamp    prometheus.Gauge
+	pendingContainers     prometheus.Gauge
+	reloadIncomplete      prometheus.Gauge
 }
 
 // NewRecorder registers all metric collectors against Prometheus' default
@@ -100,6 +102,16 @@ func NewRecorder() *Recorder {
 		lastEventTimestamp: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "sda_last_event_timestamp_seconds",
 			Help: "Unix timestamp of the last container processed successfully (event, startup or reload).",
+		}),
+
+		pendingContainers: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "sda_reconcile_pending_containers",
+			Help: "Containers whose last reconciliation failed and that are being retried with backoff.",
+		}),
+
+		reloadIncomplete: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "sda_reload_incomplete",
+			Help: "1 until a reconciliation pass for the latest config and trigger has visited every running container, else 0.",
 		}),
 	}
 }
@@ -206,4 +218,28 @@ func (rec *Recorder) SetLastEvent(eventTime time.Time) {
 	}
 
 	rec.lastEventTimestamp.Set(float64(eventTime.Unix()))
+}
+
+// SetPendingContainers records how many containers await a reconcile retry.
+func (rec *Recorder) SetPendingContainers(count int) {
+	if rec == nil {
+		return
+	}
+
+	rec.pendingContainers.Set(float64(count))
+}
+
+// SetReloadIncomplete records whether the latest requested reconciliation
+// pass has yet to visit every running container.
+func (rec *Recorder) SetReloadIncomplete(incomplete bool) {
+	if rec == nil {
+		return
+	}
+
+	value := 0.0
+	if incomplete {
+		value = 1
+	}
+
+	rec.reloadIncomplete.Set(value)
 }

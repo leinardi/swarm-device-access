@@ -22,20 +22,19 @@ import (
 	"context"
 	"flag"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
 	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/policy"
+	"github.com/leinardi/swarm-device-access/internal/processor"
 )
 
 // applyFileConfig merges the file config into the CLI flags (for flags not
-// explicitly set by the user) and stores the result in store.
-// Must be called after flag.Parse() and after store is initialized.
+// explicitly set by the user) and returns the resulting startup Runtime.
+// Must be called after flag.Parse().
 //
 //nolint:gocyclo,cyclop // complexity is inherent: merges many independent optional config fields
-func applyFileConfig(fileCfg *config.FileSchema, store *config.Store) {
+func applyFileConfig(fileCfg *config.FileSchema) config.Runtime {
 	cliSet := make(map[string]bool)
 
 	flag.Visit(func(f *flag.Flag) { cliSet[f.Name] = true })
@@ -80,27 +79,27 @@ func applyFileConfig(fileCfg *config.FileSchema, store *config.Store) {
 		deviceDeny = fileCfg.DeviceDeny
 	}
 
-	store.Set(config.Runtime{
+	return config.Runtime{
 		DryRun: *dryRun,
 		Policy: policy.Global{
 			Mode:        policy.Mode(*policyMode),
 			DeviceAllow: append([]string(nil), deviceAllow...),
 			DeviceDeny:  append([]string(nil), deviceDeny...),
 		},
-	})
+	}
 }
 
 // watchSIGHUP blocks until ctx is done, reloading the config file and
-// updating store + logger on each SIGHUP. Settings that require a
-// restart (docker-socket, metrics-addr, debug-addr) are not reloaded.
+// updating the logger on each SIGHUP, then publishing the new config through
+// proc, which reconciles every running container under it. Settings that
+// require a restart (docker-socket, metrics-addr, debug-addr) are not
+// reloaded.
+//
+// sigCh must already be registered for SIGHUP (see run), so a SIGHUP during
+// startup is queued instead of terminating the process.
 //
 //nolint:gocyclo,cyclop,gocognit // complexity is inherent: handles SIGHUP, reload, merge, validate, and logger update
-func watchSIGHUP(ctx context.Context, store *config.Store) {
-	sigCh := make(chan os.Signal, 1)
-
-	signal.Notify(sigCh, syscall.SIGHUP)
-	defer signal.Stop(sigCh)
-
+func watchSIGHUP(ctx context.Context, sigCh <-chan os.Signal, proc *processor.Processor) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -177,12 +176,13 @@ func watchSIGHUP(ctx context.Context, store *config.Store) {
 				continue
 			}
 
-			store.Set(config.Runtime{
+			generation := proc.PublishAndReconcile(ctx, config.Runtime{
 				DryRun: newDryRun,
 				Policy: newPolicy,
 			})
 
 			logger.L().Info("config reloaded",
+				"generation", generation,
 				"dry_run", newDryRun,
 				"policy_mode", newPolicy.Mode,
 				"device_allow", newPolicy.DeviceAllow,

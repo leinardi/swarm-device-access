@@ -24,11 +24,16 @@ import (
 	"fmt"
 	"io/fs"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
 	"github.com/leinardi/swarm-device-access/internal/logger"
 )
+
+// ErrContainerGone reports that Docker no longer knows the container and no
+// revoke is outstanding for it, so there is nothing left to retry.
+var ErrContainerGone = errors.New("container no longer exists")
 
 // applyPinned sets rules on the cgroup of the container's running process.
 // It returns the cgroup path once resolved, for error reporting.
@@ -159,26 +164,31 @@ func (p *Processor) verifyPinned(
 
 // revokeAfterInspectFailure handles a container Docker cannot report on.
 // Without a pid there is no cgroup to resolve, so every lifecycle of the
-// container with a known cgroup is revoked there, and the container stays
-// pending either way. Dry-run never mutates.
+// container with a known cgroup is revoked there. The container stays
+// pending, unless Docker reported it does not exist and every revoke
+// succeeded: the error then wraps ErrContainerGone. Dry-run never mutates,
+// so for it a container Docker does not know is simply gone.
 func (p *Processor) revokeAfterInspectFailure(
 	containerID string,
 	dryRun bool,
 	inspectErr error,
 ) error {
-	errs := []error{inspectErr}
-
-	if dryRun {
-		return inspectErr
-	}
+	var errs []error
 
 	for key, known := range p.known {
-		if key.containerID == containerID {
-			errs = append(errs, p.revokeAt(key, known, true))
+		if key.containerID == containerID && !dryRun {
+			revokeErr := p.revokeAt(key, known, true)
+			if revokeErr != nil {
+				errs = append(errs, revokeErr)
+			}
 		}
 	}
 
-	return errors.Join(errs...)
+	if len(errs) == 0 && cerrdefs.IsNotFound(inspectErr) {
+		return fmt.Errorf("%w: %w", ErrContainerGone, inspectErr)
+	}
+
+	return errors.Join(append([]error{inspectErr}, errs...)...)
 }
 
 // revokeKnown applies the empty set to the cgroup key was last verified in,
