@@ -62,7 +62,7 @@ Expected response time: acknowledgment within 7 days, patch or mitigation plan w
 ## Known design constraints
 
 - The daemon must run as root. Dropping to a minimal capability set (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_ADMIN`, `CAP_SYS_RESOURCE`) is theoretically possible but has not been tested across kernel versions and is not supported at this time.
-- The daemon uses `privileged: true` in the reference Swarm deployment. This is required because Swarm rejects `--cap-add` on service definitions. In non-Swarm deployments, explicit capabilities can be used instead.
+- The daemon uses `privileged: true` in the reference Swarm deployment, started by a wrapper service with `docker run`. Swarm services do support `cap_add` (Docker Engine 20.10 and newer), but not the host cgroup, PID and user namespaces the daemon also needs, which is why the wrapper exists. With the wrapper, or outside Swarm, explicit capabilities could be used instead of `privileged`; that is not tested or supported (see above).
 - **cgroup v1: grants made by a previous daemon instance are not revoked.** On cgroup v1 the daemon
   can only tell its own `devices.allow` exceptions from the runtime's through an in-memory ledger. A
   restarted daemon starts with an empty ledger, so exceptions its predecessor added look like the

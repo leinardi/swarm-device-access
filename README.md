@@ -462,7 +462,7 @@ With debug logs enabled, successful processing looks like this:
 
 ```text
 level=DEBUG device mount detected id=abc123 source=/dev/ttyS0 ...
-level=DEBUG adding device rule pid=1234 type=c major=4 minor=64
+level=DEBUG setting device rule pid=1234 cgroup=/host/sys/fs/cgroup/... type=c major=4 minor=64
 ```
 
 ## 🛠️ Development

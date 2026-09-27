@@ -94,7 +94,7 @@ or deployment behavior:
 
 3. Start a consumer container with `--label swarm-device-access.enable=true` and
    a real `/dev/...` bind mount and confirm the daemon logs `device mount detected`
-   and `adding device rule`. (For Swarm stacks, the equivalent placement is the
+   and `setting device rule`. (For Swarm stacks, the equivalent placement is the
    service's top-level `labels:`, which Docker copies into every task container;
    `docker service create --container-label` writes to the same location. Do not
    use `deploy.labels:` or `docker service create --label`: those are service
@@ -118,6 +118,6 @@ or deployment behavior:
    (`docker ps --filter 'name=^swarm-device-access$'`; without the anchors the
    filter also matches the wrapper task's container).
 
-9. Verify observability by starting with `-metrics-addr :9090` and
-   `-debug-addr :6060`, then checking `/healthz`, `/readyz`, `/metrics`, and
+9. Verify observability by starting with `-metrics-addr 127.0.0.1:9090` and
+   `-debug-addr 127.0.0.1:6060`, then checking `/healthz`, `/readyz`, `/metrics`, and
    `/debug/pprof/`.

@@ -4,10 +4,11 @@
 
 `swarm-device-access` is a privileged Linux daemon that fills a gap in Docker Swarm: Swarm services silently ignore `devices:` and
 `device_cgroup_rules:` in compose specs, yet the kernel still enforces cgroup device controls. A container that bind-mounts `/dev/nvidia0` can _see_
-the device file but cannot open it (`EACCES`).
+the device file but cannot open it (`EPERM`).
 
-The daemon watches Docker for container-start events and, for each new container that bind-mounts something under `/dev/`, attaches an extra BPF
-`BPF_CGROUP_DEVICE` program to the container's cgroup that allows read/write/mknod on the mounted device's major/minor pair.
+The daemon watches Docker for container events and, for every running container that bind-mounts something under `/dev/`, makes the device grants
+in the container's cgroup equal exactly what the current policy allows it: on cgroup v2 by wrapping the runtime's `BPF_CGROUP_DEVICE` filter, on
+cgroup v1 through `devices.allow` and `devices.deny`.
 
 ## High-level flow
 
@@ -16,72 +17,107 @@ Docker daemon
     |
     | container start / unpause / die / destroy events (Unix socket)
     v
-+---------------------------------------------------+
-|  cmd/swarm-device-access/main.go                  |
-|                                                   |
-|  run()                                            |
-|   ├─ Events(Since=now)            ← subscribe     |
-|   ├─ processExistingContainers()  ← startup       |
-|   ├─ startReloadWatcher()         ← goroutine     |
-|   └─ listenEvents()               ← main loop     |
-|          │                                        |
-|          │  per container-start event             |
-|          ▼                                        |
-|  processContainer(id, procRootPath, dryRun)        |
-|   ├─ ContainerInspect  → PID, Mounts              |
-|   ├─ GetDeviceCGroupVersion(procRootPath, pid)     |
-|   ├─ New(version) → Interface                     |
-|   ├─ GetDeviceCGroupMountPath(procRootPath, pid)   |
-|   └─ for each /dev/... mount:                     |
-|        enumerate names (complete, ≤ 4096)         |
-|        each name: openat2 beneath /dev → fstat    |
-|          → sysfs DEVNAME → deny/allow on names    |
-|        aggregate per device across mounts         |
-|        applyMount → applyDeviceRules              |
-|          └─ api.AddDeviceRules(cgroupPath, rules)  |
-+---------------------------------------------------+
++---------------------------------------------------------------+
+| cmd/swarm-device-access/main.go                                |
+|   flags + config file → config.Store; SIGHUP → reloader        |
+|   processor.Processor; daemon.Run                              |
++---------------------------------------------------------------+
+    |
+    v
++---------------------------------------------------------------+
+| internal/daemon                                                |
+|   Run                                                          |
+|    ├─ subscribe (Events, Since=now)       ← before the listing |
+|    ├─ coordinator.run                     ← one goroutine      |
+|    │    passes: list running containers, reconcile each        |
+|    │    (startup, SIGHUP via PublishAndReconcile, systemd      |
+|    │    reload), retries with backoff, lifecycle sweep         |
+|    ├─ startReloadWatcher (systemd DBus)   ← requests a pass    |
+|    └─ listenEvents → consumeEvents        ← reconnect loop     |
+|         └─ coordinator.handleEvent                             |
+|              start/unpause → reconcileContainer → processOne   |
+|              die/destroy   → terminateContainer                |
++---------------------------------------------------------------+
+    |
+    v
++---------------------------------------------------------------+
+| internal/processor: Processor.Reconcile(id)                    |
+|   ContainerInspect → labels, State, Mounts                     |
+|   computeDesired: policy.Enabled, CollectMountRules per /dev   |
+|     mount (openat2 beneath /dev → fstat → sysfs DEVNAME →      |
+|     deny/allow on every name), aggregate per device            |
+|   applyPinned: pidfd → /proc/<pid>/cgroup → OpenCgroup →       |
+|     re-verify → cgroup.Interface.SetDeviceRules(handle, rules) |
++---------------------------------------------------------------+
     |                          |
     | cgroup v1                | cgroup v2
     v                          v
-devices.allow write     BPF_CGROUP_DEVICE attach
-(cgroupv1.go)           (cgroupv2.go + ebpf.go)
+devices.allow / devices.deny   owned wrapper around the runtime's
+(v1.go, v1set.go, ledger.go)   BPF_CGROUP_DEVICE filter
+                               (v2.go, v2plan.go, v2ops.go, owned.go, ebpf.go)
 ```
+
+### Reconciliation
+
+`Processor.Reconcile` is the one idempotent path every trigger runs: a start or unpause event, the startup pass, a systemd reload and a config
+reload. It computes the complete desired set for the container under the current config and sets exactly that set, including none at all: a
+container that policy disables or does not opt in, one with invalid labels, and one whose device set cannot be established all get the empty
+set, so an earlier grant is revoked rather than kept. A container that is not running, or that Docker cannot report on, has its grants revoked in
+the cgroup its lifecycle was last verified in (`Processor.Terminate` for `die` and `destroy`, a periodic `Processor.Sweep` for records whose
+cgroup is gone).
+
+Before changing a cgroup the processor pins the container's process with a pidfd, resolves the cgroup from `/proc/<pid>/cgroup`, opens it as a
+directory handle, and re-checks that the process is alive, that Docker still reports it as the container's process with the same start time and,
+for a grant, that it is in that cgroup. All mutation goes through the handle, never the path again.
+
+### Coordinator
+
+The coordinator (`internal/daemon/coordinator.go`) is the single owner of reconciliation passes. Startup, `SIGHUP` (through
+`Processor.PublishAndReconcile`, which publishes the new config generation) and systemd reloads only request a pass; one goroutine runs them.
+A request arriving while a pass runs makes that pass stop after its current container and start again under the newest request. Containers
+whose reconcile failed are retried with backoff (`sda_reconcile_pending_containers`); `sda_reload_incomplete` is 1 until a pass for the latest
+request has visited every running container, and `config reload complete` is logged when it has.
+
+Events go through the coordinator too (`handleEvent`). Every reconcile or cleanup of a container first reserves it, so work requested for a
+container that is already being handled coalesces into one follow-up instead of running twice.
 
 ### Startup back-fill
 
-On daemon start, `processExistingContainers` calls `ContainerList` and applies rules to every already-running container. Without this, containers that
-started before the daemon would have no device access until their next restart.
+On daemon start, the first pass lists the running containers and reconciles each one. Without this, containers that started before the daemon
+would have no device access until their next restart, and grants a previous instance left behind would stay.
 
-The Docker event stream is opened **before** the enumeration, with `Since` set to the time captured just before subscribing. A container that starts
+The Docker event stream is opened **before** the listing, with `Since` set to the time captured just before subscribing. A container that starts
 while the list is being processed is therefore still delivered as a `start` event instead of falling into the gap between the list and the
-subscription (the typical node-boot case). The client delivers events on an unbuffered channel, so events that arrive during the enumeration wait
-until the event loop starts consuming them; nothing is dropped.
+subscription (the typical node-boot case). The client delivers events on an unbuffered channel, so events that arrive during the listing wait
+until the event loop starts consuming them; nothing is dropped. `Run` starts consuming events once the first pass has ended.
 
-A `processed map[string]time.Time` records, for every container processed successfully at startup, the time captured just before it was inspected.
-An event for a container in the map is skipped only if its timestamp is not newer than that time: Docker emits `start` after the container is
-running, so an older event was already visible to the startup inspect. A newer event (for example `docker restart` or `unpause` shortly after the
-daemon started) belongs to a new run with a new cgroup and is applied. The entry is removed on the first event for that ID either way, and the whole
-map is cleared after 60s to bound memory. Event time and daemon time come from the same host clock.
+The coordinator's `processed map[string]time.Time` records, for every container a pass reconciled successfully, the time captured just before
+it was inspected. A `start` or `unpause` event for a container in the map is skipped only if its timestamp is not newer than that time: Docker
+emits `start` after the container is running, so an older event was already visible to the inspect. A newer event (for example `docker restart`
+shortly after the daemon started) belongs to a new run with a new cgroup and is applied. The entry is removed by the first event for that ID
+either way, and entries older than `processedTTL` (2 × the 30 s maximum backoff) are ignored and pruned. Event time and daemon time come from
+the same host clock.
 
-Startup and event-driven processing share the same code path (`processOne`), so both record the same metrics and log a `Warn` on failure
-(`could not process running container` at startup, `could not process container` for events).
+Passes, retries and events share the same per-container code path (`processOne`), so all of them record the same metrics and log a `Warn` on
+failure (`could not process running container` in a pass, `could not reconcile pending container` on retry, `could not process container` for
+events).
 
 ### Event loop reconnect
 
 `listenEvents` wraps `consumeEvents` in a reconnect loop with exponential backoff (`1s`→`30s`). If the Docker event stream drops (daemon restart,
-socket error, channel close), the loop reconnects rather than exiting — replacing the upstream `log.Fatal(err)` pattern.
+socket error, channel close), the loop reconnects rather than exiting.
 
-On re-subscription `Since` is set to one nanosecond after the last received event (or the original startup time if no event arrived yet), so events
-emitted during the disconnect are delivered while the last event is not replayed. Replaying it would re-apply rules, and on cgroup v2 every apply
-prepends the rules again, growing the attached programs.
+On re-subscription `Since` is set to one nanosecond after the last received event (or the original startup time if no event arrived yet), so
+events emitted during the disconnect are delivered while the last event is not replayed.
 
-Context cancellation (SIGTERM/SIGINT via `signal.NotifyContext`) exits cleanly at any point.
+Context cancellation (SIGTERM/SIGINT via `signal.NotifyContext`) exits cleanly at any point; `Run` waits for the coordinator, so shutdown does
+not cut off a reconcile in the middle of its cgroup mutation.
 
 ### systemd daemon-reload handling
 
-`systemctl daemon-reload` clears all cgroup BPF programs. The optional DBus watcher (`internal/systemd/`) subscribes to
-`org.freedesktop.systemd1.Manager.Reloading` and triggers a full re-apply when it receives the completion edge (`active=false`). It gracefully
-degrades to a warning when the DBus socket is not mounted.
+`systemctl daemon-reload` can detach cgroup BPF programs. The optional DBus watcher (`internal/systemd/`) subscribes to
+`org.freedesktop.systemd1.Manager.Reloading` and requests a pass when it receives the completion edge (`active=false`). It gracefully degrades
+to a warning when the DBus socket is not mounted.
 
 ## BPF program structure
 
@@ -110,8 +146,17 @@ MOV  R0, 1                           ; allow
 RETURN
 ```
 
-Rules are prepended to any existing program (`BPF_F_ALLOW_MULTI` flag), so the daemon's rules compose with the container runtime's own device filter
-rather than replacing it.
+The rule blocks sit inside an owned wrapper around the runtime's original filter (`internal/cgroup/owned.go`):
+
+```
+HEADER, init, rule blocks, TRAILER, original
+```
+
+A request no rule block allows falls through to the original program, so the runtime's own restrictions still apply. The header and trailer are
+dead stores to `R0` that identify the wrapper (`sda_devfilter` in `bpftool`); on the next change the daemon strips its wrapper back to the
+original and wraps it again, so grants replace each other instead of piling up. The new program is attached with `BPF_F_ALLOW_MULTI` (or
+`BPF_F_REPLACE` where supported) before the old one is detached. The README's Host Requirements section describes what the runtime filter must
+look like for this to work.
 
 ## Device mount collection
 
@@ -162,10 +207,14 @@ symlinks to directories and non-device entries, and `errors` counts per-device f
 
 | Package | Responsibility |
 | --- | --- |
-| `cmd/swarm-device-access` | Daemon entrypoint, event loop, Docker client, apply pipeline |
-| `internal/cgroup` | Device-rule application: cgroup v1 (`devices.allow` write) and v2 (BPF attach). Cgroup version + path detection via `/proc`. NVIDIA-derived code. |
+| `cmd/swarm-device-access` | Entrypoint: flags, settings merge and validation, config file reload on `SIGHUP` (`config.go`), wiring |
+| `internal/config` | Strict YAML loader, runtime config `Store` with generations and its `Publisher` |
+| `internal/policy` | Cross-platform policy evaluation: mode (opt-in/all), label parsing, glob allow/deny (`Denied`, `Authorized`) |
+| `internal/daemon` | Event loop (`Run`, `listenEvents`, `consumeEvents`, `processOne`) and the coordinator that owns passes, retries, the `processed` dedup and container reservations |
+| `internal/processor` | `Reconcile`, `Terminate`, `Sweep`, `PublishAndReconcile`; desired-set computation (`CollectMountRules`, `devfs.go`), process pinning (`pin.go`), lifecycle history (`lifecycle.go`) |
+| `internal/cgroup` | Device-rule application behind `Interface.SetDeviceRules(handle, rules)`: cgroup v1 (`v1.go`, `v1set.go`, `ledger.go`) and v2 (`v2.go`, `v2plan.go`, `v2ops.go`, `owned.go`, `ebpf.go`); cgroup handles (`handle.go`); `/proc` cgroup parsing. NVIDIA-derived code. |
+| `internal/observability` | Prometheus metrics (`Recorder`, nil-safe), `/healthz`, `/readyz`, pprof servers |
 | `internal/logger` | `slog`-based singleton with `text`, `json`, `plain` handlers |
-| `internal/policy` | Cross-platform policy evaluation: mode (opt-in/all), label parsing, glob allow/deny logic |
 | `internal/systemd` | DBus watcher for systemd `Reloading` signal |
 
 ## Policy model
@@ -195,14 +244,15 @@ across daemon restarts.
 | `swarm-device-access.device-allow` | Comma-separated globs narrowing global allow. Empty = inherit. |
 | `swarm-device-access.device-deny` | Comma-separated globs added on top of global deny. |
 
-**Decision rule** for a given container and device path:
+**Decision rule** for a given container and device (see [Device mount collection](#device-mount-collection) for its names):
 
 ```
-enabled = (enable != false) AND (mode=all OR enable=true)
-allowed = NOT global-denied
-       AND NOT container-denied
-       AND (global-allow empty OR path matches global-allow)
-       AND (container-allow empty OR path matches container-allow)
+enabled    = (enable != false) AND (mode=all OR enable=true)
+Denied(p)     = p matches global-deny OR p matches container-deny
+Authorized(p) = (global-allow empty OR p matches global-allow)
+            AND (container-allow empty OR p matches container-allow)
+granted    = no name it was found by (alias, resolved, canonical) is Denied
+         AND Authorized(canonical) AND Authorized(resolved)
 ```
 
 Global is the maximum allowed access; per-container labels can only narrow it. Deny always wins over allow. Invalid label values cause the container to be skipped (fail-closed).
@@ -214,7 +264,7 @@ The daemon **must** run as root with:
 - `--privileged` (or equivalent capabilities: `CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_ADMIN`, `CAP_SYS_RESOURCE`)
 - `--cgroupns=host`, `--pid=host`, `--userns=host`
 - `/sys` bind-mounted at `/host/sys` inside the container
-- `/dev` bind-mounted (so device major/minor can be read via `unix.Stat`)
+- `/dev` bind-mounted (device candidates are opened beneath it with `openat2` and identified with `fstat` and sysfs)
 - `/var/run/docker.sock` bind-mounted
 
 The DBus socket is optional — enables systemd reload handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`; the container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run` symlink.
@@ -223,7 +273,7 @@ The DBus socket is optional — enables systemd reload handling. Mount as `-v /r
 
 ### Prometheus metrics (`--metrics-addr`)
 
-When `-metrics-addr=:9090` is set, the daemon exposes:
+When `-metrics-addr=127.0.0.1:9090` is set, the daemon exposes:
 
 | Endpoint | Description |
 | --- | --- |
@@ -252,7 +302,7 @@ Metrics exposed:
 
 ### pprof debug server (`--debug-addr`)
 
-When `-debug-addr=:6060` is set, the standard Go pprof endpoints are available at `/debug/pprof/*`. Only bind to localhost in production.
+When `-debug-addr=127.0.0.1:6060` is set, the standard Go pprof endpoints are available at `/debug/pprof/*`. Only bind to localhost in production.
 
 ## Dry-run mode
 
@@ -278,10 +328,12 @@ level=INFO msg="dry-run: would set device rules" id=abc rules=1
 3. Confirm a rule was applied:
 
    ```
-   level=DEBUG msg="adding device rule" pid=1234 type=c major=195 minor=0
+   level=DEBUG msg="setting device rule" pid=1234 cgroup=/host/sys/fs/cgroup/... type=c major=195 minor=0
    ```
 
-4. If step 2 fires but step 3 does not, check `cgroup version detected` — if it returns `-1`, the `/proc` parse failed (check `pid: host` is set).
+4. If step 2 fires but step 3 does not, look for `container processed` with `errors` above 0, `device rule failed` or `device set incomplete`
+   (a device whose identity could not be established), and for `cgroup path resolved`; a `/proc` parse failure usually means `pid: host` is
+   not set.
 5. If rules were applied but the container still gets `EACCES`, verify the container is on cgroup v2 and `BPF_F_ALLOW_MULTI` is supported (kernel ≥
    4.15).
 
