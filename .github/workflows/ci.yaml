@@ -8,9 +8,17 @@ concurrency:
   group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
   cancel-in-progress: true
 
+# Nothing by default: every job states the permissions it needs.
+permissions: {}
+
 jobs:
   actionlint:
     runs-on: ubuntu-latest
+    # reviewdog posts findings as pull request review comments
+    # (-reporter=github-pr-review), not as checks.
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -27,6 +35,11 @@ jobs:
 
   pre-commit-hooks:
     runs-on: ubuntu-latest
+    # reviewdog posts findings as pull request review comments
+    # (-reporter=github-pr-review), not as checks.
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -60,6 +73,8 @@ jobs:
   # never be scanned there.
   audit-deps:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -78,6 +93,8 @@ jobs:
   # cannot merge with a failing vet or unit test and only find out at release.
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -97,6 +114,11 @@ jobs:
 
   markdownlint:
     runs-on: ubuntu-latest
+    # reviewdog posts findings as pull request review comments
+    # (-reporter=github-pr-review), not as checks.
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -113,6 +135,11 @@ jobs:
 
   shellcheck:
     runs-on: ubuntu-latest
+    # reviewdog posts findings as pull request review comments
+    # (-reporter=github-pr-review), not as checks.
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -129,6 +156,11 @@ jobs:
 
   yamllint:
     runs-on: ubuntu-latest
+    # reviewdog posts findings as pull request review comments
+    # (-reporter=github-pr-review), not as checks.
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -154,6 +186,9 @@ jobs:
     # merging would need one added here first.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # The action takes no token and only prints annotations.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
