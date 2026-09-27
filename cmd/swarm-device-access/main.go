@@ -132,10 +132,8 @@ func run() int {
 
 	store, publisher := config.NewStore(effective.runtime())
 
-	log := logger.L()
-
 	cfg := store.Load()
-	log.Info("swarm-device-access starting",
+	logger.L().Info("swarm-device-access starting",
 		"version", version,
 		"commit", commit,
 		"date", date,
@@ -149,7 +147,7 @@ func run() int {
 	if cfg.DryRun {
 		// Dry-run has no cgroup view and no saved ownership state, so it
 		// cannot even count what a previous live run left behind.
-		log.Warn(
+		logger.L().Warn(
 			"dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run",
 		)
 	}
@@ -160,7 +158,7 @@ func run() int {
 	// containers.
 	memlockErr := rlimit.RemoveMemlock()
 	if memlockErr != nil {
-		log.Warn(
+		logger.L().Warn(
 			"could not remove RLIMIT_MEMLOCK; loading BPF device filters may fail",
 			"err",
 			memlockErr,
@@ -177,7 +175,7 @@ func run() int {
 	// API version negotiation is the client default; it runs lazily on the first request.
 	cli, err := client.New(client.WithHost("unix://" + effective.DockerSocket))
 	if err != nil {
-		log.Error("docker client init failed", "err", err)
+		logger.L().Error("docker client init failed", "err", err)
 
 		return 1
 	}
@@ -189,7 +187,7 @@ func run() int {
 	// reachable during startup enumeration.
 	stopServers, err := startServers(rootCtx, &effective)
 	if err != nil {
-		log.Error("could not start observability server", "err", err)
+		logger.L().Error("could not start observability server", "err", err)
 
 		return 1
 	}
@@ -222,12 +220,12 @@ func run() int {
 		Metrics: recorder,
 	})
 	if runErr != nil {
-		log.Error("daemon error", "err", runErr)
+		logger.L().Error("daemon error", "err", runErr)
 
 		return 1
 	}
 
-	log.Info("swarm-device-access shutting down")
+	logger.L().Info("swarm-device-access shutting down")
 
 	return 0
 }

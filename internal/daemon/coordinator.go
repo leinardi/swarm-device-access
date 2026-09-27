@@ -290,15 +290,13 @@ func (c *coordinator) redo() {
 func (c *coordinator) pass(ctx context.Context, key passKey) passOutcome {
 	defer c.markFirstPassEnded()
 
-	log := logger.L()
-
 	listCtx, cancelList := context.WithTimeout(ctx, c.timeout)
 	list, err := c.docker.ContainerList(listCtx, client.ContainerListOptions{})
 
 	cancelList()
 
 	if err != nil {
-		log.Warn("could not list containers; reconciliation incomplete, retrying",
+		logger.L().Warn("could not list containers; reconciliation incomplete, retrying",
 			"err", fmt.Errorf("list containers: %w", err),
 			"generation", key.generation)
 		c.warnIncomplete()
@@ -306,7 +304,7 @@ func (c *coordinator) pass(ctx context.Context, key passKey) passOutcome {
 		return passListFailed
 	}
 
-	log.Debug("reconciling running containers",
+	logger.L().Debug("reconciling running containers",
 		"count", len(list.Items), "generation", key.generation, "epoch", key.epoch)
 
 	for idx := range list.Items {
@@ -573,10 +571,8 @@ func (c *coordinator) finishPass(key passKey) {
 // reportLocked logs completion once per request when nothing is left for
 // the latest request, and warns while anything is.
 func (c *coordinator) reportLocked() {
-	log := logger.L()
-
 	if c.incomplete || len(c.pending) > 0 {
-		log.Warn("reconciliation incomplete; retrying",
+		logger.L().Warn("reconciliation incomplete; retrying",
 			"pending_containers", len(c.pending),
 			"reload_incomplete", c.incomplete,
 			"generation", c.latest.generation)

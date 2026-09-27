@@ -77,8 +77,6 @@ func run(
 	opts Options,
 	startWatcher func(context.Context, Options, func()),
 ) error {
-	log := logger.L()
-
 	since := time.Now()
 
 	// The client delivers messages on an unbuffered channel, so events that
@@ -88,7 +86,7 @@ func run(
 	// events of the enumeration window are still replayed.
 	stream, cancelStream, subErr := subscribe(ctx, opts.Docker, formatSince(since), opts.timeout())
 	if subErr != nil {
-		log.Warn("could not subscribe to docker events; will retry", "err", subErr)
+		logger.L().Warn("could not subscribe to docker events; will retry", "err", subErr)
 	}
 
 	coord := newCoordinator(opts.Docker, processorApply(opts.Proc), opts.Metrics, opts.timeout())
@@ -137,11 +135,9 @@ func processorApply(proc *processor.Processor) applyFn {
 // on hosts without systemd or without the DBus socket mounted, this logs a
 // warning and returns.
 func startReloadWatcher(ctx context.Context, _ Options, trigger func()) {
-	log := logger.L()
-
 	watcher, err := systemd.Open()
 	if err != nil {
-		log.Warn("systemd reload handling disabled", "err", err)
+		logger.L().Warn("systemd reload handling disabled", "err", err)
 
 		return
 	}
@@ -150,7 +146,7 @@ func startReloadWatcher(ctx context.Context, _ Options, trigger func()) {
 		defer func() {
 			closeErr := watcher.Close()
 			if closeErr != nil {
-				log.Warn("close systemd watcher", "err", closeErr)
+				logger.L().Warn("close systemd watcher", "err", closeErr)
 			}
 		}()
 

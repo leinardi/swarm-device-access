@@ -136,17 +136,16 @@ func newDebugServer() *http.Server {
 
 // serve runs srv on ln until ctx is done or the returned stop is called.
 func serve(ctx context.Context, name string, listener net.Listener, srv *http.Server) func() {
-	log := logger.L()
 	served := make(chan struct{})
 
-	log.Info(name+" server listening", "addr", listener.Addr().String())
+	logger.L().Info(name+" server listening", "addr", listener.Addr().String())
 
 	go func() {
 		defer close(served)
 
 		err := srv.Serve(listener)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error(name+" server error", "err", err)
+			logger.L().Error(name+" server error", "err", err)
 		}
 	}()
 
@@ -156,7 +155,7 @@ func serve(ctx context.Context, name string, listener net.Listener, srv *http.Se
 
 		err := srv.Shutdown(shutCtx)
 		if err != nil {
-			log.Warn(name+" server shutdown error", "err", err)
+			logger.L().Warn(name+" server shutdown error", "err", err)
 		}
 
 		<-served

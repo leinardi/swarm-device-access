@@ -160,12 +160,11 @@ func (w *Watcher) Watch(ctx context.Context, onReload func()) {
 // completes while it runs is absorbed into one more run after it
 // finishes. watch returns only after the last run has finished.
 func watch(ctx context.Context, sigCh <-chan *dbus.Signal, owner string, onReload func()) {
-	log := logger.L()
 	runs := &coalescer{run: onReload}
 
 	defer runs.wait()
 
-	log.Debug("systemd reload watcher started", "systemd", owner)
+	logger.L().Debug("systemd reload watcher started", "systemd", owner)
 
 	for {
 		select {
@@ -174,13 +173,13 @@ func watch(ctx context.Context, sigCh <-chan *dbus.Signal, owner string, onReloa
 
 		case sig, ok := <-sigCh:
 			if !ok {
-				log.Warn("systemd signal channel closed; reload watcher exiting")
+				logger.L().Warn("systemd signal channel closed; reload watcher exiting")
 
 				return
 			}
 
 			if newOwner, changed := ownerChange(sig); changed {
-				log.Debug("systemd bus name changed owner", "old", owner, "new", newOwner)
+				logger.L().Debug("systemd bus name changed owner", "old", owner, "new", newOwner)
 				owner = newOwner
 
 				continue
@@ -190,7 +189,7 @@ func watch(ctx context.Context, sigCh <-chan *dbus.Signal, owner string, onReloa
 				continue
 			}
 
-			log.Info("systemd reload completed; re-applying device rules")
+			logger.L().Info("systemd reload completed; re-applying device rules")
 			runs.trigger()
 		}
 	}

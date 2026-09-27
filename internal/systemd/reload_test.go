@@ -19,11 +19,16 @@
 package systemd
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
+
+	"github.com/leinardi/swarm-device-access/internal/logger"
 )
 
 func TestIsReloadCompleted(t *testing.T) {
@@ -225,5 +230,47 @@ func TestWatch_CoalescesWhileRunning(t *testing.T) {
 
 	if got := calls.Load(); got != 2 {
 		t.Errorf("onReload ran %d times, want 2 (the running one and one trailing run)", got)
+	}
+}
+
+// A reload of the log settings (logger.Set) reaches a watcher that is
+// already running: it logs through logger.L at each site.
+func TestWatch_UsesTheCurrentLogger(t *testing.T) {
+	prev := logger.L()
+
+	t.Cleanup(func() { logger.Set(prev) })
+
+	var before, after bytes.Buffer
+
+	logger.Set(slog.New(slog.NewTextHandler(&before, nil)))
+
+	sigCh := make(chan *dbus.Signal)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		watch(context.Background(), sigCh, testOwner, func() {})
+	}()
+
+	// Each send returns once the previous signal has been handled.
+	sigCh <- completed(testOwner, systemdObjectPath)
+
+	sigCh <- completed(":1.99", systemdObjectPath)
+
+	logger.Set(slog.New(slog.NewTextHandler(&after, nil)))
+
+	sigCh <- completed(testOwner, systemdObjectPath)
+
+	close(sigCh)
+	<-done
+
+	const msg = "systemd reload completed"
+	if strings.Count(before.String(), msg) != 1 || strings.Count(after.String(), msg) != 1 {
+		t.Errorf(
+			"want one line per logger; before:\n%s\nafter:\n%s",
+			before.String(),
+			after.String(),
+		)
 	}
 }

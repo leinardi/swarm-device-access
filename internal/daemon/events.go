@@ -96,7 +96,6 @@ func listenEvents(
 	stream client.EventsResult,
 	cancelStream context.CancelFunc,
 ) {
-	log := logger.L()
 	backoff := minBackoff
 	timeout := opts.timeout()
 
@@ -123,7 +122,7 @@ func listenEvents(
 					return
 				}
 
-				log.Error("could not subscribe to docker events, retrying",
+				logger.L().Error("could not subscribe to docker events, retrying",
 					"err", subErr, "backoff", backoff)
 				opts.Metrics.IncDockerReconnect()
 				observability.SetReady(false)
@@ -138,12 +137,12 @@ func listenEvents(
 			// gap can be lost: re-list and reconcile every running
 			// container. The coordinator's processed map skips replayed
 			// start events the pass already covered.
-			log.Info("docker event stream re-subscribed; reconciling running containers")
+			logger.L().Info("docker event stream re-subscribed; reconciling running containers")
 			coord.requestReenumeration()
 		}
 
 		observability.SetReady(true)
-		log.Debug("subscribed to docker events")
+		logger.L().Debug("subscribed to docker events")
 
 		disconnected := consumeEvents(
 			ctx,
@@ -239,8 +238,6 @@ func consumeEvents(
 	lastEventNano *int64,
 	metrics *observability.Recorder,
 ) bool {
-	log := logger.L()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -263,7 +260,7 @@ func consumeEvents(
 				return false
 			}
 
-			log.Error("docker events stream error, reconnecting",
+			logger.L().Error("docker events stream error, reconnecting",
 				"err", streamErr, "backoff", *backoff)
 			metrics.IncDockerReconnect()
 			observability.SetReady(false)
@@ -274,7 +271,7 @@ func consumeEvents(
 
 		case msg, ok := <-msgs:
 			if !ok {
-				log.Warn("docker events channel closed, reconnecting",
+				logger.L().Warn("docker events channel closed, reconnecting",
 					"backoff", *backoff)
 				metrics.IncDockerReconnect()
 				observability.SetReady(false)
