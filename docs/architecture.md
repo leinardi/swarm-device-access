@@ -135,6 +135,38 @@ daemon restarting, for one), is retried with a backoff of 1 s doubling to 5 min,
 first failure is logged at `Warn`, later ones at `Debug`. Every successful subscription requests a pass, because a reload that completed while
 the watcher was not subscribed, including one during the startup pass, sent a signal nobody received.
 
+## Launcher
+
+Swarm rejects `privileged`, `cgroup: host`, `pid: host` and `userns_mode: host` on services, so the
+Swarm service runs the image as `swarm-device-access launch [launch flags] -- [daemon flags]`,
+unprivileged and with only the Docker socket (`internal/launcher`):
+
+1. **Self-identification.** The launcher finds its container ID in `/proc/self/mountinfo`: the root of
+   the `/etc/hostname`, `/etc/hosts` and `/etc/resolv.conf` mounts is
+   `…/containers/<64 hex>/<file>` whatever the data-root. It inspects that container and takes its
+   `Image`, the `sha256:` image ID. No match, two IDs, a failed inspect or a non-ID image all exit
+   non-zero.
+2. **Stale-daemon cleanup.** Every container named `swarm-device-access` is checked. A daemon (label
+   `io.github.leinardi.swarm-device-access.role=daemon`) is removed only when its launcher (label
+   `io.github.leinardi.swarm-device-access.launcher`) is confirmed gone (`NotFound`) or not running,
+   or is this very container restarted; one left by the old `sh` wrapper (image title
+   `swarm-device-access`, no role label) is removed too. A live owner, any other inspect error or a
+   foreign container aborts the launcher.
+3. **Create, attach, wait, start**, in the order the `docker run` CLI uses. `daemonSpec` is the one
+   source of the daemon's privileged set: the image ID, `Privileged`, host cgroup, PID and user
+   namespaces, network `none` (or `host` with `-host-network`), `AutoRemove`, a 10s stop timeout,
+   and bind `Mounts` (never `Binds`, so a missing source fails the create) for the Docker socket,
+   `/sys` at `/host/sys`, `/dev`, and optionally the DBus socket and a read-only config directory.
+   The attach copy goroutine starts before `ContainerStart`, and `ContainerWait(removed)` is
+   registered before it, so no output and no exit is missed. Any failure after the create removes
+   the created container.
+4. **Supervision.** The attach and wait streams each run on their own context, detached from the
+   signal context; only their establishment is bounded (`DockerCallTimeout`). The launcher returns
+   the daemon's status after it is removed and its output drained. `SIGTERM`, a broken wait stream
+   or a lost log stream stop the daemon **by ID**, and every shutdown shares one 20s budget (a 10s
+   stop plus `DockerCallTimeout`) for the stop, the wait for the removal and the drain, inside the
+   compose files' `stop_grace_period: 30s`.
+
 ## BPF program structure
 
 For cgroup v2 hosts, device control is implemented via `BPF_CGROUP_DEVICE` programs. The code in `internal/cgroup/ebpf.go` (ported from
@@ -224,7 +256,8 @@ symlinks to directories and non-device entries, and `errors` counts per-device f
 
 | Package | Responsibility |
 | --- | --- |
-| `cmd/swarm-device-access` | Entrypoint: flags, settings merge and validation, config file reload on `SIGHUP` (`config.go`), wiring |
+| `cmd/swarm-device-access` | Entrypoint: flags, settings merge and validation, config file reload on `SIGHUP` (`config.go`), wiring; `launch` subcommand (`launch.go`) |
+| `internal/launcher` | Launcher mode: self-identification, the daemon container spec (`daemonSpec`, the privileged set), stale-daemon cleanup, attach/wait/start and supervision |
 | `internal/config` | Strict YAML loader, runtime config `Store` with generations and its `Publisher` |
 | `internal/policy` | Cross-platform policy evaluation: mode (opt-in/all), label parsing, glob allow/deny (`Denied`, `Authorized`) |
 | `internal/daemon` | Event loop (`Run`, `listenEvents`, `consumeEvents`, `processOne`) and the coordinator that owns passes, retries, the `processed` dedup and container reservations |
