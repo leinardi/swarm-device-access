@@ -156,3 +156,30 @@ func TestProcessContainer_InaccessibleFiltersIsRetryableError(t *testing.T) {
 		t.Errorf("error %q does not carry the reason", err)
 	}
 }
+
+func TestProcessContainer_OwnedBlockConflictIsLoggedWithRemedy(t *testing.T) {
+	buf := captureLogger(t)
+	fake := &failingCgroup{err: fmt.Errorf("%w: trailer missing", cgroup.ErrOwnedBlockConflict)}
+
+	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	if !errors.Is(err, cgroup.ErrOwnedBlockConflict) ||
+		!strings.Contains(err.Error(), "owned_block_conflict") {
+		t.Fatalf("err = %v, want a retryable ErrOwnedBlockConflict carrying the reason", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "level=ERROR") || !strings.Contains(out, "restart the container") ||
+		!strings.Contains(out, "cgroup=") {
+		t.Errorf("expected ERROR with cgroup and remedy, got:\n%s", out)
+	}
+}
+
+func TestProcessContainer_NotWrappableIsRetryableError(t *testing.T) {
+	fake := &failingCgroup{err: fmt.Errorf("%w: uses maps", cgroup.ErrProgramNotWrappable)}
+
+	err := devNullProcessor(t, fake).ProcessContainer(context.Background(), "abc")
+	if !errors.Is(err, cgroup.ErrProgramNotWrappable) ||
+		!strings.Contains(err.Error(), "program_not_wrappable") {
+		t.Fatalf("err = %v, want ErrProgramNotWrappable with its reason", err)
+	}
+}

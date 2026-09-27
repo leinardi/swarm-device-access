@@ -61,10 +61,28 @@ type fakeOps struct {
 	calls  []string
 	opened []*fakeProg
 	loads  int
+
+	// insts holds each program's instructions; a name without an entry is
+	// a runtime original (runtimeOriginal).
+	insts map[string]asm.Instructions
+	names map[string]string // program name each loaded program was given
+	meta  progMeta
+}
+
+// runtimeOriginal is a minimal runtime device filter: deny everything.
+func runtimeOriginal() asm.Instructions {
+	return asm.Instructions{asm.Mov.Imm32(asm.R0, 0), asm.Return()}
 }
 
 func newFakeOps(attached ...string) *fakeOps {
-	return &fakeOps{attached: attached, flags: unix.BPF_F_ALLOW_MULTI, errs: map[string]error{}}
+	return &fakeOps{
+		attached: attached,
+		flags:    unix.BPF_F_ALLOW_MULTI,
+		errs:     map[string]error{},
+		insts:    map[string]asm.Instructions{},
+		names:    map[string]string{},
+		meta:     progMeta{mapIDsKnown: true},
+	}
 }
 
 func (f *fakeOps) open(name string) *fakeProg {
@@ -93,7 +111,7 @@ func nameOf(handle progHandle) string {
 }
 
 //nolint:ireturn // implements v2ops.load
-func (f *fakeOps) load(*ebpf.ProgramSpec) (progHandle, error) {
+func (f *fakeOps) load(spec *ebpf.ProgramSpec) (progHandle, error) {
 	f.loads++
 	name := fmt.Sprintf("N%d", f.loads)
 
@@ -104,6 +122,9 @@ func (f *fakeOps) load(*ebpf.ProgramSpec) (progHandle, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	f.insts[name] = slices.Clone(spec.Instructions)
+	f.names[name] = spec.Name
 
 	return f.open(name), nil
 }
@@ -159,8 +180,13 @@ func (f *fakeOps) detach(prog progHandle, _ int) error {
 	return nil
 }
 
-func (f *fakeOps) instructions(progHandle) (asm.Instructions, error) {
-	return asm.Instructions{asm.Mov.Imm32(asm.R0, 0), asm.Return()}, nil
+func (f *fakeOps) instructions(prog progHandle) (asm.Instructions, progMeta, error) {
+	insts, ok := f.insts[nameOf(prog)]
+	if !ok {
+		insts = runtimeOriginal()
+	}
+
+	return slices.Clone(insts), f.meta, nil
 }
 
 func (f *fakeOps) assertAllClosed(t *testing.T) {
@@ -189,7 +215,7 @@ func probeIn(state int32) *replaceProbe {
 func run(ops *fakeOps, probe *replaceProbe) error {
 	c := &cgroupv2{ops: ops, replace: probe}
 
-	return c.addDeviceRules(3, testRules())
+	return c.setDeviceRules(3, "/sys/fs/cgroup/test", testRules())
 }
 
 func assertCalls(t *testing.T, ops *fakeOps, want ...string) {

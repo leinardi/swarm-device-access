@@ -68,7 +68,9 @@ type v2ops interface {
 	// replacement of that program.
 	attach(prog progHandle, dirFD int, flags uint32, replace progHandle) error
 	detach(prog progHandle, dirFD int) error
-	instructions(prog progHandle) (asm.Instructions, error)
+	// instructions returns the program's translated instructions and what
+	// the reloadability gate needs to know about its maps.
+	instructions(prog progHandle) (asm.Instructions, progMeta, error)
 }
 
 // kernelProg adapts *ebpf.Program to progHandle.
@@ -164,15 +166,19 @@ func (kernelOps) detach(prog progHandle, dirFD int) error {
 	return DetachCgroupDeviceFilter(kprog, dirFD)
 }
 
-func (kernelOps) instructions(prog progHandle) (asm.Instructions, error) {
+func (kernelOps) instructions(prog progHandle) (asm.Instructions, progMeta, error) {
 	kprog, err := kernelProgram(prog)
 	if err != nil {
-		return nil, err
+		return nil, progMeta{}, err
+	}
+
+	if !kernelDumpsSanitized() {
+		return nil, progMeta{}, fmt.Errorf("%w: kernel older than 4.16", ErrProgramNotWrappable)
 	}
 
 	info, err := kprog.Info()
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, progMeta{}, fmt.Errorf(
 			"unable to get Info() of the original device filters program: %w",
 			err,
 		)
@@ -180,13 +186,41 @@ func (kernelOps) instructions(prog progHandle) (asm.Instructions, error) {
 
 	insts, err := info.Instructions()
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, progMeta{}, fmt.Errorf(
 			"unable to get the instructions of the original device filters program: %w",
 			err,
 		)
 	}
 
-	return insts, nil
+	mapIDs, known := info.MapIDs()
+
+	return insts, progMeta{mapIDsKnown: known, mapCount: len(mapIDs)}, nil
+}
+
+// kernelDumpsSanitized reports whether the running kernel is 4.16 or newer,
+// the first release whose translated dumps of unprivileged-style programs
+// are sanitized consistently enough to be loaded back.
+func kernelDumpsSanitized() bool {
+	var uname unix.Utsname
+
+	err := unix.Uname(&uname)
+	if err != nil {
+		return false
+	}
+
+	return kernelAtLeast(unix.ByteSliceToString(uname.Release[:]), 4, 16)
+}
+
+// kernelAtLeast parses the leading "major.minor" of a kernel release string.
+func kernelAtLeast(release string, wantMajor, wantMinor int) bool {
+	var major, minor int
+
+	_, err := fmt.Sscanf(release, "%d.%d", &major, &minor)
+	if err != nil {
+		return false
+	}
+
+	return major > wantMajor || (major == wantMajor && minor >= wantMinor)
 }
 
 // Replace-support states for replaceProbe.

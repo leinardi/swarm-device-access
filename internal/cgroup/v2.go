@@ -29,8 +29,9 @@ import (
 	"strings"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/asm"
 	"golang.org/x/sys/unix"
+
+	"github.com/leinardi/swarm-device-access/internal/logger"
 )
 
 const (
@@ -150,12 +151,22 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 	return "", errNoCgroupV2Entry
 }
 
-// SetDeviceRules adds rules to the device filter of the cgroup behind handle.
+// SetDeviceRules makes this daemon's grants in the device filters of the
+// cgroup behind handle equal exactly rules.
 //
-// It is still grant-only: rules are prepended to the attached programs, and
-// earlier grants are not replaced or revoked. An empty rule set is a no-op.
+// Each attached program is either one of this daemon's wrappers (see
+// owned.go), which is stripped back to the runtime original it wraps, or an
+// unmarked program, which is the original itself. Non-empty rules replace
+// every program with a fresh wrapper around its original; empty rules
+// replace every wrapper with its bare original and leave unmarked programs
+// alone, so a cgroup this daemon never touched is never touched. Nothing
+// but the programs themselves carries state, so this works the same after
+// a daemon restart.
 //
-// Every attached program is replaced by a copy with the rules prepended.
+// Unmarked programs are never interpreted: a wrapper written by a version
+// that predates the ownership markers looks exactly like a runtime program,
+// so its grants are kept until the container restarts.
+//
 // Unlike NVIDIA's upstream code, which detaches every program before
 // attaching the replacements because it runs strictly before the container
 // starts, this daemon mutates live containers: detaching first would leave
@@ -163,14 +174,17 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 // failed or the daemon died. Programs are therefore replaced pairwise, each
 // new program attached (or atomically swapped in) before its original goes.
 func (c *cgroupv2) SetDeviceRules(handle *CgroupHandle, rules []DeviceRule) error {
-	if len(rules) == 0 {
-		return nil
-	}
-
-	return c.addDeviceRules(handle.fd, rules)
+	return c.setDeviceRules(handle.fd, handle.Identity().Path, rules)
 }
 
-func (c *cgroupv2) addDeviceRules(dirFD int, rules []DeviceRule) error {
+// replacement is the planned new program for one attached program.
+type replacement struct {
+	old  progHandle
+	raw  []byte
+	name string
+}
+
+func (c *cgroupv2) setDeviceRules(dirFD int, cgroupPath string, rules []DeviceRule) error {
 	// Find any existing eBPF device filter programs attached to this cgroup.
 	oldProgs, total, inaccessible, attachFlags, err := c.ops.query(dirFD)
 	if err != nil {
@@ -184,6 +198,8 @@ func (c *cgroupv2) addDeviceRules(dirFD int, rules []DeviceRule) error {
 	switch {
 	case inaccessible > 0:
 		return fmt.Errorf("%w: %d of %d programs", ErrFiltersInaccessible, inaccessible, total)
+	case total == 0 && len(rules) == 0:
+		return nil
 	case total == 0:
 		return ErrFilterMissing
 	case attachFlags&unix.BPF_F_ALLOW_MULTI == 0:
@@ -194,28 +210,35 @@ func (c *cgroupv2) addDeviceRules(dirFD int, rules []DeviceRule) error {
 		)
 	}
 
-	// Build every replacement before touching the cgroup, so a generation or
-	// load failure mutates nothing.
-	newProgs := make([]progHandle, 0, len(oldProgs))
-	defer func() { closeAll(newProgs) }()
+	// Plan every replacement before touching the cgroup: a conflict, an
+	// unwrappable program or a load failure anywhere mutates nothing.
+	plans := make([]replacement, 0, len(oldProgs))
 
 	for _, oldProg := range oldProgs {
 		var (
-			oldInsts asm.Instructions
-			newProg  progHandle
+			plan replacement
+			keep bool
 		)
 
-		oldInsts, err = c.ops.instructions(oldProg)
+		plan, keep, err = c.planReplacement(oldProg, cgroupPath, rules)
 		if err != nil {
 			return err
 		}
 
-		newProg, err = c.generateNewProgram(rules, oldInsts)
+		if !keep {
+			plans = append(plans, plan)
+		}
+	}
+
+	newProgs := make([]progHandle, 0, len(plans))
+	defer func() { closeAll(newProgs) }()
+
+	for _, plan := range plans {
+		var newProg progHandle
+
+		newProg, err = c.loadCanonical(plan.raw, plan.name)
 		if err != nil {
-			return fmt.Errorf(
-				"unable to generate new device filter program from existing programs: %w",
-				err,
-			)
+			return err
 		}
 
 		newProgs = append(newProgs, newProg)
@@ -225,19 +248,110 @@ func (c *cgroupv2) addDeviceRules(dirFD int, rules []DeviceRule) error {
 	// every program, so a half-replaced set is narrower, never wider (an
 	// original not yet replaced masks the new grant). A failure therefore
 	// stops here without undoing earlier pairs; a retry completes the rest.
-	for idx := range oldProgs {
-		err = c.swap(dirFD, oldProgs[idx], newProgs[idx])
+	for idx, plan := range plans {
+		err = c.swap(dirFD, plan.old, newProgs[idx])
 		if err != nil {
 			return fmt.Errorf(
 				"replace device filter program %d of %d: %w",
 				idx+1,
-				len(oldProgs),
+				len(plans),
 				err,
 			)
 		}
 	}
 
 	return nil
+}
+
+// planReplacement decides what replaces oldProg. keep reports that oldProg
+// stays as it is (an unmarked program under empty rules).
+func (c *cgroupv2) planReplacement(
+	oldProg progHandle,
+	cgroupPath string,
+	rules []DeviceRule,
+) (replacement, bool, error) {
+	insts, meta, err := c.ops.instructions(oldProg)
+	if err != nil {
+		return replacement{}, false, err
+	}
+
+	raw, err := canonicalBytes(insts)
+	if err != nil {
+		return replacement{}, false, err
+	}
+
+	owned, isOwned, err := parseOwned(raw)
+	if err != nil {
+		return replacement{}, false, err
+	}
+
+	if !isOwned && len(rules) == 0 {
+		return replacement{}, true, nil
+	}
+
+	original := raw
+	if isOwned {
+		original = owned.original
+	}
+
+	origInsts, err := fromCanonical(original)
+	if err != nil {
+		return replacement{}, false, err
+	}
+
+	err = checkWrappable(origInsts, meta)
+	if err != nil {
+		return replacement{}, false, err
+	}
+
+	if len(rules) == 0 {
+		return replacement{old: oldProg, raw: original}, false, nil
+	}
+
+	var nonce uint64
+
+	if isOwned {
+		nonce = owned.nonce
+	} else {
+		nonce, err = newNonce()
+		if err != nil {
+			return replacement{}, false, err
+		}
+
+		logger.L().
+			Info("wrapping device filter with no prior owned block; pre-upgrade grants, if any, are not managed",
+				"cgroup", cgroupPath)
+	}
+
+	wrapped, err := emitOwned(rules, nonce, original)
+	if err != nil {
+		return replacement{}, false, fmt.Errorf(
+			"unable to generate new device filter program: %w",
+			err,
+		)
+	}
+
+	return replacement{old: oldProg, raw: wrapped, name: ownedProgramName}, false, nil
+}
+
+// loadCanonical loads a program from canonical bytes. A verifier rejection
+// is returned as is, before anything is attached.
+//
+//nolint:ireturn // progHandle hides the kernel handle so the swap logic can be tested with fakes
+func (c *cgroupv2) loadCanonical(raw []byte, name string) (progHandle, error) {
+	insts, err := fromCanonical(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	spec := &ebpf.ProgramSpec{
+		Name:         name,
+		Type:         ebpf.CGroupDevice,
+		Instructions: insts,
+		License:      bpfProgramLicense,
+	}
+
+	return c.ops.load(spec)
 }
 
 // swap replaces oldProg with newProg on dirFD: atomically when the kernel
@@ -279,30 +393,6 @@ func (c *cgroupv2) swap(dirFD int, oldProg, newProg progHandle) error {
 	}
 
 	return detachErr
-}
-
-//nolint:ireturn // progHandle hides the kernel handle so the swap logic can be tested with fakes
-func (c *cgroupv2) generateNewProgram(
-	rules []DeviceRule,
-	oldInsts asm.Instructions,
-) (progHandle, error) {
-	// Prepend instructions for the new devices to the original set of instructions.
-	newInsts, err := PrependDeviceFilter(rules, oldInsts)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"unable to prepend new device filters to the original device filters program: %w",
-			err,
-		)
-	}
-
-	// Generate new eBPF program for the merged device filter instructions.
-	spec := &ebpf.ProgramSpec{
-		Type:         ebpf.CGroupDevice,
-		Instructions: newInsts,
-		License:      bpfProgramLicense,
-	}
-
-	return c.ops.load(spec)
 }
 
 func closeAll(progs []progHandle) {

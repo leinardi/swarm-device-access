@@ -75,6 +75,27 @@ than removing it first, so the container is never left unfiltered. That needs:
   programs, and such policies are unsupported.
 - A device filter attached at all. A container whose cgroup has none (for
   example after `systemctl daemon-reload` wiped it) is not granted anything.
+- A device filter made only of the instructions device filters normally use
+  (context loads, simple ALU, jumps inside the program, exit; no helper calls,
+  maps or 64-bit immediates) on Linux 4.16 or newer. The daemon rebuilds the
+  runtime's filter from the kernel's dump of it, and only this subset is known
+  to load back unchanged; the filters runc, crun and systemd attach are all
+  inside it. A filter outside it is left untouched and the container is
+  retried with reason `program_not_wrappable`.
+
+The daemon marks every program it attaches with a header naming it as its own
+(`bpftool` shows it as `sda_devfilter`) and, on the next change, strips that
+wrapper back to the runtime's original before wrapping it again. Grants
+therefore replace each other instead of piling up, and survive a daemon restart
+without any saved state. A program that starts like such a header but does not
+check out completely is never modified: the daemon logs an error with reason
+`owned_block_conflict` and the container has to be restarted.
+
+> **Upgrading from versions without these markers:** programs attached by
+> earlier versions look exactly like the runtime's own filter, so the grants
+> they carry are kept (and wrapped again) until the container is restarted.
+> Restart containers that were processed by an earlier version to drop grants
+> the new version cannot see.
 
 Atomic replacement (`BPF_F_REPLACE`) is used when the kernel supports it
 (Linux 5.5+, detected on first use); otherwise each new program is attached
