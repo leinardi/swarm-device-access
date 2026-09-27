@@ -95,7 +95,7 @@ func Supervise(ctx context.Context, onReload, onSubscribed func()) {
 // supervisor is Supervise with its seams: tests replace open and shorten
 // the timings.
 type supervisor struct {
-	open         func() (*Watcher, error)
+	open         func(ctx context.Context) (*Watcher, error)
 	setupTimeout time.Duration
 	minRetry     time.Duration
 	maxRetry     time.Duration
@@ -106,10 +106,16 @@ func (s *supervisor) run(ctx context.Context, onReload, onSubscribed func()) {
 	failures := 0
 
 	for {
-		watcher, err := s.openBounded(ctx)
-		if ctx.Err() != nil {
-			closeWatcher(watcher)
+		held, err := s.attempt(ctx, onReload, func() {
+			if failures > 0 {
+				logger.L().Info("systemd reload handling available again")
+			}
 
+			failures = 0
+
+			onSubscribed()
+		})
+		if ctx.Err() != nil {
 			return
 		}
 
@@ -125,41 +131,16 @@ func (s *supervisor) run(ctx context.Context, onReload, onSubscribed func()) {
 			}
 
 			failures++
-
-			if !sleepCtx(ctx, retry) {
-				return
+		} else {
+			// A subscription that held for a while starts the backoff over;
+			// one that keeps dropping right away backs off like a failure,
+			// so a flapping bus does not request a pass every minRetry.
+			if held >= s.maxRetry {
+				retry = s.minRetry
 			}
 
-			retry = min(retry*2, s.maxRetry)
-
-			continue
+			logger.L().Warn("systemd reload watcher disconnected; resubscribing", "retry_in", retry)
 		}
-
-		if failures > 0 {
-			logger.L().Info("systemd reload handling available again")
-		}
-
-		failures = 0
-		subscribedAt := time.Now()
-
-		// Signals are buffered from here on, so none is lost while the
-		// caller reconciles.
-		onSubscribed()
-		watcher.Watch(ctx, onReload)
-		closeWatcher(watcher)
-
-		if ctx.Err() != nil {
-			return
-		}
-
-		// A subscription that held for a while starts the backoff over;
-		// one that keeps dropping right away backs off like a failure, so
-		// a flapping bus does not request a pass every minRetry.
-		if time.Since(subscribedAt) >= s.maxRetry {
-			retry = s.minRetry
-		}
-
-		logger.L().Warn("systemd reload watcher disconnected; resubscribing", "retry_in", retry)
 
 		if !sleepCtx(ctx, retry) {
 			return
@@ -169,41 +150,56 @@ func (s *supervisor) run(ctx context.Context, onReload, onSubscribed func()) {
 	}
 }
 
-// openBounded runs open, giving up after setupTimeout or when ctx is done.
-// An attempt given up on keeps running in the background and closes its
-// watcher if it ever succeeds, so nothing leaks a subscription.
-func (s *supervisor) openBounded(ctx context.Context) (*Watcher, error) {
-	type attempt struct {
-		watcher *Watcher
-		err     error
+// attempt connects, subscribes and watches until the subscription is lost
+// or ctx is done, and returns how long the subscription held; err is the
+// setup failure when there was none. Everything the attempt opened is
+// closed before it returns, so attempts never overlap.
+func (s *supervisor) attempt(
+	ctx context.Context,
+	onReload, onSubscribed func(),
+) (time.Duration, error) {
+	attemptCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	watcher, err := s.openBounded(attemptCtx, cancel)
+	if err != nil {
+		return 0, err
 	}
 
-	result := make(chan attempt, 1)
+	defer closeWatcher(watcher)
 
-	go func() {
-		watcher, err := s.open()
-		result <- attempt{watcher, err}
-	}()
+	subscribedAt := time.Now()
 
-	abandon := func() {
-		go func() { closeWatcher((<-result).watcher) }()
-	}
+	// Signals are buffered from here on, so none is lost while the caller
+	// reconciles.
+	onSubscribed()
+	watcher.Watch(attemptCtx, onReload)
 
-	timer := time.NewTimer(s.setupTimeout)
-	defer timer.Stop()
+	return time.Since(subscribedAt), nil
+}
 
-	select {
-	case got := <-result:
-		return got.watcher, got.err
-	case <-timer.C:
-		abandon()
+// openBounded runs open with ctx canceled (through cancel) once
+// setupTimeout passes. The connection is bound to ctx, so a timed-out
+// attempt is closed rather than abandoned: every read and call still
+// waiting on the bus fails, and open returns before the next attempt
+// starts.
+func (s *supervisor) openBounded(ctx context.Context, cancel context.CancelFunc) (*Watcher, error) {
+	timer := time.AfterFunc(s.setupTimeout, cancel)
+
+	watcher, err := s.open(ctx)
+	if !timer.Stop() {
+		// The timer fired: the connection is closed even if open still
+		// got a watcher out of it.
+		closeWatcher(watcher)
 
 		return nil, errSetupTimeout
-	case <-ctx.Done():
-		abandon()
-
-		return nil, fmt.Errorf("subscribe to systemd reloads: %w", ctx.Err())
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return watcher, nil
 }
 
 func closeWatcher(watcher *Watcher) {
@@ -236,13 +232,19 @@ func sleepCtx(ctx context.Context, duration time.Duration) bool {
 // changes of that name's owner. Returns an error if DBus is unavailable (no
 // socket bind-mount, no systemd, daemon running off-host). Supervise
 // retries it; the daemon runs without reload handling meanwhile.
-func Open() (*Watcher, error) {
-	conn, err := dbus.ConnectSystemBus()
+//
+// The connection is bound to ctx: it closes when ctx is done, which also
+// fails any setup step still waiting on the bus (the authentication
+// handshake, Hello, the match rules, the owner lookup). Connecting the
+// socket itself takes no context, but a unix-socket connect does not wait
+// for a bus that stops accepting: it fails at once.
+func Open(ctx context.Context) (*Watcher, error) {
+	conn, err := dbus.ConnectSystemBus(dbus.WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("connect system bus: %w", err)
 	}
 
-	watcher, err := subscribe(conn)
+	watcher, err := subscribe(ctx, conn)
 	if err != nil {
 		closeErr := conn.Close()
 		if closeErr != nil {
@@ -259,8 +261,9 @@ func Open() (*Watcher, error) {
 // resolves systemd's owner: godbus drops signals no channel is registered
 // for, so a NameOwnerChanged between the lookup and the registration would
 // otherwise be lost and leave the watcher trusting a dead name.
-func subscribe(conn *dbus.Conn) (*Watcher, error) {
-	err := conn.AddMatchSignal(
+func subscribe(ctx context.Context, conn *dbus.Conn) (*Watcher, error) {
+	err := conn.AddMatchSignalContext(
+		ctx,
 		dbus.WithMatchSender(systemdBusName),
 		dbus.WithMatchObjectPath(systemdObjectPath),
 		dbus.WithMatchInterface(reloadingInterface),
@@ -270,7 +273,8 @@ func subscribe(conn *dbus.Conn) (*Watcher, error) {
 		return nil, fmt.Errorf("add match signal %s: %w", reloadingFullName, err)
 	}
 
-	err = conn.AddMatchSignal(
+	err = conn.AddMatchSignalContext(
+		ctx,
 		dbus.WithMatchSender(busDaemonName),
 		dbus.WithMatchObjectPath(busDaemonPath),
 		dbus.WithMatchInterface(busDaemonName),
@@ -286,7 +290,9 @@ func subscribe(conn *dbus.Conn) (*Watcher, error) {
 
 	var owner string
 
-	err = conn.BusObject().Call(busDaemonName+".GetNameOwner", 0, systemdBusName).Store(&owner)
+	err = conn.BusObject().
+		CallWithContext(ctx, busDaemonName+".GetNameOwner", 0, systemdBusName).
+		Store(&owner)
 	if err != nil {
 		conn.RemoveSignal(sigCh)
 

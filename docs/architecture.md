@@ -128,12 +128,12 @@ system bus can emit a signal with that name, so the watcher only counts one sent
 owns `org.freedesktop.systemd1` (resolved with `GetNameOwner` at startup and followed through the bus daemon's `NameOwnerChanged`). Re-applies
 are coalesced: reloads that complete while one runs lead to a single trailing run.
 
-The watcher runs in its own goroutine, started before the startup pass, so connecting to the bus never delays the pass or the event loop.
-Each connection attempt is bounded (10 s). An attempt that fails, and a subscription that is lost later (the bus daemon restarting, for
-one), is retried with a backoff of 1 s doubling to 5 min, which starts over once a subscription has held for 5 min; the first failure is logged
-at `Warn`, later ones at `Debug`. Every successful
-subscription requests a pass, because a reload that completed while the watcher was not subscribed, including one during the startup
-pass, sent a signal nobody received.
+The watcher runs in its own goroutine, started before the startup pass, so connecting to the bus never delays the pass or the event loop. Each
+connection attempt is bounded (10 s): the connection is bound to the attempt, so one that times out is closed, which fails whatever it was
+waiting on, and the next attempt starts only after it has returned. An attempt that fails, and a subscription that is lost later (the bus
+daemon restarting, for one), is retried with a backoff of 1 s doubling to 5 min, which starts over once a subscription has held for 5 min; the
+first failure is logged at `Warn`, later ones at `Debug`. Every successful subscription requests a pass, because a reload that completed while
+the watcher was not subscribed, including one during the startup pass, sent a signal nobody received.
 
 ## BPF program structure
 

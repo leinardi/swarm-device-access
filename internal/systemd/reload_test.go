@@ -21,6 +21,7 @@ package systemd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -277,26 +278,54 @@ func TestWatch_UsesTheCurrentLogger(t *testing.T) {
 	}
 }
 
-// fakeOpens scripts successive Open results for a supervisor.
+// fakeOpens scripts successive Open results for a supervisor and records
+// how many attempts ever ran at once.
 type fakeOpens struct {
-	mu    sync.Mutex
-	steps []func() (*Watcher, error)
-	calls int
+	mu          sync.Mutex
+	steps       []func(ctx context.Context) (*Watcher, error)
+	calls       int
+	inFlight    int
+	maxInFlight int
 }
 
-func (f *fakeOpens) open() (*Watcher, error) {
+func (f *fakeOpens) open(ctx context.Context) (*Watcher, error) {
 	f.mu.Lock()
 	step := f.steps[min(f.calls, len(f.steps)-1)]
 	f.calls++
+	f.inFlight++
+	f.maxInFlight = max(f.maxInFlight, f.inFlight)
 	f.mu.Unlock()
 
-	return step()
+	defer func() {
+		f.mu.Lock()
+		f.inFlight--
+		f.mu.Unlock()
+	}()
+
+	return step(ctx)
 }
 
-func failOpen() (*Watcher, error) { return nil, errSetupTimeout }
+func (f *fakeOpens) stats() (calls, maxInFlight int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
-func openOn(sigCh chan *dbus.Signal) func() (*Watcher, error) {
-	return func() (*Watcher, error) { return &Watcher{sigCh: sigCh, owner: testOwner}, nil }
+	return f.calls, f.maxInFlight
+}
+
+func failOpen(context.Context) (*Watcher, error) { return nil, errSetupTimeout }
+
+func openOn(sigCh chan *dbus.Signal) func(context.Context) (*Watcher, error) {
+	return func(context.Context) (*Watcher, error) {
+		return &Watcher{sigCh: sigCh, owner: testOwner}, nil
+	}
+}
+
+// hungOpen blocks like a wedged bus until its context is canceled, the
+// way a real connection bound to that context fails its waiting calls.
+func hungOpen(ctx context.Context) (*Watcher, error) {
+	<-ctx.Done()
+
+	return nil, fmt.Errorf("hung open: %w", ctx.Err())
 }
 
 // startSupervisor runs a supervisor with millisecond timings and returns
@@ -359,7 +388,9 @@ func TestSupervise_RetriesUntilSubscribed(t *testing.T) {
 	t.Parallel()
 
 	sigCh := make(chan *dbus.Signal)
-	opens := &fakeOpens{steps: []func() (*Watcher, error){failOpen, failOpen, openOn(sigCh)}}
+	opens := &fakeOpens{steps: []func(context.Context) (*Watcher, error){
+		failOpen, failOpen, openOn(sigCh),
+	}}
 	subscribed, reloaded := startSupervisor(t, opens)
 
 	receive(t, subscribed, "the first subscription")
@@ -377,7 +408,9 @@ func TestSupervise_ResubscribesAfterDisconnect(t *testing.T) {
 
 	first := make(chan *dbus.Signal)
 	second := make(chan *dbus.Signal)
-	opens := &fakeOpens{steps: []func() (*Watcher, error){openOn(first), openOn(second)}}
+	opens := &fakeOpens{steps: []func(context.Context) (*Watcher, error){
+		openOn(first), openOn(second),
+	}}
 	subscribed, reloaded := startSupervisor(t, opens)
 
 	receive(t, subscribed, "the first subscription")
@@ -389,43 +422,46 @@ func TestSupervise_ResubscribesAfterDisconnect(t *testing.T) {
 	receive(t, reloaded, "the reload on the new subscription")
 }
 
-// An attempt stuck on a wedged bus is given up after setupTimeout and the
-// next one proceeds; canceling returns even while an attempt hangs.
-func TestSupervise_BoundsAHungAttempt(t *testing.T) {
+// An attempt stuck on a wedged bus is canceled after setupTimeout, and
+// returns before the next attempt starts. Even a watcher it produces once
+// canceled is not used: its connection is already closed.
+func TestSupervise_CancelsAHungAttempt(t *testing.T) {
 	t.Parallel()
 
-	hang := make(chan struct{})
-
-	t.Cleanup(func() { close(hang) })
-
+	late := make(chan *dbus.Signal)
 	sigCh := make(chan *dbus.Signal)
-	opens := &fakeOpens{steps: []func() (*Watcher, error){
-		func() (*Watcher, error) {
-			<-hang
+	opens := &fakeOpens{steps: []func(context.Context) (*Watcher, error){
+		func(ctx context.Context) (*Watcher, error) {
+			<-ctx.Done()
 
-			return nil, errSetupTimeout
+			return &Watcher{sigCh: late, owner: testOwner}, nil
 		},
+		hungOpen,
 		openOn(sigCh),
 	}}
 	subscribed, _ := startSupervisor(t, opens)
 
-	receive(t, subscribed, "the subscription after the hung attempt")
+	receive(t, subscribed, "the subscription after the hung attempts")
+
+	calls, maxInFlight := opens.stats()
+	if calls != 3 || maxInFlight != 1 {
+		t.Errorf(
+			"calls = %d, max in flight = %d; want 3 attempts, one at a time",
+			calls,
+			maxInFlight,
+		)
+	}
 }
 
 func TestSupervise_CancelWhileAttemptHangs(t *testing.T) {
 	t.Parallel()
 
-	hang := make(chan struct{})
-
-	t.Cleanup(func() { close(hang) })
-
 	entered := make(chan struct{})
-	opens := &fakeOpens{steps: []func() (*Watcher, error){
-		func() (*Watcher, error) {
+	opens := &fakeOpens{steps: []func(context.Context) (*Watcher, error){
+		func(ctx context.Context) (*Watcher, error) {
 			close(entered)
-			<-hang
 
-			return nil, errSetupTimeout
+			return hungOpen(ctx)
 		},
 	}}
 
@@ -452,5 +488,9 @@ func TestSupervise_CancelWhileAttemptHangs(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("supervisor did not return after cancel while an attempt hung")
+	}
+
+	if calls, _ := opens.stats(); calls != 1 {
+		t.Errorf("calls = %d, want no attempt after cancel", calls)
 	}
 }
