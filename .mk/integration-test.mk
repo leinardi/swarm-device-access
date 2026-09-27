@@ -23,12 +23,17 @@
 #   make go-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
 #
 # Every container the suite creates carries the swarm-device-access-it.envid
-# label. After a killed run, remove the leftovers of every run with:
+# label. The daemon a test launcher creates does not; it is swept once its
+# launcher no longer exists. After a killed run, remove the leftovers of every
+# run with:
 #   make sweep-test-leaks
 
 INTEGRATION_TIMEOUT  ?= 6m
 INTEGRATION_PKG      ?= ./test/integration/...
 INTEGRATION_ENV_LABEL := swarm-device-access-it.envid
+# The labels internal/launcher puts on the daemon containers it creates.
+LAUNCHER_ROLE_LABEL   := io.github.leinardi.swarm-device-access.role
+LAUNCHER_OWNER_LABEL  := io.github.leinardi.swarm-device-access.launcher
 
 # go test changes CWD to the package dir, so the binary path must be absolute.
 export SDA_TEST_BINARY ?= $(REPO_ROOT)/$(DIST_DIR)/$(BIN_NAME)
@@ -61,3 +66,11 @@ integration-image: ## Build the daemon image the enforcement test runs, as $(INT
 .PHONY: sweep-test-leaks
 sweep-test-leaks: ## Remove every container left behind by integration test runs
 	docker ps -aq --filter "label=$(INTEGRATION_ENV_LABEL)" | xargs -r docker rm -f
+	docker ps -a --filter "label=$(LAUNCHER_ROLE_LABEL)=daemon" \
+	  --format '{{.ID}} {{.Label "$(LAUNCHER_OWNER_LABEL)"}}' | \
+	  while read -r id owner; do \
+	    [ -n "$$owner" ] || continue; \
+	    if docker container inspect "$$owner" 2>&1 >/dev/null | grep -q 'No such'; then \
+	      docker rm -f "$$id"; \
+	    fi; \
+	  done

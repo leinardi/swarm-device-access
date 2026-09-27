@@ -454,13 +454,37 @@ func startDaemonContainer(
 			},
 		})
 
-	logs, err := cli.ContainerLogs(ctx, daemonID, dockerclient.ContainerLogsOptions{
+	proc := followLogs(ctx, t, cli, daemonID)
+
+	// Registered after startContainer's removal, so it runs first: the log
+	// stream ends once the container is gone, and collect must be finished
+	// before the test completes.
+	t.Cleanup(func() {
+		stopDaemonContainer(context.WithoutCancel(ctx), t, cli, daemonID, proc)
+	})
+
+	proc.waitReady(ctx, t)
+
+	return daemonID, proc
+}
+
+// followLogs collects the JSON log records of containerID until its log
+// stream ends.
+func followLogs(
+	ctx context.Context,
+	t *testing.T,
+	cli *dockerclient.Client,
+	containerID string,
+) *daemonProc {
+	t.Helper()
+
+	logs, err := cli.ContainerLogs(ctx, containerID, dockerclient.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
 	})
 	if err != nil {
-		t.Fatalf("follow daemon container logs: %v", err)
+		t.Fatalf("follow container %s logs: %v", shortID(containerID), err)
 	}
 
 	proc := newDaemonProc()
@@ -474,16 +498,7 @@ func startDaemonContainer(
 
 	go proc.collect(t.Log, reader)
 
-	// Registered after startContainer's removal, so it runs first: the log
-	// stream ends once the container is gone, and collect must be finished
-	// before the test completes.
-	t.Cleanup(func() {
-		stopDaemonContainer(context.WithoutCancel(ctx), t, cli, daemonID, proc)
-	})
-
-	proc.waitReady(ctx, t)
-
-	return daemonID, proc
+	return proc
 }
 
 // stopDaemonContainer stops the daemon and waits until its log stream ends.
