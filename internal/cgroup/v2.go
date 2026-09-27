@@ -23,15 +23,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/asm"
 	"golang.org/x/sys/unix"
+
+	"github.com/leinardi/swarm-device-access/internal/logger"
 )
 
 const (
@@ -151,139 +151,208 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 	return "", errNoCgroupV2Entry
 }
 
-// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath.
-func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
-	// Open the cgroup path.
-	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY, 0)
-	if err != nil {
-		return fmt.Errorf("unable to open the cgroup path: %w", err)
-	}
-	defer unix.Close(dirFD)
+// SetDeviceRules makes this daemon's grants in the device filters of the
+// cgroup behind handle equal exactly rules.
+//
+// Each attached program is either one of this daemon's wrappers (see
+// owned.go), stripped back to the runtime original it wraps, or an unmarked
+// program, which is a runtime original itself. Non-empty rules leave one
+// wrapper per lineage around its original; empty rules put the bare
+// originals back and leave unmarked programs alone, so a cgroup this daemon
+// never touched is never touched. The programs carry all the state this
+// needs, so it works the same after a daemon restart; the one exception is
+// a cgroup whose filters were all detached (systemd daemon-reload), which
+// is rebuilt from FilterCache when this process saw it before.
+//
+// Unmarked programs are never interpreted: a wrapper written by a version
+// that predates the ownership markers looks exactly like a runtime program,
+// so its grants are kept until the container restarts. Kernel program IDs
+// are reused and are never used as identity; every equality decision
+// compares full canonical instruction bytes.
+//
+// Unlike NVIDIA's upstream code, which detaches every program before
+// attaching the replacements because it runs strictly before the container
+// starts, this daemon mutates live containers: detaching first would leave
+// the container unfiltered in between, and permanently so if the attach
+// failed or the daemon died. Every new program is therefore attached (or
+// atomically swapped in) before anything it replaces is detached.
+func (c *cgroupv2) SetDeviceRules(handle *CgroupHandle, rules []DeviceRule) error {
+	return c.setDeviceRules(handle.fd, handle.Identity(), rules)
+}
 
+const multiFlag = unix.BPF_F_ALLOW_MULTI
+
+func (c *cgroupv2) setDeviceRules(dirFD int, id Identity, rules []DeviceRule) error {
 	// Find any existing eBPF device filter programs attached to this cgroup.
-	oldProgs, err := FindAttachedCgroupDeviceFilters(dirFD)
+	oldProgs, total, inaccessible, attachFlags, err := c.ops.query(dirFD)
 	if err != nil {
 		return fmt.Errorf(
 			"unable to find any existing device filters attached to the cgroup: %w",
 			err,
 		)
 	}
+	defer closeAll(oldProgs)
 
-	// Generate a new set of eBPF programs by prepending instructions for the
-	// new devices to the instructions of each existing program.
-	// If no existing programs found, create a new program with just our device filter.
-	var newProgs []*ebpf.Program
-	defer func() {
-		for _, p := range newProgs {
-			p.Close()
-		}
-	}()
-
-	if len(oldProgs) == 0 {
-		oldInsts := asm.Instructions{asm.Return()}
-
-		var newProg *ebpf.Program
-
-		newProg, err = generateNewProgram(rules, oldInsts)
-		if err != nil {
-			return fmt.Errorf(
-				"unable to generate new device filter program with no existing programs: %w",
-				err,
-			)
-		}
-
-		newProgs = append(newProgs, newProg)
-	}
-
-	for _, oldProg := range oldProgs {
-		var (
-			oldInfo  *ebpf.ProgramInfo
-			oldInsts asm.Instructions
-			newProg  *ebpf.Program
+	switch {
+	case inaccessible > 0:
+		return fmt.Errorf("%w: %d of %d programs", ErrFiltersInaccessible, inaccessible, total)
+	case total == 0:
+		return c.rebuild(dirFD, id, rules)
+	case attachFlags&unix.BPF_F_ALLOW_MULTI == 0:
+		return fmt.Errorf(
+			"%w: attach mode %s",
+			ErrUnsupportedAttachMode,
+			describeAttachFlags(attachFlags),
 		)
-
-		oldInfo, err = oldProg.Info()
-		if err != nil {
-			return fmt.Errorf(
-				"unable to get Info() of the original device filters program: %w",
-				err,
-			)
-		}
-
-		oldInsts, err = oldInfo.Instructions()
-		if err != nil {
-			return fmt.Errorf(
-				"unable to get the instructions of the original device filters program: %w",
-				err,
-			)
-		}
-
-		newProg, err = generateNewProgram(rules, oldInsts)
-		if err != nil {
-			return fmt.Errorf(
-				"unable to generate new device filter program from existing programs: %w",
-				err,
-			)
-		}
-
-		newProgs = append(newProgs, newProg)
 	}
 
-	// Increase `ulimit -l` limit to avoid BPF_PROG_LOAD error below.
-	// This limit is not inherited into the container.
-	memlockLimit := &unix.Rlimit{
-		Cur: unix.RLIM_INFINITY,
-		Max: unix.RLIM_INFINITY,
-	}
+	// Classify and plan everything before touching the cgroup: a conflict,
+	// an unwrappable program or a load failure anywhere mutates nothing.
+	classified := make([]attachedProg, 0, len(oldProgs))
 
-	rlimitErr := unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
-	if rlimitErr != nil {
-		slog.Default().Warn("setrlimit RLIMIT_MEMLOCK failed; BPF_PROG_LOAD may fail",
-			"err", rlimitErr)
-	}
-
-	// Replace the set of existing eBPF programs with the new ones.
-	// We don't have to worry about atomically replacing each program (i.e. by
-	// using BPF_F_REPLACE) because we know that the code here is always run
-	// strictly *before* a container begins executing.
 	for _, oldProg := range oldProgs {
-		err = DetachCgroupDeviceFilter(oldProg, dirFD)
+		var prog attachedProg
+
+		prog, err = c.classify(oldProg)
 		if err != nil {
-			return fmt.Errorf("unable to detach original device filters program: %w", err)
+			return err
+		}
+
+		classified = append(classified, prog)
+	}
+
+	groups, bares := groupWrappers(classified)
+
+	var plan passPlan
+
+	if len(rules) == 0 {
+		plan = planRestore(groups, bares)
+	} else {
+		plan, err = planGrant(groups, bares, rules, id.Path)
+		if err != nil {
+			return err
 		}
 	}
 
-	for _, newProg := range newProgs {
-		err = AttachCgroupDeviceFilter(newProg, dirFD)
+	// A rebuild that stopped halfway left some lineages attached and others
+	// not; the missing ones were lost to the wipe, so they are attached
+	// again rather than dropped from the cache.
+	entry := c.cache.get(id)
+	if entry.rebuilding {
+		err = plan.addRebuild(missingLineages(entry.lineages, groups, bares), rules)
 		if err != nil {
-			return fmt.Errorf("unable to attach new device filters program: %w", err)
+			return err
 		}
+	}
+
+	return c.commit(dirFD, id, plan, entry.rebuilding)
+}
+
+// commit records plan's lineages and executes it. rebuilding stays set in
+// the cache until a pass that reattaches every lineage has succeeded.
+func (c *cgroupv2) commit(dirFD int, id Identity, plan passPlan, rebuilding bool) error {
+	c.cache.set(id, cacheEntry{lineages: plan.lineages, rebuilding: rebuilding})
+
+	err := c.execute(dirFD, plan)
+	if err != nil {
+		return err
+	}
+
+	if rebuilding {
+		c.cache.set(id, cacheEntry{lineages: plan.lineages})
 	}
 
 	return nil
 }
 
-func generateNewProgram(rules []DeviceRule, oldInsts asm.Instructions) (*ebpf.Program, error) {
-	// Prepend instructions for the new devices to the original set of instructions.
-	newInsts, err := PrependDeviceFilter(rules, oldInsts)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"unable to prepend new device filters to the original device filters program: %w",
-			err,
-		)
+// rebuild handles a cgroup with no device filter at all. That is what
+// systemd's daemon-reload leaves behind, so it is not a no-op for a
+// container that had one: its runtime originals are attached again from
+// FilterCache. Without a cached entry nothing can be rebuilt, and
+// ErrFilterMissing lets the caller decide (a privileged container never had
+// a filter; anything else must not be reported as done).
+func (c *cgroupv2) rebuild(dirFD int, id Identity, rules []DeviceRule) error {
+	entry := c.cache.get(id)
+	if len(entry.lineages) == 0 {
+		return ErrFilterMissing
 	}
 
-	// Generate new eBPF program for the merged device filter instructions.
+	var plan passPlan
+
+	err := plan.addRebuild(entry.lineages, rules)
+	if err != nil {
+		return err
+	}
+
+	logger.L().Info("device filter missing; reattaching the cached runtime originals",
+		"cgroup", id.Path, "programs", len(entry.lineages), "with_grants", len(rules) > 0)
+
+	return c.commit(dirFD, id, plan, true)
+}
+
+// loadCanonical loads a program from canonical bytes. A verifier rejection
+// is returned as is, before anything is attached.
+//
+//nolint:ireturn // progHandle hides the kernel handle so the swap logic can be tested with fakes
+func (c *cgroupv2) loadCanonical(raw []byte, name string) (progHandle, error) {
+	insts, err := fromCanonical(raw)
+	if err != nil {
+		return nil, err
+	}
+
 	spec := &ebpf.ProgramSpec{
+		Name:         name,
 		Type:         ebpf.CGroupDevice,
-		Instructions: newInsts,
+		Instructions: insts,
 		License:      bpfProgramLicense,
 	}
 
-	newProg, err := ebpf.NewProgram(spec)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create new device filters program: %w", err)
+	return c.ops.load(spec)
+}
+
+// swap replaces oldProg with newProg on dirFD: atomically when the kernel
+// supports BPF_F_REPLACE, otherwise by attaching newProg before detaching
+// oldProg. If that detach fails, newProg is detached again so the pair is
+// left as it was (both attached would make a later pass stack another copy).
+func (c *cgroupv2) swap(dirFD int, oldProg, newProg progHandle) error {
+	if c.replace.usable() {
+		err := c.ops.attach(newProg, dirFD, unix.BPF_F_ALLOW_MULTI, oldProg)
+		c.replace.record(err)
+
+		if err == nil {
+			return nil
+		}
+
+		if c.replace.usable() {
+			return fmt.Errorf("unable to replace device filters program: %w", err)
+		}
 	}
 
-	return newProg, nil
+	err := c.ops.attach(newProg, dirFD, unix.BPF_F_ALLOW_MULTI, nil)
+	if err != nil {
+		return fmt.Errorf("unable to attach new device filters program: %w", err)
+	}
+
+	detachErr := c.ops.detach(oldProg, dirFD)
+	if detachErr == nil {
+		return nil
+	}
+
+	detachErr = fmt.Errorf("unable to detach original device filters program: %w", detachErr)
+
+	rollbackErr := c.ops.detach(newProg, dirFD)
+	if rollbackErr != nil {
+		return errors.Join(
+			detachErr,
+			fmt.Errorf("roll back new device filters program: %w", rollbackErr),
+		)
+	}
+
+	return detachErr
+}
+
+func closeAll(progs []progHandle) {
+	for _, prog := range progs {
+		prog.Close()
+	}
 }

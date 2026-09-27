@@ -72,10 +72,14 @@ const (
 	imagePullTimeout = 45 * time.Second
 
 	// Messages of the daemon's log records the tests wait for.
-	msgReady         = "subscribed to docker events"
-	msgProcessed     = "container processed"
-	msgSkippedPolicy = "container skipped by policy"
-	msgInvalidLabels = "container skipped: invalid policy labels"
+	msgReady              = "subscribed to docker events"
+	msgProcessed          = "container processed"
+	msgSkippedPolicy      = "container skipped by policy"
+	msgInvalidLabels      = "container skipped: invalid policy labels"
+	msgWatcherStarted     = "systemd reload watcher started"
+	msgWatcherUnavailable = "systemd reload handling unavailable; retrying in the background"
+	// msgRequestDone is logged once per reconcile request, with its epoch.
+	msgRequestDone = "config reload complete"
 
 	testImage = "docker.io/library/busybox:1.36"
 )
@@ -335,11 +339,31 @@ func newDaemonProc() *daemonProc {
 	return &daemonProc{changed: make(chan struct{}), exited: make(chan struct{})}
 }
 
-// waitReady blocks until the daemon has subscribed to Docker events.
+// waitReady blocks until the daemon has subscribed to Docker events, its
+// reload watcher has subscribed to systemd or given up for now, and the
+// passes those requested have finished. The startup pass is one request and
+// a watcher subscription another, so with both the second completion is
+// the last: every later "container processed" record comes from what the
+// test does next, not from a pass still running.
 func (d *daemonProc) waitReady(ctx context.Context, t *testing.T) {
 	t.Helper()
 
 	d.waitN(ctx, t, "daemon subscription to docker events", withMsg(msgReady), 1)
+
+	watcher := d.wait(ctx, t, "systemd reload watcher outcome", func(rec logRecord) bool {
+		return rec.str("msg") == msgWatcherStarted || rec.str("msg") == msgWatcherUnavailable
+	})
+
+	requests := 1
+	if watcher.str("msg") == msgWatcherStarted {
+		requests = 2
+	}
+
+	d.wait(ctx, t, "startup passes complete", func(rec logRecord) bool {
+		epoch, ok := rec.num("epoch")
+
+		return rec.str("msg") == msgRequestDone && ok && epoch == requests
+	})
 }
 
 // withMsg matches records with the given message.

@@ -19,6 +19,7 @@
 package config
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"github.com/leinardi/swarm-device-access/internal/policy"
@@ -31,29 +32,61 @@ type Runtime struct {
 	Policy policy.Global
 }
 
-// Store provides atomic read/write access to the current Runtime.
+// snapshot is one published Runtime and its generation.
+type snapshot struct {
+	runtime    Runtime
+	generation uint64
+}
+
+// Store provides atomic read access to the current Runtime. Only the
+// Publisher returned with it can replace the Runtime, so whoever holds the
+// Publisher (the processor, after startup) is the one path that publishes.
 type Store struct {
-	current atomic.Pointer[Runtime]
+	current atomic.Pointer[snapshot]
 }
 
-// NewStore returns an initialized Store with a zero-value Runtime.
-// Call Set to populate it after parsing the initial configuration.
-func NewStore() *Store {
-	return &Store{}
+// Publisher replaces the Runtime of the Store it was created with.
+type Publisher struct {
+	store *Store
+	// mu orders publications, so generations are handed out in the order
+	// the snapshots become visible.
+	mu sync.Mutex
 }
 
-// Load returns the current Runtime. Returns a zero-value Runtime if Set has
-// not been called yet.
+// NewStore returns a Store holding initial as generation 1, and the
+// Publisher for it.
+func NewStore(initial Runtime) (*Store, *Publisher) {
+	store := &Store{}
+	store.current.Store(&snapshot{runtime: initial, generation: 1})
+
+	return store, &Publisher{store: store}
+}
+
+// Load returns the current Runtime.
 func (s *Store) Load() Runtime {
-	ptr := s.current.Load()
-	if ptr == nil {
-		return Runtime{}
-	}
-
-	return *ptr
+	return s.current.Load().runtime
 }
 
-// Set atomically replaces the current Runtime.
-func (s *Store) Set(rt Runtime) {
-	s.current.Store(&rt)
+// Snapshot returns the current Runtime and its generation.
+func (s *Store) Snapshot() (rt Runtime, generation uint64) {
+	current := s.current.Load()
+
+	return current.runtime, current.generation
+}
+
+// Generation returns the generation of the current Runtime. It starts at 1
+// and grows by one with every publication.
+func (s *Store) Generation() uint64 {
+	return s.current.Load().generation
+}
+
+// Publish atomically replaces the Runtime and returns its generation.
+func (p *Publisher) Publish(rt Runtime) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	generation := p.store.Generation() + 1
+	p.store.current.Store(&snapshot{runtime: rt, generation: generation})
+
+	return generation
 }

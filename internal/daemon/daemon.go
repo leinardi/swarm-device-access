@@ -20,7 +20,7 @@ package daemon
 
 import (
 	"context"
-	"fmt"
+	"sync"
 	"time"
 
 	"github.com/moby/moby/client"
@@ -39,6 +39,7 @@ type dockerAPI interface {
 		options client.ContainerListOptions,
 	) (client.ContainerListResult, error)
 	Events(ctx context.Context, options client.EventsListOptions) client.EventsResult
+	Ping(ctx context.Context, options client.PingOptions) (client.PingResult, error)
 }
 
 // Options bundles the dependencies required by Run.
@@ -46,11 +47,23 @@ type Options struct {
 	Docker  dockerAPI
 	Proc    *processor.Processor
 	Metrics *observability.Recorder
+
+	// callTimeout overrides DockerCallTimeout; zero means the default. Only
+	// tests set it, to exercise hung calls without waiting the full timeout.
+	callTimeout time.Duration
 }
 
-// Run subscribes to the Docker event stream, enumerates existing containers,
-// subscribes to the systemd reload signal, and then blocks on the event stream
-// until ctx is done.
+func (o *Options) timeout() time.Duration {
+	if o.callTimeout > 0 {
+		return o.callTimeout
+	}
+
+	return DockerCallTimeout
+}
+
+// Run subscribes to the Docker event stream, reconciles every running
+// container, subscribes to the systemd reload signal, and then blocks on the
+// event stream until ctx is done.
 //
 // The event stream is opened before the enumeration, with Since set to the
 // time just before subscribing, so a container started while the list is
@@ -59,123 +72,79 @@ func Run(ctx context.Context, opts Options) error {
 	return run(ctx, opts, startReloadWatcher)
 }
 
-func run(ctx context.Context, opts Options, startWatcher func(context.Context, Options)) error {
-	log := logger.L()
-
+func run(
+	ctx context.Context,
+	opts Options,
+	startWatcher func(ctx context.Context, onReload, onSubscribed func()),
+) error {
 	since := time.Now()
 
 	// The client delivers messages on an unbuffered channel, so events that
 	// arrive during the enumeration below wait (with backpressure on the
-	// socket) until listenEvents starts consuming them.
-	stream := opts.Docker.Events(ctx, eventListOptions(formatSince(since)))
-
-	processed := make(map[string]time.Time)
-
-	processErr := processExistingContainers(
-		ctx,
-		opts.Docker,
-		processed,
-		opts.Metrics,
-		processorApply(opts.Proc),
-	)
-	if processErr != nil {
-		log.Warn("could not enumerate existing containers", "err", processErr)
+	// socket) until listenEvents starts consuming them. A failed subscription
+	// leaves stream empty; listenEvents then resubscribes from since, so the
+	// events of the enumeration window are still replayed.
+	stream, cancelStream, subErr := subscribe(ctx, opts.Docker, formatSince(since), opts.timeout())
+	if subErr != nil {
+		logger.L().Warn("could not subscribe to docker events; will retry", "err", subErr)
 	}
 
-	startWatcher(ctx, opts)
+	coord := newCoordinator(opts.Docker, processorApply(opts.Proc), opts.Metrics, opts.timeout())
+	coord.terminate = opts.Proc.Terminate
+	coord.sweep = opts.Proc.Sweep
+	opts.Proc.SetLifecycles(coord.lifecycles)
 
-	listenEvents(ctx, opts, processed, since, stream.Messages, stream.Err)
+	// Every later publication goes to the coordinator; installed before
+	// the startup request, so no generation published from here on is
+	// missed.
+	opts.Proc.SetPassRequester(coord.requestPass)
 
-	return nil
-}
+	// Waited for before Run returns, so shutdown does not cut off a
+	// reconcile in the middle of its cgroup mutation.
+	var background sync.WaitGroup
+	defer background.Wait()
 
-// processExistingContainers iterates the currently running containers and
-// applies device rules to each one that bind-mounts /dev/... paths. For every
-// container processed successfully, processed records the time captured just
-// before it was inspected, so later events for an earlier run can be skipped.
-func processExistingContainers(
-	ctx context.Context,
-	cli dockerAPI,
-	processed map[string]time.Time,
-	metrics *observability.Recorder,
-	apply applyFn,
-) error {
-	log := logger.L()
+	background.Go(func() { coord.run(ctx) })
 
-	list, err := cli.ContainerList(ctx, client.ContainerListOptions{})
-	if err != nil {
-		return fmt.Errorf("list containers: %w", err)
-	}
-
-	containers := list.Items
-
-	log.Debug("enumerating running containers", "count", len(containers))
-
-	for idx := range containers {
-		startedAt := time.Now()
-
-		processErr := processOne(
-			ctx,
-			containers[idx].ID,
-			metrics,
-			apply,
-			"could not process running container",
+	// The reload watcher starts before the startup pass, on its own
+	// goroutine so a wedged system bus never delays the pass or the event
+	// loop. Every time it subscribes, the first time included, it requests
+	// a pass: a daemon-reload that completed before it was listening (for
+	// example during the startup pass) was not seen.
+	background.Go(func() {
+		startWatcher(ctx,
+			func() {
+				opts.Metrics.IncReloadReapply()
+				coord.request(opts.Proc.Cfg.Generation())
+			},
+			func() { coord.request(opts.Proc.Cfg.Generation()) },
 		)
-		if processErr != nil {
-			continue
-		}
+	})
 
-		processed[containers[idx].ID] = startedAt
-	}
+	// The startup pass reconciles every running container under the
+	// startup config. In live mode that replaces or strips grants a
+	// previous instance left behind.
+	coord.request(opts.Proc.Cfg.Generation())
+	coord.awaitFirstPass(ctx)
+
+	listenEvents(ctx, opts, coord, since, stream, cancelStream)
 
 	return nil
 }
 
-// processorApply adapts Processor.ProcessContainer to applyFn.
+// processorApply adapts Processor.Reconcile to applyFn.
 func processorApply(proc *processor.Processor) applyFn {
 	return func(ctx context.Context, id string) error {
-		return proc.ProcessContainer(ctx, id)
+		return proc.Reconcile(ctx, id)
 	}
 }
 
-// startReloadWatcher tries to subscribe to systemd's DBus Reloading signal so
-// that when daemon-reload wipes the cgroup BPF programs, we re-apply rules to
-// every running container. DBus is optional — on hosts without systemd or
-// without the DBus socket mounted, this logs a warning and returns.
-func startReloadWatcher(ctx context.Context, opts Options) {
-	log := logger.L()
-
-	watcher, err := systemd.Open()
-	if err != nil {
-		log.Warn("systemd reload handling disabled", "err", err)
-
-		return
-	}
-
-	go func() {
-		defer func() {
-			closeErr := watcher.Close()
-			if closeErr != nil {
-				log.Warn("close systemd watcher", "err", closeErr)
-			}
-		}()
-
-		watcher.Watch(ctx, func() {
-			opts.Metrics.IncReloadReapply()
-
-			fresh := make(map[string]time.Time)
-
-			processErr := processExistingContainers(
-				ctx,
-				opts.Docker,
-				fresh,
-				opts.Metrics,
-				processorApply(opts.Proc),
-			)
-			if processErr != nil {
-				log.Warn("could not re-apply rules after systemd reload",
-					"err", processErr)
-			}
-		})
-	}()
+// startReloadWatcher keeps a subscription to systemd's DBus Reloading
+// signal until ctx is done (see systemd.Supervise). daemon-reload can wipe
+// the cgroup BPF programs, so each completed reload requests a pass that
+// re-applies rules to every running container. DBus is optional: on hosts
+// without systemd or without the DBus socket mounted, this warns once and
+// keeps retrying in the background.
+func startReloadWatcher(ctx context.Context, onReload, onSubscribed func()) {
+	systemd.Supervise(ctx, onReload, onSubscribed)
 }

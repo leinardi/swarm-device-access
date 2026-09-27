@@ -21,6 +21,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/moby/moby/api/types/events"
@@ -33,19 +34,28 @@ import (
 const (
 	minBackoff = 1 * time.Second
 	maxBackoff = 30 * time.Second
+
+	// DockerCallTimeout bounds every request/response Docker API call and the
+	// establishment of the event stream. Without it a wedged dockerd blocks the
+	// caller forever, and nothing behind it (retries, reconnects, shutdown)
+	// ever runs.
+	DockerCallTimeout = 10 * time.Second
 )
 
-// applyFn is the per-container rule-application callback injected into consumeEvents.
-// In production this wraps Processor.ProcessContainer; in tests it is replaced by a fake.
+var errSubscribeTimeout = errors.New("docker event stream not established before timeout")
+
+// applyFn is the per-container reconcile the coordinator runs. In
+// production it wraps Processor.Reconcile; in tests it is replaced by a fake.
 type applyFn func(ctx context.Context, id string) error
 
 // eventListOptions returns the Docker event subscription options: "start"
-// and "unpause" container events at or after since.
+// and "unpause" container events, which reconcile a container, and "die"
+// and "destroy", which end a run and clean up after it, at or after since.
 func eventListOptions(since string) client.EventsListOptions {
 	return client.EventsListOptions{
 		Since: since,
 		// make, not the zero value: a nil client.Filters panics on Add.
-		Filters: make(client.Filters).Add("event", "start", "unpause"),
+		Filters: make(client.Filters).Add("event", "start", "unpause", "die", "destroy"),
 	}
 }
 
@@ -68,59 +78,146 @@ func resubscribeSince(initial time.Time, lastEventNano int64) string {
 }
 
 // listenEvents consumes Docker container events and applies device rules.
+// Every re-subscription after the initial stream requests a coordinator
+// pass (see requestReenumeration).
 // "start" covers fresh starts and restart's second phase; "unpause" covers
-// resume from a paused state if the cgroup state was cleared. msgs and errs
-// are the stream already opened by Run before the startup enumeration. On
-// stream error it reconnects with exponential backoff (capped) rather than
-// terminating the daemon — replaces the upstream log.Fatal(err) pattern.
+// resume from a paused state if the cgroup state was cleared. stream is the
+// stream already opened by Run before the startup enumeration (zero value when
+// that subscription failed) and cancelStream releases it. On stream error it
+// reconnects with exponential backoff (capped) rather than terminating the
+// daemon — replaces the upstream log.Fatal(err) pattern.
 //
 // /readyz reflects live Docker event-stream health via observability.SetReady.
 func listenEvents(
 	ctx context.Context,
 	opts Options,
-	processed map[string]time.Time,
+	coord *coordinator,
 	since time.Time,
-	msgs <-chan events.Message,
-	errs <-chan error,
+	stream client.EventsResult,
+	cancelStream context.CancelFunc,
 ) {
-	log := logger.L()
 	backoff := minBackoff
+	timeout := opts.timeout()
 
 	var lastEventNano int64
 
-	// The processed map guards the overlap window between startup enumeration
-	// and the live event stream. After 2×maxBackoff (60s) the window has
-	// certainly passed; any remaining entries are from containers that exited
-	// before producing a start event and will never be drained normally.
-	clearProcessed := time.After(2 * maxBackoff)
-
 	for {
 		if ctx.Err() != nil {
+			cancelStream()
+
 			return
 		}
 
-		if msgs == nil {
-			stream := opts.Docker.Events(
+		if stream.Messages == nil {
+			var subErr error
+
+			stream, cancelStream, subErr = subscribe(
 				ctx,
-				eventListOptions(resubscribeSince(since, lastEventNano)),
+				opts.Docker,
+				resubscribeSince(since, lastEventNano),
+				timeout,
 			)
-			msgs, errs = stream.Messages, stream.Err
+			if subErr != nil {
+				if ctx.Err() != nil {
+					return
+				}
+
+				logger.L().Error("could not subscribe to docker events, retrying",
+					"err", subErr, "backoff", backoff)
+				opts.Metrics.IncDockerReconnect()
+				observability.SetReady(false)
+				sleepCtx(ctx, backoff)
+				backoff = nextBackoff(backoff)
+
+				continue
+			}
+
+			// Since only replays what dockerd still buffers, and a
+			// restarted dockerd has nothing buffered, so events of the
+			// gap can be lost: re-list and reconcile every running
+			// container. The coordinator's processed map skips replayed
+			// start events the pass already covered.
+			logger.L().Info("docker event stream re-subscribed; reconciling running containers")
+			coord.requestReenumeration()
 		}
 
 		observability.SetReady(true)
-		log.Debug("subscribed to docker events")
+		logger.L().Debug("subscribed to docker events")
 
-		disconnected := consumeEvents(ctx, msgs, errs, processed, &backoff, clearProcessed,
+		disconnected := consumeEvents(
+			ctx,
+			stream.Messages,
+			stream.Err,
+			coord,
+			&backoff,
 			&lastEventNano,
 			opts.Metrics,
-			processorApply(opts.Proc))
+		)
+
+		// The stream context lives exactly as long as this subscription: a
+		// reconnect opens a new one and shutdown must release the request.
+		cancelStream()
+
 		if !disconnected {
 			return
 		}
 
-		msgs, errs = nil, nil
+		stream = client.EventsResult{}
 
 		observability.SetReady(false)
+	}
+}
+
+// subscribe opens the Docker event stream with a bounded establishment.
+//
+// The client's Events call does not return until dockerd has sent the
+// response headers, so a hung dockerd would block the caller with nothing
+// able to act as a watchdog, and a deadline on the stream context would also
+// kill the stream once established. Events therefore runs in a goroutine on a
+// cancelable context and is raced against a timer here; on timeout the
+// request is canceled and the goroutine is waited for, so it never leaks. On
+// success the returned cancel func owns the stream context for its lifetime.
+func subscribe(
+	ctx context.Context,
+	docker dockerAPI,
+	since string,
+	timeout time.Duration,
+) (client.EventsResult, context.CancelFunc, error) {
+	pingCtx, cancelPing := context.WithTimeout(ctx, timeout)
+	_, pingErr := docker.Ping(pingCtx, client.PingOptions{})
+
+	cancelPing()
+
+	if pingErr != nil {
+		return client.EventsResult{}, func() {}, fmt.Errorf("ping docker: %w", pingErr)
+	}
+
+	streamCtx, cancel := context.WithCancel(ctx)
+	established := make(chan client.EventsResult, 1)
+
+	go func() {
+		established <- docker.Events(streamCtx, eventListOptions(since))
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case stream := <-established:
+		return stream, cancel, nil
+	case <-timer.C:
+		cancel()
+		<-established
+
+		return client.EventsResult{}, func() {}, errSubscribeTimeout
+	case <-ctx.Done():
+		cancel()
+		<-established
+
+		return client.EventsResult{}, func() {}, fmt.Errorf(
+			"subscribe to docker events: %w",
+			ctx.Err(),
+		)
 	}
 }
 
@@ -128,38 +225,23 @@ func listenEvents(
 // caller should reconnect, false on context cancellation. lastEventNano is
 // updated with the timestamp of every received event.
 //
-// An event is skipped only when processed holds an entry for the container
-// and the event is not newer than that entry: Docker emits "start" after the
-// container is running, so an earlier event was already visible to the
-// startup inspect. A newer event (restart, unpause) has a new cgroup and is
-// applied. The entry is removed on the first event for that ID either way.
+// An event already covered by an enumeration is skipped (see
+// coordinator.skipEvent); a newer one (restart, unpause) has a new cgroup and
+// is applied. A failed apply leaves the container to the coordinator's
+// retries.
 func consumeEvents(
 	ctx context.Context,
 	msgs <-chan events.Message,
 	errs <-chan error,
-	processed map[string]time.Time,
+	coord *coordinator,
 	backoff *time.Duration,
-	clearProcessed <-chan time.Time,
 	lastEventNano *int64,
 	metrics *observability.Recorder,
-	apply applyFn,
 ) bool {
-	log := logger.L()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return false
-
-		case <-clearProcessed:
-			// Overlap window expired; discard any startup entries that were
-			// never matched by a live event (containers that exited during the
-			// window). Reassign to a nil channel so the case never fires again.
-			for key := range processed {
-				delete(processed, key)
-			}
-
-			clearProcessed = nil
 
 		case streamErr := <-errs:
 			if streamErr == nil {
@@ -178,7 +260,7 @@ func consumeEvents(
 				return false
 			}
 
-			log.Error("docker events stream error, reconnecting",
+			logger.L().Error("docker events stream error, reconnecting",
 				"err", streamErr, "backoff", *backoff)
 			metrics.IncDockerReconnect()
 			observability.SetReady(false)
@@ -189,7 +271,7 @@ func consumeEvents(
 
 		case msg, ok := <-msgs:
 			if !ok {
-				log.Warn("docker events channel closed, reconnecting",
+				logger.L().Warn("docker events channel closed, reconnecting",
 					"backoff", *backoff)
 				metrics.IncDockerReconnect()
 				observability.SetReady(false)
@@ -207,16 +289,7 @@ func consumeEvents(
 
 			metrics.RecordEvent(string(msg.Action))
 
-			recordedAt, alreadyProcessed := processed[msg.Actor.ID]
-			if alreadyProcessed {
-				delete(processed, msg.Actor.ID)
-
-				if !time.Unix(0, msg.TimeNano).After(recordedAt) {
-					continue
-				}
-			}
-
-			_ = processOne(ctx, msg.Actor.ID, metrics, apply, "could not process container")
+			coord.handleEvent(ctx, &msg)
 		}
 	}
 }
@@ -224,17 +297,23 @@ func consumeEvents(
 // processOne applies device rules to one container and records the outcome:
 // rules-applied result, apply duration, last-event timestamp on success, and
 // a WARN with logMsg on failure. It is shared by the startup enumeration and
-// the event stream so both paths report identically.
+// the event stream so both paths report identically. The apply runs under a
+// per-container timeout so a hung Docker call made while processing (inspect)
+// cannot stall the enumeration or the event loop behind it.
 func processOne(
 	ctx context.Context,
 	containerID string,
 	metrics *observability.Recorder,
 	apply applyFn,
+	timeout time.Duration,
 	logMsg string,
 ) error {
 	start := time.Now()
 
-	applyErr := apply(ctx, containerID)
+	applyCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	applyErr := apply(applyCtx, containerID)
 	if applyErr != nil {
 		logger.L().Warn(logMsg, "id", containerID, "err", applyErr)
 		metrics.RecordRuleApplied(false)

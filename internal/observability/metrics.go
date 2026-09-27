@@ -36,9 +36,12 @@ type Recorder struct {
 	containersScanned     prometheus.Counter
 	containersSkipped     *prometheus.CounterVec
 	deviceFilesDiscovered prometheus.Counter
+	candidatesSkipped     *prometheus.CounterVec
 	ruleFailures          prometheus.Counter
 	dryRunSkips           prometheus.Counter
 	lastEventTimestamp    prometheus.Gauge
+	pendingContainers     prometheus.Gauge
+	reloadIncomplete      prometheus.Gauge
 }
 
 // NewRecorder registers all metric collectors against Prometheus' default
@@ -87,6 +90,11 @@ func NewRecorder() *Recorder {
 			Help: "Device files for which rules were collected.",
 		}),
 
+		candidatesSkipped: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "sda_device_candidates_skipped_total",
+			Help: "Names under a /dev mount that name no device (outside_dev, dangling, not_device).",
+		}, []string{"reason"}),
+
 		ruleFailures: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sda_rule_failures_total",
 			Help: "Per-device rule failures (entries that passed policy but could not be turned into a rule, and walk errors).",
@@ -100,6 +108,16 @@ func NewRecorder() *Recorder {
 		lastEventTimestamp: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "sda_last_event_timestamp_seconds",
 			Help: "Unix timestamp of the last container processed successfully (event, startup or reload).",
+		}),
+
+		pendingContainers: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "sda_reconcile_pending_containers",
+			Help: "Containers whose last reconciliation failed and that are being retried with backoff.",
+		}),
+
+		reloadIncomplete: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "sda_reload_incomplete",
+			Help: "1 until a reconciliation pass for the latest config and trigger has visited every running container, else 0.",
 		}),
 	}
 }
@@ -181,6 +199,15 @@ func (rec *Recorder) AddDeviceFilesDiscovered(count int) {
 	rec.deviceFilesDiscovered.Add(float64(count))
 }
 
+// AddCandidatesSkipped adds count to the skipped-candidates counter for reason.
+func (rec *Recorder) AddCandidatesSkipped(reason string, count int) {
+	if rec == nil {
+		return
+	}
+
+	rec.candidatesSkipped.WithLabelValues(reason).Add(float64(count))
+}
+
 // AddRuleFailures adds count to the rule-failures counter.
 func (rec *Recorder) AddRuleFailures(count int) {
 	if rec == nil {
@@ -206,4 +233,28 @@ func (rec *Recorder) SetLastEvent(eventTime time.Time) {
 	}
 
 	rec.lastEventTimestamp.Set(float64(eventTime.Unix()))
+}
+
+// SetPendingContainers records how many containers await a reconcile retry.
+func (rec *Recorder) SetPendingContainers(count int) {
+	if rec == nil {
+		return
+	}
+
+	rec.pendingContainers.Set(float64(count))
+}
+
+// SetReloadIncomplete records whether the latest requested reconciliation
+// pass has yet to visit every running container.
+func (rec *Recorder) SetReloadIncomplete(incomplete bool) {
+	if rec == nil {
+		return
+	}
+
+	value := 0.0
+	if incomplete {
+		value = 1
+	}
+
+	rec.reloadIncomplete.Set(value)
 }

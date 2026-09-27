@@ -52,103 +52,111 @@ fixed set, it must be rejected at load time, naming the key and the bad value.
 
 `policy.ParseMode` rejects an unknown `policy-mode`, and `policy.Global.Validate` wraps glob errors
 as `device-allow: …` / `device-deny: …` via `policy.ValidateGlobs`. `run` in
-`cmd/swarm-device-access/main.go` calls `Validate` after `applyFileConfig` merges the file into the
-flags, and exits `1` with `invalid config: …` on failure; an unreadable or unparsable file from
-`config.LoadFile` (`internal/config/loader.go`) makes it exit `1` with `config file error: …`. Covered by
-`TestGlobalValidate` and `TestValidateGlobs`.
+`cmd/swarm-device-access/main.go` calls `Validate` and `config.ValidateEnums` (log-format, log-level,
+policy-mode) on the effective values after `applyFileConfig` merges the file into the flags, and exits
+`1` with `invalid config: …` on failure. `config.LoadFile` (`internal/config/loader.go`) is strict: it
+checks every known key's exact YAML shape (following aliases; explicit `null`, a quoted `"yes"` for a
+bool and `[null]` in a list are errors), refuses merge keys, unknown keys and a second document, and
+validates the enums; any failure makes the daemon exit `1` with `config file error: …`. Covered by
+`TestGlobalValidate`, `TestValidateGlobs`, `TestLoadFile_*` and `TestValidateEnums`.
 
 - [ ] A new enum-like key or flag is checked in `Validate` (or an equivalent load-time check) with
       a table test covering an unknown value.
 - [ ] The error names the key, so an operator can fix it without reading Go.
-- [ ] **Known gap:** `log-format` and `log-level` are not validated — `logger.Configure` falls back
-      to `text` and `INFO` on anything it does not recognize. That cannot widen device access, but
-      it is the pattern this item forbids; do not copy it for a key that can.
+- [ ] A new file key gets an entry in `keyShapes` (`internal/config/loader.go`), so an explicit
+      `null` or a wrong type is rejected instead of decoding as "not set".
 
 ## 3. Labels are untrusted input
 
-Anyone who can `docker service create` or `docker run` sets `swarm-device-access.*` labels, and on
-manager nodes service labels are merged in too (`policy.MergeLabels`, container labels winning,
-called from `Processor.ProcessContainer` in `internal/processor/processor.go`). Treat every label
+Anyone who can `docker service create` or `docker run` sets `swarm-device-access.*` labels. The
+container's own labels are the **only** label input: `Processor.Reconcile`
+(`internal/processor/processor.go`) parses `Config.Labels` from the container inspect and nothing
+else. Swarm service labels (`deploy.labels:`) are ignored, and the processor never calls
+`ServiceInspect` or `Info` (neither is part of `DockerInspector`), so a decision cannot depend on
+which node runs the daemon or on whether a service inspect happened to succeed. Treat every label
 as attacker-controlled.
 
 - `policy.ParseContainer` rejects a non-boolean `enable` and any malformed glob in `device-allow`
-  or `device-deny`, naming the label. `ProcessContainer` then **skips the container** (warns,
-  records `invalid_labels`) rather than falling back to the global policy — a typo in a narrowing
-  label must never widen access to "whatever the global allows".
+  or `device-deny`, naming the label. `Reconcile` then gives the container the **empty** device
+  set (warns, records `invalid_labels`, revokes any earlier grant) rather than falling back to the
+  global policy — a typo in a narrowing label must never widen access to "whatever the global
+  allows", nor keep what an earlier, valid label granted.
 - Labels can only narrow: `policy.Global.DeviceAllowed` checks the global deny, the container deny,
   the global allow and the container allow, in that order. **Deny wins over allow**, and a
   per-container allow can never re-admit a path the global allow excludes.
 - An empty or all-whitespace `device-allow` label means "inherit the global allow set", not
   "allow nothing" — that is documented in the README label table; keep it that way or change both.
 
-Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`, `TestMergeLabels`
-and `TestProcessContainer_SwarmServiceLabels`.
+Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`,
+`TestReconcile_IgnoresServiceLevelLabels` and
+`TestReconcile_WarnsOnUnknownContainerLabel`.
 
-- [ ] New label parsing returns an error on malformed input, and the caller skips the container.
+- [ ] New label parsing returns an error on malformed input, and the caller applies the empty set.
 - [ ] A new label can only narrow; a test proves deny still beats allow with it set.
-- [ ] Unknown `swarm-device-access.*` keys keep being reported (`policy.UnknownLabels`), not
-      silently accepted.
-- [ ] **Known gap:** on a manager node, when the parent-service inspect fails,
-      `Processor.resolveServiceLabels` logs `could not inspect parent service; using container
-      labels only` and returns no service labels — so a service-level `device-deny` (set under
-      `deploy.labels:`, which the README already tells users not to do) is silently dropped and
-      the container gets wider access than the deployer asked for. It is not an escalation — the
-      same deployer sets both label sets — but it is the "lost narrowing label means wider access"
-      pattern this item forbids. Do not extend it; the fail-closed fix is to skip the container
-      when a service it belongs to cannot be inspected.
+- [ ] Unknown `swarm-device-access.*` keys on the container keep being reported
+      (`policy.UnknownLabels`, warned by `Reconcile`), not silently accepted.
+- [ ] No second label source (service, node, stack) is added back: a label that only some nodes
+      can read, or that disappears when an API call fails, turns a lost narrowing label into wider
+      access.
 
 ## 4. Only `/dev` mount sources become rules
 
 `collectContainerRules` (`internal/processor/processor.go`) passes a mount to
 `processor.CollectMountRules` only when `processor.IsMountSource` says its `Source` is `/dev` or
-under `/dev/`. `CollectMountRules` (`internal/processor/rules.go`) resolves a symlinked mount
-source, walks directory mounts, applies `DeviceAllowed` to each resolved entry, and emits a rule only
-for a character or block device. Unresolvable symlinks get two different treatments:
+under `/dev/`. From there every name (the source, each walked entry, each symlink) goes through one
+`evaluateCandidate` (`internal/processor/rules.go`) on file descriptors, never re-walked paths:
 
-- a dangling or unresolvable symlink **found while walking a directory mount** is skipped, with a
-  warning only when an explicit allow glob names it (`skipUnresolvable`, the fix merged in commit
-  `244d2a5`);
-- a mount **source** that is itself an unresolvable symlink returns an error in
-  `MountResult.Errs`, which `ProcessContainer` logs as a rule failure — no rule is emitted for it
-  either way.
-Covered by `TestIsDeviceMountSource`, `TestCollectMountRules_*` and
-`TestCollectMountRules_UnresolvableSymlinks_ExplicitAllow` / `_NoAllowGlobs`.
+- a lexical gate: the name must be clean and under `/dev`, so `/dev/../etc/x` is skipped
+  (`outside_dev`);
+- `openat2` beneath a `/dev` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (the `devFS`
+  seam in `devfs.go`): no symlink step can leave `/dev`. An absolute link back into `/dev` is
+  followed by hand, bounded to 40 hops; any other escape is skipped with a warning. The daemon
+  refuses to start without `openat2` (`ProbeOpenat2`);
+- `fstat` on that descriptor gives the device number, and sysfs `DEVNAME` gives the canonical name,
+  so a node planted under `/dev/shm` is judged as the device it is;
+- `Denied` is checked on the alias, the resolved and the canonical name, `Authorized` on the
+  canonical and the resolved name; candidates are aggregated per device across all mounts, and one
+  deny vote suppresses the device.
+
+A dangling name found while walking is skipped (a warning only when an explicit allow glob names it).
+Everything that leaves the set unknown is an entry in `MountResult.Errs` and makes the container's
+whole desired set empty (reason `incomplete_device_set`) until a retry succeeds: a missing mount
+source, an identity that cannot be established for a candidate policy would otherwise grant, any
+walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
+Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName`, `TestCollect_*`,
+`TestProcessor_*EmptiesTheSet` and `TestRealDevFS_Openat2Containment`.
 
 - [ ] No new code path turns a non-`/dev` source into a rule.
-- [ ] A new resolution step (symlink, bind, overlay) fails only that entry on error — a skip or a
-      per-mount error in `MountResult.Errs` — and never falls back to the unresolved path.
-- [ ] **Known gap:** `IsMountSource` is a lexical prefix check on the unresolved `Source`, and
-      the mount `Source` comes from whoever writes the service spec — the same untrusted deployer
-      who sets the labels — so `/dev/../etc` passes it. The resolved targets in
-      `CollectMountRules` and `visitSymlink` are policy-checked but not re-checked against
-      `/dev`, and `/dev/shm` and `/dev/mqueue` are world-writable (mode 1777) on normal hosts, so
-      a non-root host user or a container that bind-mounts `/dev/shm` can plant symlinks the walk
-      follows. What bounds this today is not who can write to `/dev`; it is that
-      `DeviceAllowed` runs on the **resolved** path, so allow globs anchored at `/dev/...` reject a
-      target they do not name, and that only character and block device nodes become rules. With
-      no allow globs configured (the default) that bound is only as tight as the deployer's
-      ability to mount the target directly. A change that touches resolution must not widen
-      this; the right fix is `filepath.Clean` plus an `IsMountSource` check on every resolved
-      path.
+- [ ] A new resolution step goes through `evaluateCandidate`; it skips a name that names nothing
+      under `/dev`, and anything it cannot establish is an error that empties the set — never a
+      fallback to path-only policy and never a silent skip.
+- [ ] Policy keeps judging the canonical identity: deny on every name, allow on the canonical and
+      resolved names. An alias-level deny is only a reconciliation-time veto (a container can hide
+      the alias between passes); the durable boundary is a glob on the canonical name.
+- [x] **Closed gap (containment):** mount sources and symlink targets are contained to `/dev` by
+      the lexical gate and `openat2 RESOLVE_BENEATH`, not by a prefix check on the unresolved path.
+- [x] **Closed gap (planted nodes):** a node planted in a world-writable `/dev` directory
+      (`/dev/shm`, `/dev/mqueue`) is judged by its sysfs `DEVNAME`, so `/dev/shm/x` made as `b 8:0`
+      is denied by a deny on `/dev/sd*` and not authorized by an allow on `/dev/shm/*`.
 
 ## 5. Hot reload never widens access on a parse error
 
-`watchSIGHUP` (`cmd/swarm-device-access/config.go`) re-reads the file on `SIGHUP`. On a read or
-parse error from `config.LoadFile` it logs `config reload failed` and keeps the running config; on
-a `policy.Global.Validate` failure it logs `config reload: invalid policy; keeping previous config`
-and keeps it too. `config.Store.Set` swaps the whole `config.Runtime` (policy and `dry-run`)
-atomically, so no reader sees half a policy.
+`watchSIGHUP` (`cmd/swarm-device-access/config.go`) calls `reloader.reload` on `SIGHUP`. It
+re-reads the file and recomputes every setting with the pure `mergeSettings(flags, cliSet, file)`
+from the flag snapshot taken right after `flag.Parse`, so a key removed from the file falls back to
+the command line or the default. Validation (`settings.validate`: enums and policy) and the dry-run
+rule (a reload may turn `dry-run` off, never on) run before anything is applied; any failure is
+logged as `config reload rejected; keeping previous config` and leaves the store, the logger and
+the in-force settings untouched. On success the logger is reconfigured and the runtime is published
+through `Processor.PublishAndReconcile`, which swaps the whole `config.Runtime` (policy and
+`dry-run`) atomically and reconciles every running container. Restart-only settings changed in the
+file are logged and ignored. Covered by `TestReload_*` and `TestMergeSettings_*`.
 
-- [ ] Every new reloadable key is validated before `store.Set`, and a failure `continue`s without
-      touching the store.
+- [ ] Every new setting goes through `settings`/`mergeSettings`, is checked in
+      `settings.validate`, and a failure returns before `configureLogger` or `publish`.
 - [ ] A reload that fails leaves the previous policy and `dry-run` in force — never a zero value,
       never a partially merged one.
-- [ ] **Known gap:** `watchSIGHUP` calls `logger.Configure` with the file's `log-format`,
-      `log-level` and `log-time` before `Validate` runs, so a reload rejected for its policy still
-      changes logging. Device access is unaffected, but do not move any access-relevant setting
-      ahead of validation the same way.
-- [ ] **Known gap:** there is no test for the reload path. A change to `watchSIGHUP` adds one that
-      sends an invalid file and asserts the previous policy is still loaded.
+- [ ] A new restart-only setting is added to `settings.coldChanges`.
 
 ## 6. Least privilege in the image and the deployment
 
@@ -185,6 +193,6 @@ a static binary onto `dhi.io/static` with `USER 0` and nothing else in the runti
 - [ ] Empty and unknown mode deny; a test covers both
 - [ ] Enum-like config and flags validated at load, by name
 - [ ] Malformed labels skip the container; labels only narrow; deny beats allow
-- [ ] Only resolved `/dev` device nodes become rules; unresolvable symlinks are skipped
+- [ ] Only device nodes resolved beneath `/dev` become rules; an unknown identity or walk empties the set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional

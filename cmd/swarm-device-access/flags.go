@@ -37,7 +37,7 @@ func (f *stringSliceFlag) Set(val string) error {
 
 var (
 	logFormat    = flag.String("log-format", "text", "Either json, text or plain")
-	logLevel     = flag.String("log-level", "info", "Either debug, info, warn, error, fatal, panic")
+	logLevel     = flag.String("log-level", "info", "Either debug, info, warn or error")
 	logTime      = flag.Bool("log-time", false, "Include timestamp in logs")
 	dockerSocket = flag.String(
 		"docker-socket",

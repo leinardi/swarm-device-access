@@ -47,42 +47,52 @@ The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on
 
 See [`docs/architecture.md`](docs/architecture.md) for the sequence diagram, BPF program structure, package layout, and troubleshooting guide.
 
-Three layers, all under `cmd/swarm-device-access` + `internal/`:
+Four layers, all under `cmd/swarm-device-access` + `internal/`:
 
-**1. Event loop (`cmd/swarm-device-access/main.go`)**
+**1. Entrypoint and config (`cmd/swarm-device-access/`, `internal/config/`, `internal/policy/`)**
 
-`run()` performs:
+`main.go` parses flags, merges them with the config file (`config.go`: `flagSettings`, `mergeSettings`, `validate`), refuses to start
+without `openat2` (`processor.ProbeOpenat2`), creates the `config.Store`/`Publisher`, and wires the processor and `daemon.Run`. `SIGHUP`
+re-reads the file (`reloader.reload`) and publishes through `Processor.PublishAndReconcile`. `internal/config` is the strict YAML loader and
+the generation-numbered runtime store; `internal/policy` holds mode, label parsing and the glob predicates (`Denied`, `Authorized`).
 
-1. `processExistingContainers` — enumerates running containers at startup and applies rules to each (closes the "daemon restart loses state" gap).
-2. `startReloadWatcher` — best-effort subscribe to systemd DBus `Reloading` signal so that `systemctl daemon-reload` (which wipes cgroup BPF programs)
-   triggers a full re-apply.
-3. `listenEvents` — subscribes to Docker `start` + `unpause` events, reconnects with exponential backoff (`minBackoff`/`maxBackoff`) instead of
-   `log.Fatal` on stream errors.
+**2. Event loop and coordinator (`internal/daemon/`)**
 
-A `processed map[string]struct{}` deduplicates the overlap window between the startup enumeration and the live event stream.
+`Run` subscribes to Docker events (`start`, `unpause`, `die`, `destroy`) **before** the first pass, starts the coordinator, requests the
+startup pass, starts the systemd reload watcher, then consumes events (`listenEvents` → `consumeEvents`, reconnecting with
+`minBackoff`/`maxBackoff` backoff). The coordinator (`coordinator.go`) is the single owner of reconciliation passes: startup, `SIGHUP` and
+systemd reloads only request one; it retries failed containers with backoff, reserves each container so concurrent work coalesces, sweeps
+the lifecycle history, and owns the `processed map[string]time.Time` dedup (entries expire after `processedTTL`) that skips start events an
+enumeration already covered. Every reconcile goes through `processOne` for metrics and logging.
 
-For each container, `processContainer` reads its PID, detects cgroup version via `cgroup.GetDeviceCGroupVersion`, resolves the host cgroup path (
-`host/sys/...`), walks every `mount.Source` under `/dev`, and calls `cgroup.AddDeviceRules` with the major/minor pair from `unix.Stat`.
+**3. Reconcile (`internal/processor/`)**
 
-**2. Cgroup BPF (`internal/cgroup/`)**
+`Processor.Reconcile(id)` is the one idempotent path: inspect, compute the complete desired set (`computeDesired`: policy, then
+`CollectMountRules` per `/dev` mount, which resolves each name beneath `/dev` with `openat2`, identifies it by `fstat` and sysfs `DEVNAME`,
+and aggregates per device), then apply it (`applyPinned`: pidfd pin, `/proc/<pid>/cgroup`, `cgroup.OpenCgroup`, re-verify,
+`SetDeviceRules`). Anything uncertain yields the empty set. `Terminate` and `Sweep` revoke and release ended runs (`lifecycle.go`).
 
-`api.go` defines the `Interface` (`GetDeviceCGroupMountPath`, `GetDeviceCGroupRootPath`, `AddDeviceRules`) and a `New(version)` factory. `v1.go`
-writes to `devices.allow`. `v2.go` + `ebpf.go` compile and attach a `BPF_CGROUP_DEVICE` program (cilium/ebpf) via `BPF_F_ALLOW_MULTI` so it composes
-with the container runtime's existing filter rather than replacing it. **This code is preserved from NVIDIA's k8s-device-plugin (Apache 2.0) — touch
-with care; the upstream PRs went into runc/containerd long ago.**
+**4. Cgroup (`internal/cgroup/`)**
 
-**3. Glue (`internal/logger/`, `internal/systemd/`)**
+`api.go` defines the `Interface` (`GetDeviceCGroupMountPath`, `GetDeviceCGroupRootPath`, `SetDeviceRules(handle, rules)`) and the
+`New(version, ledger, cache)` factory; `handle.go` holds the directory-fd `CgroupHandle`. `v1.go`/`v1set.go`/`ledger.go` write
+`devices.allow` and `devices.deny` and track the daemon's own exceptions. `v2.go`, `v2plan.go`, `v2ops.go`, `owned.go` and `ebpf.go` wrap the
+runtime's `BPF_CGROUP_DEVICE` filter in an owned block and swap it in with `BPF_F_ALLOW_MULTI` (or `BPF_F_REPLACE`). **Parts of this code are
+preserved from NVIDIA (Apache 2.0) — touch with care.**
+
+**Glue (`internal/logger/`, `internal/systemd/`, `internal/observability/`)**
 
 - `logger` — slog wrapper with `text`/`json`/`plain` handlers, `-log-time` strips timestamps via a `ReplaceAttr`. `L()` lazy-inits a default INFO text
   handler so packages can log without explicit wiring.
 - `systemd` — DBus `Reloading` signal watcher. Triggers re-apply on the **completion** edge only (signal body `active=false`). The start edge (`true`)
   is mid-reload and races the cgroup wipe. Gracefully degrades when DBus is unreachable.
+- `observability` — Prometheus `Recorder` (nil-safe), `/healthz`, `/readyz` and pprof servers.
 
 ## Runtime requirements
 
 The daemon **must** run with `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`, and bind mounts for `/var/run/docker.sock` and
-`/sys → /host/sys`. The `hostRootPath = "/host"` constant in `main.go` is the inside-container view of the host root; cgroup paths are joined against
-it. The DBus socket mount is optional — enables reload handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`; the container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run` symlink.
+`/sys → /host/sys`. The `hostRootPath = "/host"` constant in `main.go` is the inside-container view of the host root; cgroup paths (and sysfs, when
+mounted there) are joined against it. The DBus socket mount is optional — enables reload handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`; the container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run` symlink.
 
 ## Conventions worth knowing
 
@@ -117,7 +127,7 @@ Skills live in `.agents/skills/` (symlinked as `.claude/skills`). Load them befo
 All commits MUST be Conventional Commits 1.0.0 **with a scope**: `<type>(<scope>)[!]: <description>`, optional blank-line body and
 footers. Enforced by the `conventional-pre-commit` `commit-msg` hook (`--force-scope`). Types: `feat`, `fix`, `docs`, `test`, `refactor`,
 `perf`, `build`, `ci`, `chore`, `style`, `revert`. Breaking changes use `!` before `:` or a `BREAKING CHANGE:` footer. Release notes are
-generated from these messages. Examples: `fix(processor): skip unresolvable symlinks`, `ci(dependabot): add dhi registry`.
+not built from these messages: `gh release create --generate-notes` lists the merged pull requests by title. Examples: `fix(processor): skip unresolvable symlinks`, `ci(dependabot): add dhi registry`.
 
 Release versions are derived from the commit types since the last tag (`feat` minor, `fix` patch, `!`/`BREAKING CHANGE` major;
 anything else bumps nothing), so a wrong type ships a wrong version. PRs land as merge commits, so every commit counts, not just the

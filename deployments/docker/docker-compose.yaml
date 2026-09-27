@@ -6,35 +6,51 @@ services:
       # The wrapper only needs the host Docker socket to dispatch `docker run`.
       - /var/run/docker.sock:/var/run/docker.sock
 
+    # Swarm rejects privileged/cgroup/pid/userns on services. This wrapper
+    # launches the actual daemon with `docker run`, where those flags are valid.
     command:
-      - run
-      - -i
-      - --rm
-      - --privileged
-      - --cgroupns=host
-      - --pid=host
-      - --userns=host
-      - -v
-      - /sys:/host/sys
-      - -v
-      - /var/run/docker.sock:/var/run/docker.sock
-      - -v
-      - /dev:/dev
-      # Optional: gives the daemon access to the host's system DBus so it can
-      # detect systemctl daemon-reload (which wipes cgroup BPF programs) and
-      # re-apply device rules. Without this mount, reload handling is skipped
-      # and the daemon logs a warning at startup.
-      # NOTE: dhi.io/static has no /var/run→/run symlink; the container-side
-      # path must be /var/run/dbus/system_bus_socket (not /run/dbus/...).
-      # - -v
-      # - /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
-      - ghcr.io/leinardi/swarm-device-access:latest
-      - "-log-level"
-      - "info"
-      - "-log-format"
-      - "text"
+      - |
+        # docker run options, before the image. Uncomment a line to add it.
+        set -- --rm --name=swarm-device-access \
+          --privileged --cgroupns=host --pid=host --userns=host \
+          -v /sys:/host/sys \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v /dev:/dev
+        # Reapply device rules after systemctl daemon-reload, which wipes cgroup
+        # BPF programs (without it the daemon warns and skips reload handling).
+        # The container-side path must be under /var/run: dhi.io/static has no
+        # /var/run -> /run symlink.
+        # set -- "$$@" -v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+        # A config file for -config below. Mount the directory, not the file:
+        # an editor that replaces the file would leave a file mount on the old
+        # content, and a reload would silently apply it.
+        # set -- "$$@" -v /etc/swarm-device-access:/etc/swarm-device-access:ro
+        set -- "$$@" ghcr.io/leinardi/swarm-device-access:latest
+        # Daemon flags, after the image; before it they are docker run flags.
+        # Reload the config file with: docker kill -s HUP swarm-device-access
+        # set -- "$$@" -config /etc/swarm-device-access/config.yaml
+        set -- "$$@" -log-level info -log-format text
 
-    entrypoint: docker
+        # On SIGTERM or SIGINT from Swarm, stop the daemon and exit with its
+        # status. The trap is set before the daemon starts, and the daemon runs
+        # in the background: a shell waiting on a foreground child only runs
+        # its traps after the child exits.
+        pid=
+        stop_daemon() {
+          docker stop -t 10 swarm-device-access >/dev/null 2>&1
+          wait $$pid
+          exit $$?
+        }
+        trap stop_daemon TERM INT
+
+        # Clear a daemon container left behind by a wrapper that was killed.
+        docker rm -f swarm-device-access >/dev/null 2>&1 || true
+        docker run "$$@" &
+        pid=$$!
+        wait "$$pid"
+        exit $$?
+
+    entrypoint: [ "sh", "-c" ]
 
     restart: unless-stopped
 
@@ -42,3 +58,6 @@ services:
       mode: global
       restart_policy:
         condition: any
+
+    # Leaves time for docker stop -t 10 before Swarm kills the wrapper.
+    stop_grace_period: 30s

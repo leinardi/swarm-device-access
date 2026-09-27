@@ -19,8 +19,8 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
-	"maps"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -33,6 +33,15 @@ const (
 	LabelEnable      = LabelPrefix + "enable"
 	LabelDeviceAllow = LabelPrefix + "device-allow"
 	LabelDeviceDeny  = LabelPrefix + "device-deny"
+)
+
+// devPrefix is what every glob must start with: only paths under /dev are
+// ever matched against it.
+const devPrefix = "/dev/"
+
+var (
+	errGlobNotClean   = errors.New("glob pattern is not a clean path")
+	errGlobOutsideDev = errors.New("glob pattern must start with /dev/")
 )
 
 // Mode controls which containers the daemon processes by default.
@@ -140,13 +149,22 @@ func splitAndTrim(s string) []string {
 }
 
 // ValidateGlobs returns an error if any pattern in patterns is syntactically
-// invalid. Malformed globs silently never match; this prevents silent
-// policy misconfiguration.
+// invalid, not clean, or not under /dev/. Such a glob silently never
+// matches a device path, which for a deny means a device the operator meant
+// to deny stays grantable; rejecting it prevents that misconfiguration.
 func ValidateGlobs(patterns []string) error {
-	for _, p := range patterns {
-		_, err := filepath.Match(p, "")
+	for _, pattern := range patterns {
+		_, err := filepath.Match(pattern, "")
 		if err != nil {
-			return fmt.Errorf("invalid glob pattern %q: %w", p, err)
+			return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+		}
+
+		if filepath.Clean(pattern) != pattern {
+			return fmt.Errorf("%w: %q", errGlobNotClean, pattern)
+		}
+
+		if !strings.HasPrefix(pattern, devPrefix) {
+			return fmt.Errorf("%w: %q", errGlobOutsideDev, pattern)
 		}
 	}
 
@@ -154,7 +172,7 @@ func ValidateGlobs(patterns []string) error {
 }
 
 // Validate checks that the Global policy is well-formed: mode is valid and
-// all glob lists are syntactically correct.
+// every glob passes ValidateGlobs.
 func (g Global) Validate() error {
 	_, err := ParseMode(string(g.Mode))
 	if err != nil {
@@ -197,30 +215,31 @@ func (g Global) Enabled(cpol Container) bool {
 }
 
 // DeviceAllowed reports whether path is permitted by the combined global and
-// per-container allow/deny policy.
+// per-container allow/deny policy: not Denied and Authorized.
 //
 // Global is the maximum allowed access; per-container labels can only narrow
 // it further. Deny always wins over allow.
-//
-
 func (g Global) DeviceAllowed(cpol Container, path string) bool {
-	if matchAny(g.DeviceDeny, path) {
-		return false
-	}
+	return !g.Denied(cpol, path) && g.Authorized(cpol, path)
+}
 
-	if matchAny(cpol.DeviceDeny, path) {
-		return false
-	}
+// Denied reports whether path matches a global or a per-container deny glob.
+// A device is checked under every name it was found by, and one match on
+// any of them denies it.
+func (g Global) Denied(cpol Container, path string) bool {
+	return matchAny(g.DeviceDeny, path) || matchAny(cpol.DeviceDeny, path)
+}
 
+// Authorized reports whether path passes the allow lists: the global one and
+// the per-container one, each allowing everything when empty. A device must
+// be authorized under its canonical and its resolved name; missing the allow
+// list under some other alias is not a reason to deny it.
+func (g Global) Authorized(cpol Container, path string) bool {
 	if len(g.DeviceAllow) > 0 && !matchAny(g.DeviceAllow, path) {
 		return false
 	}
 
-	if len(cpol.DeviceAllow) > 0 && !matchAny(cpol.DeviceAllow, path) {
-		return false
-	}
-
-	return true
+	return len(cpol.DeviceAllow) == 0 || matchAny(cpol.DeviceAllow, path)
 }
 
 // ExplicitlyAllowed reports whether path is matched by at least one explicit
@@ -248,17 +267,6 @@ var knownLabels = map[string]struct{}{
 	LabelDeviceDeny:  {},
 }
 
-// MergeLabels returns a merged label map: service labels as base, container
-// labels win on conflict. Nil inputs are treated as empty maps.
-func MergeLabels(service, container map[string]string) map[string]string {
-	merged := make(map[string]string, len(service)+len(container))
-
-	maps.Copy(merged, service)
-	maps.Copy(merged, container)
-
-	return merged
-}
-
 // UnknownLabels returns a sorted slice of keys in labels that start with
 // LabelPrefix but are not in the known label set. Returns nil when none.
 func UnknownLabels(labels map[string]string) []string {
@@ -279,24 +287,4 @@ func UnknownLabels(labels map[string]string) []string {
 	sort.Strings(unknown)
 
 	return unknown
-}
-
-// KnownLabels returns a sorted list of swarm-device-access.* keys from labels
-// that are recognized by this package (i.e. the inverse of UnknownLabels).
-func KnownLabels(labels map[string]string) []string {
-	var known []string
-
-	for k := range labels {
-		if _, ok := knownLabels[k]; ok {
-			known = append(known, k)
-		}
-	}
-
-	if len(known) == 0 {
-		return nil
-	}
-
-	sort.Strings(known)
-
-	return known
 }

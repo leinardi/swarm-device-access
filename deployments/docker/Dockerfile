@@ -1,25 +1,29 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-# Base images are pinned as tag@sha256:<index digest>, so a rebuild of the same
-# commit (a release recovery, for one) uses the same bases. Dependabot's docker
-# ecosystem updates the tag and the digest together, through reviewed PRs.
+# Base images, and the Dockerfile frontend above, are pinned as
+# tag@sha256:<index digest>, so a rebuild of the same commit (a release
+# recovery, for one) uses the same bases and the same frontend. Dependabot's
+# docker ecosystem updates the base images' tag and digest together, through
+# reviewed PRs; the frontend pin is updated by hand.
 
 ########################
-# deps: cache modules
+# deps: download modules in a layer keyed on go.mod and go.sum only
 ########################
 FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev@sha256:0d95d4f9889abcf60c182228d28fa83fde3e0dc2330bb1365e5960273b43ed57 AS deps
 WORKDIR /src
 RUN --mount=type=cache,target=/var/cache/apk \
 	apk add --no-cache git
 COPY go.mod go.sum ./
-# Use a named cache so we can reuse it in the build stage (no COPY needed)
+# The named cache is shared with the build stage, which starts from this one.
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
 	go mod download
 
 ########################
-# build: compile static binary
+# build: compile static binary, on top of deps (same base, platform and
+# WORKDIR): the modules are downloaded before the source is copied, so a
+# source-only change does not repeat that step
 ########################
-FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev@sha256:0d95d4f9889abcf60c182228d28fa83fde3e0dc2330bb1365e5960273b43ed57 AS build
+FROM deps AS build
 ARG VERSION="dev"
 ARG COMMIT="none"
 ARG DATE="unknown"

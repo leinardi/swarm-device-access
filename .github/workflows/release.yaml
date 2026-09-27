@@ -137,9 +137,29 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Builds dist/ first, so the tests find the daemon binary and do not skip.
+      # The same enforcement run as integration.yaml: the daemon image the
+      # enforcement tests run is built from dhi.io base images.
+      - name: Log in to Docker Hardened Images (dhi.io)
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: dhi.io
+          username: ${{ vars.DHI_USERNAME }}
+          password: ${{ secrets.DHI_TOKEN }}
+
+      # Builds dist/ and the daemon image first. The enforcement flags turn
+      # every missing prerequisite into a failure, and the SKIP check makes
+      # sure a green run really exercised BPF.
       - name: Run the integration tests
-        run: make go-test-integration
+        env:
+          SDA_IT_ENFORCE: "1"
+          SDA_IT_REQUIRE_RELOAD: "1"
+        run: |
+          set -o pipefail
+          make go-test-integration 2>&1 | tee integration.log
+          if grep -E -- '^[[:space:]]*--- SKIP' integration.log; then
+            echo "::error::integration tests were skipped; SDA_IT_ENFORCE=1 requires every test to run"
+            exit 1
+          fi
 
   release:
     needs:

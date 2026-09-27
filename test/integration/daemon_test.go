@@ -57,7 +57,7 @@ const (
 // that bind-mounts /dev/null, and asserts the daemon grants that one device.
 //
 // No BPF syscalls or elevated privileges are required: -dry-run skips
-// AddDeviceRules and logs intent instead.
+// SetDeviceRules and logs intent instead.
 func TestDaemon_DryRun_DetectsDeviceMount(t *testing.T) {
 	cli := requireDocker(t)
 	ensureTestImage(t, cli)

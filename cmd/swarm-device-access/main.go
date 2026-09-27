@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/cilium/ebpf/rlimit"
 	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
@@ -44,6 +45,64 @@ func main() {
 	os.Exit(run())
 }
 
+// startupSettings loads the config file, merges it with the flags and checks
+// the result and the kernel before anything uses them.
+func startupSettings(flags *settings, cliSet map[string]bool) (settings, error) {
+	// CLI flags override file values.
+	fileCfg, err := config.LoadFile(*configFile)
+	if err != nil {
+		return settings{}, fmt.Errorf("config file error: %w", err)
+	}
+
+	effective := mergeSettings(*flags, cliSet, fileCfg)
+
+	// The file's values were checked when it was loaded; the effective
+	// values (flags included) are checked here, before anything uses them.
+	err = effective.validate()
+	if err != nil {
+		return settings{}, fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Device paths are resolved beneath /dev with openat2; without it no
+	// path can be contained, so refuse to start rather than fall back.
+	err = processor.ProbeOpenat2()
+	if err != nil {
+		return settings{}, fmt.Errorf("unsupported kernel: %w", err)
+	}
+
+	return effective, nil
+}
+
+// startServers starts the configured metrics and debug servers. A busy or
+// invalid address is an error; if the second server fails, the first is
+// stopped again. The returned stop shuts down whatever was started.
+func startServers(ctx context.Context, effective *settings) (stop func(), err error) {
+	stopMetrics := func() {}
+
+	if effective.MetricsAddr != "" {
+		stopMetrics, err = observability.StartMetricsServer(ctx, effective.MetricsAddr)
+		if err != nil {
+			return nil, fmt.Errorf("start metrics server: %w", err)
+		}
+	}
+
+	stopDebug := func() {}
+
+	if effective.DebugAddr != "" {
+		stopDebug, err = observability.StartDebugServer(ctx, effective.DebugAddr)
+		if err != nil {
+			stopMetrics()
+
+			return nil, fmt.Errorf("start debug server: %w", err)
+		}
+	}
+
+	return func() {
+		stopDebug()
+		stopMetrics()
+	}, nil
+}
+
 func run() int {
 	flag.Parse()
 
@@ -53,31 +112,28 @@ func run() int {
 		return 0
 	}
 
-	store := config.NewStore()
+	// Registered before anything slow, so a SIGHUP during startup is queued
+	// for watchSIGHUP instead of terminating the process (its default).
+	sighup := make(chan os.Signal, 1)
 
-	// Load config file; CLI flags override file values.
-	fileCfg, fileErr := config.LoadFile(*configFile)
-	if fileErr != nil {
-		fmt.Fprintf(os.Stderr, "config file error: %v\n", fileErr)
+	signal.Notify(sighup, syscall.SIGHUP)
+	defer signal.Stop(sighup)
 
-		return 1
-	}
+	flags, cliSet := flagSettings()
 
-	applyFileConfig(&fileCfg, store)
-
-	startupValidationErr := store.Load().Policy.Validate()
-	if startupValidationErr != nil {
-		fmt.Fprintf(os.Stderr, "invalid config: %v\n", startupValidationErr)
+	effective, startupErr := startupSettings(&flags, cliSet)
+	if startupErr != nil {
+		fmt.Fprintln(os.Stderr, startupErr)
 
 		return 1
 	}
 
-	logger.Configure(*logFormat, *logLevel, *logTime)
+	logger.Configure(effective.LogFormat, effective.LogLevel, effective.LogTime)
 
-	log := logger.L()
+	store, publisher := config.NewStore(effective.runtime())
 
 	cfg := store.Load()
-	log.Info("swarm-device-access starting",
+	logger.L().Info("swarm-device-access starting",
 		"version", version,
 		"commit", commit,
 		"date", date,
@@ -88,6 +144,27 @@ func run() int {
 		"device_deny", cfg.Policy.DeviceDeny,
 	)
 
+	if cfg.DryRun {
+		// Dry-run has no cgroup view and no saved ownership state, so it
+		// cannot even count what a previous live run left behind.
+		logger.L().Warn(
+			"dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run",
+		)
+	}
+
+	// Lift RLIMIT_MEMLOCK once for the process so BPF_PROG_LOAD does not fail
+	// on kernels that still charge BPF memory to it (no-op from Linux 5.11,
+	// where memcg accounting replaced it). The limit is not inherited by
+	// containers.
+	memlockErr := rlimit.RemoveMemlock()
+	if memlockErr != nil {
+		logger.L().Warn(
+			"could not remove RLIMIT_MEMLOCK; loading BPF device filters may fail",
+			"err",
+			memlockErr,
+		)
+	}
+
 	rootCtx, cancelRoot := signal.NotifyContext(
 		context.Background(),
 		syscall.SIGINT,
@@ -95,13 +172,10 @@ func run() int {
 	)
 	defer cancelRoot()
 
-	// SIGHUP: reload the config file and update hot settings + logger.
-	go watchSIGHUP(rootCtx, store)
-
 	// API version negotiation is the client default; it runs lazily on the first request.
-	cli, err := client.New(client.WithHost("unix://" + *dockerSocket))
+	cli, err := client.New(client.WithHost("unix://" + effective.DockerSocket))
 	if err != nil {
-		log.Error("docker client init failed", "err", err)
+		logger.L().Error("docker client init failed", "err", err)
 
 		return 1
 	}
@@ -109,41 +183,36 @@ func run() int {
 
 	recorder := observability.NewRecorder()
 
-	isSwarmManager := false
-
-	infoResult, infoErr := cli.Info(rootCtx, client.InfoOptions{})
-	if infoErr != nil {
-		log.Warn(
-			"could not query docker info; assuming worker node (service-label inspection disabled)",
-			"err",
-			infoErr,
-		)
-	} else {
-		isSwarmManager = infoResult.Info.Swarm.ControlAvailable
-		log.Info("swarm role detected",
-			"manager", isSwarmManager,
-			"local_node_state", infoResult.Info.Swarm.LocalNodeState,
-		)
-	}
-
 	// Start optional observability servers before the main loop so they are
 	// reachable during startup enumeration.
-	if *metricsAddr != "" {
-		observability.StartMetricsServer(rootCtx, *metricsAddr)
-	}
+	stopServers, err := startServers(rootCtx, &effective)
+	if err != nil {
+		logger.L().Error("could not start observability server", "err", err)
 
-	if *debugAddr != "" {
-		observability.StartDebugServer(rootCtx, *debugAddr)
+		return 1
 	}
+	defer stopServers()
 
 	proc := &processor.Processor{
-		Inspector:      cli,
-		Cfg:            store,
-		Metrics:        recorder,
-		HostRoot:       hostRootPath,
-		ProcRoot:       "/",
-		IsSwarmManager: isSwarmManager,
+		Inspector:   cli,
+		Cfg:         store,
+		Publisher:   publisher,
+		Metrics:     recorder,
+		HostRoot:    hostRootPath,
+		ProcRoot:    "/",
+		CallTimeout: daemon.DockerCallTimeout,
 	}
+
+	// SIGHUP: reload the config file, update the logger and publish the
+	// new config through the processor.
+	go watchSIGHUP(rootCtx, sighup, &reloader{
+		path:            *configFile,
+		flags:           flags,
+		cliSet:          cliSet,
+		current:         effective,
+		configureLogger: logger.Configure,
+		publish:         proc.PublishAndReconcile,
+	})
 
 	runErr := daemon.Run(rootCtx, daemon.Options{
 		Docker:  cli,
@@ -151,12 +220,12 @@ func run() int {
 		Metrics: recorder,
 	})
 	if runErr != nil {
-		log.Error("daemon error", "err", runErr)
+		logger.L().Error("daemon error", "err", runErr)
 
 		return 1
 	}
 
-	log.Info("swarm-device-access shutting down")
+	logger.L().Info("swarm-device-access shutting down")
 
 	return 0
 }

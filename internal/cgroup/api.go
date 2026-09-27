@@ -20,6 +20,7 @@ package cgroup
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -43,16 +44,28 @@ type DeviceRule struct {
 type Interface interface {
 	GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error)
 	GetDeviceCGroupRootPath(procRootPath string, prefix string, pid int) (string, error)
-	AddDeviceRules(cgroupPath string, devices []DeviceRule) error
+	// SetDeviceRules makes the daemon-owned device grants of the cgroup
+	// behind handle equal exactly devices. Every read and write goes through
+	// the handle's descriptor, never the path.
+	SetDeviceRules(handle *CgroupHandle, devices []DeviceRule) error
 }
 
+// New returns the cgroup API for version. ledger records the cgroup v1
+// grants this daemon made and cache the cgroup v2 runtime originals it has
+// seen; both must outlive the call (one per Processor). ledger is required
+// for version 1; a nil cache disables rebuilding wiped cgroup v2 filters.
+//
 //nolint:ireturn // intentional: callers use the interface
-func New(version int) (Interface, error) {
+func New(version int, ledger *Ledger, cache *FilterCache) (Interface, error) {
 	switch version {
 	case 1:
-		return &cgroupv1{}, nil
+		if ledger == nil {
+			return nil, errMissingLedger
+		}
+
+		return &cgroupv1{ledger: ledger, files: openatFiles{}}, nil
 	case 2:
-		return &cgroupv2{}, nil
+		return &cgroupv2{ops: kernelOps{}, replace: processReplaceProbe, cache: cache}, nil
 	default:
 		return nil, fmt.Errorf( //nolint:err113 // dynamic content
 			"invalid cgroup version %d",
@@ -64,8 +77,15 @@ func New(version int) (Interface, error) {
 var errNoDeviceOrUnifiedCgroup = errors.New("no devices or unified cgroup entries found")
 
 type (
-	cgroupv1 struct{}
-	cgroupv2 struct{}
+	cgroupv1 struct {
+		ledger *Ledger
+		files  v1files
+	}
+	cgroupv2 struct {
+		ops     v2ops
+		replace *replaceProbe
+		cache   *FilterCache
+	}
 )
 
 var (
@@ -84,6 +104,62 @@ func GetDeviceCGroupVersion(rootPath string, pid int) (int, error) {
 	defer file.Close()
 
 	return scanCGroupVersion(file, path)
+}
+
+// ProcCgroup is where a process's device cgroup lives, as described by its
+// /proc/<pid>/cgroup and /proc/<pid>/mountinfo.
+type ProcCgroup struct {
+	Version     int
+	MountPrefix string // root of the cgroup mount, from mountinfo
+	MountPoint  string // where the hierarchy is mounted, from mountinfo
+	Root        string // the process's cgroup below MountPrefix
+}
+
+// ParseProcCgroup resolves the device cgroup from the contents of a
+// process's cgroup and mountinfo files. Taking contents rather than a pid
+// lets the caller read them through a /proc/<pid> descriptor it has pinned.
+func ParseProcCgroup(cgroupData, mountinfoData []byte) (ProcCgroup, error) {
+	const cgroupName, mountinfoName = "cgroup", "mountinfo"
+
+	version, err := scanCGroupVersion(bytes.NewReader(cgroupData), cgroupName)
+	if err != nil {
+		return ProcCgroup{}, err
+	}
+
+	result := ProcCgroup{Version: version}
+
+	switch version {
+	case 1:
+		result.MountPrefix, result.MountPoint, err = scanMountInfoV1(
+			bytes.NewReader(mountinfoData),
+			mountinfoName,
+		)
+		if err == nil {
+			result.Root, err = scanProcCgroupV1(
+				bytes.NewReader(cgroupData),
+				cgroupName,
+				result.MountPrefix,
+			)
+		}
+	default:
+		result.MountPrefix, result.MountPoint, err = scanMountInfoV2(
+			bytes.NewReader(mountinfoData),
+			mountinfoName,
+		)
+		if err == nil {
+			result.Root, err = scanProcCgroupV2(
+				bytes.NewReader(cgroupData),
+				cgroupName,
+				result.MountPrefix,
+			)
+		}
+	}
+
+	if err != nil {
+		return ProcCgroup{}, err
+	}
+
+	return result, nil
 }
 
 // scanCGroupVersion parses the cgroup hierarchy file and returns 1 (v1) or 2 (v2).

@@ -20,174 +20,221 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
+	"slices"
 
 	"github.com/leinardi/swarm-device-access/internal/config"
 	"github.com/leinardi/swarm-device-access/internal/logger"
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
-// applyFileConfig merges the file config into the CLI flags (for flags not
-// explicitly set by the user) and stores the result in store.
-// Must be called after flag.Parse() and after store is initialized.
-//
-//nolint:gocyclo,cyclop // complexity is inherent: merges many independent optional config fields
-func applyFileConfig(fileCfg *config.FileSchema, store *config.Store) {
-	cliSet := make(map[string]bool)
+var errDryRunEnable = errors.New(
+	"dry-run cannot be enabled on a running daemon; to stop enforcing, restart the daemon " +
+		"live with a narrower policy, or restart the affected containers",
+)
+
+// settings is every value the flags and the config file control.
+type settings struct {
+	LogFormat    string
+	LogLevel     string
+	LogTime      bool
+	DockerSocket string
+	MetricsAddr  string
+	DebugAddr    string
+	DryRun       bool
+	PolicyMode   string
+	DeviceAllow  []string
+	DeviceDeny   []string
+}
+
+// flagSettings snapshots the parsed flags (defaults included) and the set
+// of flags given on the command line. Call it right after flag.Parse; the
+// slices are copied, so nothing later aliases the flag variables.
+func flagSettings() (flags settings, cliSet map[string]bool) {
+	cliSet = make(map[string]bool)
 
 	flag.Visit(func(f *flag.Flag) { cliSet[f.Name] = true })
 
-	if !cliSet["log-format"] && fileCfg.LogFormat != "" {
-		*logFormat = fileCfg.LogFormat
-	}
-
-	if !cliSet["log-level"] && fileCfg.LogLevel != "" {
-		*logLevel = fileCfg.LogLevel
-	}
-
-	if !cliSet["log-time"] && fileCfg.LogTime != nil {
-		*logTime = *fileCfg.LogTime
-	}
-
-	if !cliSet["docker-socket"] && fileCfg.DockerSocket != "" {
-		*dockerSocket = fileCfg.DockerSocket
-	}
-
-	if !cliSet["metrics-addr"] && fileCfg.MetricsAddr != "" {
-		*metricsAddr = fileCfg.MetricsAddr
-	}
-
-	if !cliSet["debug-addr"] && fileCfg.DebugAddr != "" {
-		*debugAddr = fileCfg.DebugAddr
-	}
-
-	if !cliSet["dry-run"] && fileCfg.DryRun != nil {
-		*dryRun = *fileCfg.DryRun
-	}
-
-	if !cliSet["policy-mode"] && fileCfg.PolicyMode != "" {
-		*policyMode = fileCfg.PolicyMode
-	}
-
-	if !cliSet["device-allow"] && fileCfg.DeviceAllow != nil {
-		deviceAllow = fileCfg.DeviceAllow
-	}
-
-	if !cliSet["device-deny"] && fileCfg.DeviceDeny != nil {
-		deviceDeny = fileCfg.DeviceDeny
-	}
-
-	store.Set(config.Runtime{
-		DryRun: *dryRun,
-		Policy: policy.Global{
-			Mode:        policy.Mode(*policyMode),
-			DeviceAllow: append([]string(nil), deviceAllow...),
-			DeviceDeny:  append([]string(nil), deviceDeny...),
-		},
-	})
+	return settings{
+		LogFormat:    *logFormat,
+		LogLevel:     *logLevel,
+		LogTime:      *logTime,
+		DockerSocket: *dockerSocket,
+		MetricsAddr:  *metricsAddr,
+		DebugAddr:    *debugAddr,
+		DryRun:       *dryRun,
+		PolicyMode:   *policyMode,
+		DeviceAllow:  slices.Clone(deviceAllow),
+		DeviceDeny:   slices.Clone(deviceDeny),
+	}, cliSet
 }
 
-// watchSIGHUP blocks until ctx is done, reloading the config file and
-// updating store + logger on each SIGHUP. Settings that require a
-// restart (docker-socket, metrics-addr, debug-addr) are not reloaded.
+// mergeSettings returns the effective settings: a flag given on the command
+// line wins, then a key set in the file, then the flag's default (whatever
+// defaults holds). It is pure and never aliases file's slices, so a reload
+// that drops a key from the file falls back to the command line or the
+// default, not to what an earlier file said.
 //
-//nolint:gocyclo,cyclop,gocognit // complexity is inherent: handles SIGHUP, reload, merge, validate, and logger update
-func watchSIGHUP(ctx context.Context, store *config.Store) {
-	sigCh := make(chan os.Signal, 1)
+//nolint:gocritic // hugeParam: settings is passed by value on purpose, the result must not share it
+func mergeSettings(defaults settings, cliSet map[string]bool, file config.FileSchema) settings {
+	merged := defaults
+	merged.DeviceAllow = slices.Clone(defaults.DeviceAllow)
+	merged.DeviceDeny = slices.Clone(defaults.DeviceDeny)
 
-	signal.Notify(sigCh, syscall.SIGHUP)
-	defer signal.Stop(sigCh)
+	fileString := func(name, value string, target *string) {
+		if !cliSet[name] && value != "" {
+			*target = value
+		}
+	}
 
+	fileBool := func(name string, value *bool, target *bool) {
+		if !cliSet[name] && value != nil {
+			*target = *value
+		}
+	}
+
+	fileList := func(name string, value []string, target *[]string) {
+		if !cliSet[name] && value != nil {
+			*target = slices.Clone(value)
+		}
+	}
+
+	fileString("log-format", file.LogFormat, &merged.LogFormat)
+	fileString("log-level", file.LogLevel, &merged.LogLevel)
+	fileBool("log-time", file.LogTime, &merged.LogTime)
+	fileString("docker-socket", file.DockerSocket, &merged.DockerSocket)
+	fileString("metrics-addr", file.MetricsAddr, &merged.MetricsAddr)
+	fileString("debug-addr", file.DebugAddr, &merged.DebugAddr)
+	fileBool("dry-run", file.DryRun, &merged.DryRun)
+	fileString("policy-mode", file.PolicyMode, &merged.PolicyMode)
+	fileList("device-allow", file.DeviceAllow, &merged.DeviceAllow)
+	fileList("device-deny", file.DeviceDeny, &merged.DeviceDeny)
+
+	return merged
+}
+
+// policy returns the global policy the settings describe.
+func (s *settings) policy() policy.Global {
+	return policy.Global{
+		Mode:        policy.Mode(s.PolicyMode),
+		DeviceAllow: slices.Clone(s.DeviceAllow),
+		DeviceDeny:  slices.Clone(s.DeviceDeny),
+	}
+}
+
+// runtime returns the hot-reloadable part the processor reads.
+func (s *settings) runtime() config.Runtime {
+	return config.Runtime{DryRun: s.DryRun, Policy: s.policy()}
+}
+
+// validate checks every enumerated value and the policy; it runs before
+// anything (the logger included) is configured from the settings.
+func (s *settings) validate() error {
+	return errors.Join(
+		config.ValidateEnums(s.LogFormat, s.LogLevel, s.PolicyMode, "setting"),
+		s.policy().Validate(),
+	)
+}
+
+// coldChanges names the restart-only settings that differ between s and
+// next.
+func (s *settings) coldChanges(next *settings) []string {
+	var changed []string
+
+	if next.DockerSocket != s.DockerSocket {
+		changed = append(changed, "docker-socket")
+	}
+
+	if next.MetricsAddr != s.MetricsAddr {
+		changed = append(changed, "metrics-addr")
+	}
+
+	if next.DebugAddr != s.DebugAddr {
+		changed = append(changed, "debug-addr")
+	}
+
+	return changed
+}
+
+// reloader applies a re-read config file on SIGHUP.
+type reloader struct {
+	path   string
+	flags  settings
+	cliSet map[string]bool
+	// current is what is in force: the startup settings, then those of
+	// the last reload that succeeded.
+	current settings
+
+	configureLogger func(format, level string, includeTime bool)
+	publish         func(ctx context.Context, rt config.Runtime) uint64
+}
+
+// reload re-reads the file and applies the hot-reloadable settings (logging,
+// dry-run, policy). On any error nothing is applied: the store, the logger
+// and current keep their previous values. A changed restart-only setting
+// is logged and ignored. dry-run may be turned off but not on: turning it
+// on would leave every grant in place while no longer enforcing narrower
+// policy.
+func (r *reloader) reload(ctx context.Context) error {
+	file, err := config.LoadFile(r.path)
+	if err != nil {
+		return fmt.Errorf("config reload failed: %w", err)
+	}
+
+	next := mergeSettings(r.flags, r.cliSet, file)
+
+	err = next.validate()
+	if err != nil {
+		return fmt.Errorf("config reload: invalid setting: %w", err)
+	}
+
+	if next.DryRun && !r.current.DryRun {
+		return fmt.Errorf("config reload: %w", errDryRunEnable)
+	}
+
+	for _, key := range r.current.coldChanges(&next) {
+		logger.L().Info("config reload: setting requires a restart; ignored", "key", key)
+	}
+
+	next.DockerSocket = r.current.DockerSocket
+	next.MetricsAddr = r.current.MetricsAddr
+	next.DebugAddr = r.current.DebugAddr
+
+	r.configureLogger(next.LogFormat, next.LogLevel, next.LogTime)
+
+	generation := r.publish(ctx, next.runtime())
+	r.current = next
+
+	logger.L().Info("config reloaded",
+		"generation", generation,
+		"dry_run", next.DryRun,
+		"policy_mode", next.PolicyMode,
+		"device_allow", next.DeviceAllow,
+		"device_deny", next.DeviceDeny,
+	)
+
+	return nil
+}
+
+// watchSIGHUP blocks until ctx is done, reloading the config on each
+// SIGHUP. sigCh must already be registered for SIGHUP (see run), so a
+// SIGHUP during startup is queued instead of terminating the process.
+func watchSIGHUP(ctx context.Context, sigCh <-chan os.Signal, reload *reloader) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
 		case <-sigCh:
-			log := logger.L()
-			log.Info("SIGHUP received; reloading config", "config_file", *configFile)
+			logger.L().Info("SIGHUP received; reloading config", "config_file", reload.path)
 
-			fileCfg, err := config.LoadFile(*configFile)
+			err := reload.reload(ctx)
 			if err != nil {
-				log.Error("config reload failed", "err", err)
-
-				continue
+				logger.L().Error("config reload rejected; keeping previous config", "err", err)
 			}
-
-			cliSet := make(map[string]bool)
-
-			flag.Visit(func(f *flag.Flag) { cliSet[f.Name] = true })
-
-			effectiveLogFormat := *logFormat
-			effectiveLogLevel := *logLevel
-			effectiveLogTime := *logTime
-
-			if !cliSet["log-format"] && fileCfg.LogFormat != "" {
-				effectiveLogFormat = fileCfg.LogFormat
-			}
-
-			if !cliSet["log-level"] && fileCfg.LogLevel != "" {
-				effectiveLogLevel = fileCfg.LogLevel
-			}
-
-			if !cliSet["log-time"] && fileCfg.LogTime != nil {
-				effectiveLogTime = *fileCfg.LogTime
-			}
-
-			logger.Configure(effectiveLogFormat, effectiveLogLevel, effectiveLogTime)
-
-			newDryRun := *dryRun
-			newPolicyMode := *policyMode
-
-			newDeviceAllow := append([]string(nil), deviceAllow...)
-			newDeviceDeny := append([]string(nil), deviceDeny...)
-
-			if !cliSet["dry-run"] && fileCfg.DryRun != nil {
-				newDryRun = *fileCfg.DryRun
-			}
-
-			if !cliSet["policy-mode"] && fileCfg.PolicyMode != "" {
-				newPolicyMode = fileCfg.PolicyMode
-			}
-
-			if !cliSet["device-allow"] && fileCfg.DeviceAllow != nil {
-				newDeviceAllow = fileCfg.DeviceAllow
-			}
-
-			if !cliSet["device-deny"] && fileCfg.DeviceDeny != nil {
-				newDeviceDeny = fileCfg.DeviceDeny
-			}
-
-			newPolicy := policy.Global{
-				Mode:        policy.Mode(newPolicyMode),
-				DeviceAllow: newDeviceAllow,
-				DeviceDeny:  newDeviceDeny,
-			}
-
-			valErr := newPolicy.Validate()
-			if valErr != nil {
-				log.Error(
-					"config reload: invalid policy; keeping previous config",
-					"err", valErr,
-				)
-
-				continue
-			}
-
-			store.Set(config.Runtime{
-				DryRun: newDryRun,
-				Policy: newPolicy,
-			})
-
-			logger.L().Info("config reloaded",
-				"dry_run", newDryRun,
-				"policy_mode", newPolicy.Mode,
-				"device_allow", newPolicy.DeviceAllow,
-				"device_deny", newPolicy.DeviceDeny,
-			)
 		}
 	}
 }

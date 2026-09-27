@@ -27,8 +27,8 @@ make go-test-integration SDA_IT_ENFORCE=1                       # plus the enfor
 make go-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
 ```
 
-The GitHub integration workflow runs the guarded enforcement test on every pull
-request and push, with both variables set:
+The GitHub integration workflow runs the guarded enforcement test on every push
+and on every pull request from this repository, with both variables set:
 
 - `SDA_IT_ENFORCE=1` is the guard. With it set, a missing prerequisite fails the
   run instead of skipping it, and the workflow also fails the job if any test
@@ -37,6 +37,15 @@ request and push, with both variables set:
   first proves that `daemon-reload` wipes the device program on this host;
   without the variable, a host where that cannot be proven skips only that
   subtest.
+
+Pull requests from another repository (a fork) are the exception: GitHub gives
+them no secrets, so they cannot log in to `dhi.io` to build the daemon image.
+For them the job is named `integration (fork: enforcement skipped)` and runs
+only the dry-run tests. The gate is where the pull request comes from, not
+whether the secret is set: on a same-repository pull request or a push, a
+missing `DHI_TOKEN` fails the job. A push to a branch of a contributor's fork
+therefore fails that check, since the fork has no `DHI_TOKEN`. The release
+workflow runs the same enforced suite.
 
 Prerequisites for the enforcement test:
 
@@ -94,11 +103,11 @@ or deployment behavior:
 
 3. Start a consumer container with `--label swarm-device-access.enable=true` and
    a real `/dev/...` bind mount and confirm the daemon logs `device mount detected`
-   and `adding device rule`. (For Swarm stacks, the equivalent placement is the
+   and `setting device rule`. (For Swarm stacks, the equivalent placement is the
    service's top-level `labels:`, which Docker copies into every task container;
    `docker service create --container-label` writes to the same location. Do not
    use `deploy.labels:` or `docker service create --label`: those are service
-   metadata that workers cannot read, see the README.)
+   metadata, which the daemon ignores; see the README.)
 
 4. If the host uses cgroup v2, confirm a `BPF_CGROUP_DEVICE` program is attached
    to the consumer cgroup with `bpftool`.
@@ -112,6 +121,12 @@ or deployment behavior:
 7. If `/run/dbus/system_bus_socket` is mounted and systemd is available, run
    `systemctl daemon-reload` and verify the daemon logs that it re-applied rules.
 
-8. Verify observability by starting with `-metrics-addr :9090` and
-   `-debug-addr :6060`, then checking `/healthz`, `/readyz`, `/metrics`, and
+8. On a Swarm node, `kill -9` the wrapper task's container and confirm that
+   Swarm's replacement task starts without a name conflict and that exactly one
+   `swarm-device-access` daemon container is running afterwards
+   (`docker ps --filter 'name=^swarm-device-access$'`; without the anchors the
+   filter also matches the wrapper task's container).
+
+9. Verify observability by starting with `-metrics-addr 127.0.0.1:9090` and
+   `-debug-addr 127.0.0.1:6060`, then checking `/healthz`, `/readyz`, `/metrics`, and
    `/debug/pprof/`.

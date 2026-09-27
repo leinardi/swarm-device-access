@@ -20,11 +20,15 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"sync"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/cgroup"
@@ -34,89 +38,234 @@ import (
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
 
-const swarmServiceIDLabel = "com.docker.swarm.service.id"
-
 // DockerInspector is the subset of *client.Client used by Processor.
 // It exists solely to allow unit tests to inject a fake without standing up a
-// real Docker daemon.
+// real Docker daemon. Policy comes from the global config and the container's
+// own labels only, so no service or node inspection is part of it.
 type DockerInspector interface {
 	ContainerInspect(
 		ctx context.Context,
 		containerID string,
 		options client.ContainerInspectOptions,
 	) (client.ContainerInspectResult, error)
-	ServiceInspect(
-		ctx context.Context,
-		serviceID string,
-		options client.ServiceInspectOptions,
-	) (client.ServiceInspectResult, error)
-}
-
-// deviceRuleKey is the deduplication key for cgroup device rules collected
-// within a single container processing pass.
-type deviceRuleKey struct {
-	typ   string
-	major int64
-	minor int64
 }
 
 // Processor applies cgroup BPF device-allow rules to containers that
-// bind-mount /dev/... paths. Inspector and Cfg are required; Metrics may be
-// nil (calls become no-ops). HostRoot is the container-internal path to the
+// bind-mount /dev/... paths. Inspector and Cfg are required; Publisher is
+// required for PublishAndReconcile; Metrics may be nil (calls become
+// no-ops). HostRoot is the container-internal path to the
 // host root (typically "/host"). ProcRoot is used for /proc lookups ("/" in
-// production, temp dir in tests).
+// production, temp dir in tests). CallTimeout bounds each Docker call the
+// processor makes, independent of the caller's context, so every entry point
+// (not only the daemon's per-container wrapper) has bounded Docker I/O;
+// production sets it to daemon.DockerCallTimeout, and zero leaves the calls
+// bounded by the caller's context only.
+//
+// A Processor must not be copied after first use.
 type Processor struct {
-	Inspector      DockerInspector
-	Cfg            *config.Store
-	Metrics        *observability.Recorder
-	HostRoot       string
-	ProcRoot       string
-	IsSwarmManager bool
+	Inspector   DockerInspector
+	Cfg         *config.Store
+	Publisher   *config.Publisher
+	Metrics     *observability.Recorder
+	HostRoot    string
+	ProcRoot    string
+	CallTimeout time.Duration
+
+	// mu serializes policy evaluation and cgroup mutation across every
+	// caller (event loop, startup enumeration, systemd re-apply, reload). It
+	// is held from the config load through the mutation, not around the
+	// mutation alone: otherwise a worker that computed rules under an old
+	// config could apply them after a newer config was published and a
+	// newer computation had already been applied. One global lock is enough
+	// at this scale; any Docker I/O made while holding it is bounded by
+	// CallTimeout.
+	mu sync.Mutex
+
+	// ledger records the cgroup v1 grants this processor made, so a later
+	// Set can revoke them without touching the runtime's own exceptions.
+	ledger cgroup.Ledger
+
+	// filterCache remembers the cgroup v2 runtime device filters seen per
+	// cgroup, so a filter wiped by systemd's daemon-reload can be rebuilt.
+	filterCache cgroup.FilterCache
+
+	// lifecycles is the history of container runs and the cgroups they
+	// were verified in (written under mu). It is how grants are revoked
+	// once the process is gone or Docker cannot be asked: see revokeAt.
+	// The daemon's coordinator installs its own; nil means a private one.
+	lifecycles *Lifecycles
+
+	// requestPass receives each generation PublishAndReconcile publishes
+	// (guarded by mu).
+	requestPass PassRequester
+
+	// pinner pins container processes; nil means pidfds. Tests replace it.
+	pinner processPinner
+
+	// newCgroup builds the cgroup API for a version; nil means cgroup.New.
+	// Tests replace it to observe or fail the mutation without a kernel.
+	newCgroup func(version int, ledger *cgroup.Ledger, cache *cgroup.FilterCache) (cgroup.Interface, error)
+
+	// devfs opens the view of /dev and sysfs for one pass; nil means the
+	// real /dev and HostRoot's sysfs. Tests replace it to script device
+	// identities.
+	devfs func() (devFS, error)
+
+	// afterCompute, when set, runs under mu after the desired rules are
+	// computed and before they are applied. Tests use it to hold a worker
+	// mid-flight.
+	afterCompute func()
 }
 
-// ProcessContainer inspects a container and applies cgroup BPF device-allow
-// rules for every bind mount sourced from /dev/...
+// desiredSet is the outcome of evaluating a container's labels, the
+// current policy and its /dev mounts.
+type desiredSet struct {
+	// rules is what the container's cgroup must hold. It is empty whenever
+	// the set cannot be established with confidence.
+	rules     []cgroup.DeviceRule
+	enabled   bool
+	collected containerRules
+	// incomplete is non-nil when some device of an enabled container could
+	// not be resolved; the container is then retried.
+	incomplete error
+}
+
+// Reconcile makes the device grants of a container's cgroup equal exactly
+// what the current config allows it. Start, unpause, startup enumeration,
+// systemd re-apply and reload all run this one idempotent path.
 //
-//nolint:cyclop,gocyclo,funlen // inherent: policy-check + inspect + version-detect + path-resolve + mount-filter + collect + apply
-func (p *Processor) ProcessContainer(ctx context.Context, containerID string) error {
+// Every outcome that cannot establish the desired set with confidence
+// (policy disabled or not opted in, invalid labels, an unresolved device)
+// is the empty set, and the empty set is applied like any other: returning
+// early would keep grants the current config no longer allows. The cost is
+// that a transient error revokes the container's grants until a retry
+// grants them again.
+//
+// The container's process is pinned (see applyPinned), so a recycled pid
+// cannot direct the rules to another cgroup. A container that is no longer
+// running, or that Docker cannot report on, has its grants revoked in the
+// cgroup its lifecycle was last verified in.
+func (p *Processor) Reconcile(ctx context.Context, containerID string) error {
 	log := logger.L()
 
-	inspected, inspectErr := p.Inspector.ContainerInspect(
-		ctx,
-		containerID,
-		client.ContainerInspectOptions{},
-	)
+	info, inspectErr := p.inspect(ctx, containerID)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	cfg := p.Cfg.Load()
+
 	if inspectErr != nil {
-		return fmt.Errorf("inspect container %q: %w", containerID, inspectErr)
+		// The caller canceled (daemon shutdown), not Docker: nothing would
+		// retry and grant again, so a running container keeps its grants.
+		// A deadline is Docker not answering in time, and does revoke.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return inspectErr
+		}
+
+		return p.revokeAfterInspectFailure(containerID, cfg.DryRun, inspectErr)
 	}
 
-	info := inspected.Container
-
-	if info.State == nil || info.State.Pid == 0 {
+	if info.State == nil || !info.State.Running || info.State.Pid == 0 {
 		log.Debug("container has no live pid; skipping", "id", containerID)
 		p.Metrics.RecordContainerSkipped("no_pid")
 
-		return nil
+		if cfg.DryRun {
+			return nil
+		}
+
+		return p.revokeEnded(containerID, startedAt(info.State))
 	}
+
+	desired := p.computeDesired(containerID, &info, cfg)
+
+	if p.afterCompute != nil {
+		p.afterCompute()
+	}
+
+	if cfg.DryRun {
+		p.logDryRun(containerID, desired.rules)
+	} else {
+		privileged := info.HostConfig != nil && info.HostConfig.Privileged
+
+		cgroupPath, applyErr := p.applyPinned(
+			ctx,
+			containerID,
+			info.State,
+			privileged,
+			desired.rules,
+		)
+		if applyErr != nil {
+			// A container skipped for good still reports an incomplete set.
+			return errors.Join(
+				p.classifyApplyError(containerID, cgroupPath, privileged, applyErr),
+				desired.incomplete,
+			)
+		}
+	}
+
+	if desired.enabled && desired.collected.devMounts > 0 {
+		log.Info("container processed",
+			"id", containerID,
+			"pid", info.State.Pid,
+			"devices_granted", len(desired.rules),
+			"skipped", desired.collected.skipped,
+			"errors", len(desired.collected.deviceErrs),
+			"dry_run", cfg.DryRun,
+		)
+	}
+
+	return desired.incomplete
+}
+
+// inspect runs one bounded ContainerInspect.
+func (p *Processor) inspect(
+	ctx context.Context,
+	containerID string,
+) (container.InspectResponse, error) {
+	callCtx, cancel := p.callContext(ctx)
+	defer cancel()
+
+	inspected, err := p.Inspector.ContainerInspect(
+		callCtx,
+		containerID,
+		client.ContainerInspectOptions{},
+	)
+	if err != nil {
+		return container.InspectResponse{}, fmt.Errorf("inspect container %q: %w", containerID, err)
+	}
+
+	return inspected.Container, nil
+}
+
+// computeDesired evaluates the container's labels and /dev mounts under
+// cfg. It never touches the container's cgroup.
+func (p *Processor) computeDesired(
+	containerID string,
+	info *container.InspectResponse,
+	cfg config.Runtime,
+) desiredSet {
+	log := logger.L()
 
 	var containerLabels map[string]string
 	if info.Config != nil {
 		containerLabels = info.Config.Labels
 	}
 
-	svc, serviceLabels := p.resolveServiceLabels(ctx, containerID, containerLabels)
+	// The container's labels are the only label input, so this is the one
+	// place a misspelled key can be reported instead of silently ignored.
+	for _, unknownKey := range policy.UnknownLabels(containerLabels) {
+		log.Warn("unrecognized swarm-device-access label on container",
+			"id", containerID, "label", unknownKey)
+	}
 
-	effectiveLabels := policy.MergeLabels(serviceLabels, containerLabels)
-
-	cfg := p.Cfg.Load()
-
-	cpol, parseErr := policy.ParseContainer(effectiveLabels)
+	cpol, parseErr := policy.ParseContainer(containerLabels)
 	if parseErr != nil {
 		log.Warn("container skipped: invalid policy labels",
 			"id", containerID, "err", parseErr)
 		p.Metrics.RecordContainerSkipped("invalid_labels")
 
-		return nil
+		return desiredSet{}
 	}
 
 	if !cfg.Policy.Enabled(cpol) {
@@ -126,50 +275,12 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		)
 		p.Metrics.RecordContainerSkipped("policy")
 
-		return nil
-	}
-
-	if svc.Spec.Name != "" {
-		cpolContainer, _ := policy.ParseContainer(containerLabels)
-		if !cfg.Policy.Enabled(cpolContainer) {
-			log.Info("opt-in granted via service-level label",
-				"id", containerID,
-				"service_id", containerLabels[swarmServiceIDLabel],
-				"service_name", svc.Spec.Name,
-			)
-		}
+		return desiredSet{}
 	}
 
 	p.Metrics.RecordContainerScanned()
 
-	pid := info.State.Pid
-
-	cgroupVersion, versionErr := cgroup.GetDeviceCGroupVersion(p.ProcRoot, pid)
-	if versionErr != nil {
-		return fmt.Errorf("detect cgroup version for pid %d: %w", pid, versionErr)
-	}
-
-	log.Debug("cgroup version detected", "pid", pid, "version", cgroupVersion)
-
-	api, apiErr := cgroup.New(cgroupVersion)
-	if apiErr != nil {
-		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
-	}
-
-	cgroupPrefix, sysfsPath, mountErr := api.GetDeviceCGroupMountPath(p.ProcRoot, pid)
-	if mountErr != nil {
-		return fmt.Errorf("resolve cgroup mount path: %w", mountErr)
-	}
-
-	cgroupRoot, rootErr := api.GetDeviceCGroupRootPath(p.ProcRoot, cgroupPrefix, pid)
-	if rootErr != nil {
-		return fmt.Errorf("resolve cgroup root path: %w", rootErr)
-	}
-
-	cgroupPath := hostCGroupPath(p.HostRoot, sysfsPath, cgroupPrefix, cgroupRoot)
-	log.Debug("cgroup path resolved", "pid", pid, "path", cgroupPath)
-
-	collected := collectContainerRules(containerID, pid, info.Mounts, cfg.Policy, cpol)
+	collected := p.collectDevices(containerID, info.State.Pid, info.Mounts, cfg.Policy, cpol)
 
 	for _, deviceErr := range collected.deviceErrs {
 		log.Warn("device rule failed", "id", containerID, "err", deviceErr)
@@ -177,55 +288,212 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 
 	p.Metrics.AddDeviceFilesDiscovered(len(collected.granted))
 
-	if len(collected.deviceErrs) > 0 {
-		p.Metrics.AddRuleFailures(len(collected.deviceErrs))
+	if len(collected.deviceErrs) == 0 {
+		return desiredSet{rules: collected.granted, enabled: true, collected: collected}
 	}
 
-	if len(collected.granted) > 0 {
-		applyErr := p.applyRulesToCgroup(api, collected.granted, cgroupPath, pid, cfg.DryRun)
-		if applyErr != nil {
-			return applyErr
-		}
-	}
+	p.Metrics.AddRuleFailures(len(collected.deviceErrs))
+	log.Warn("device set incomplete; no devices are granted until every device resolves",
+		"id", containerID, "errors", len(collected.deviceErrs), "reason", "incomplete_device_set")
 
-	if collected.devMounts > 0 {
-		log.Info("container processed",
+	return desiredSet{
+		enabled:   true,
+		collected: collected,
+		incomplete: fmt.Errorf(
+			"container %q (reason incomplete_device_set, retryable): %w",
+			containerID,
+			errors.Join(collected.deviceErrs...),
+		),
+	}
+}
+
+// logDryRun reports what a real run would set. Dry-run stays unprivileged:
+// it reads neither /proc nor the cgroup.
+func (p *Processor) logDryRun(containerID string, rules []cgroup.DeviceRule) {
+	log := logger.L()
+
+	for _, rule := range rules {
+		log.Info("dry-run: would add device rule",
 			"id", containerID,
-			"pid", pid,
-			"devices_granted", len(collected.granted),
-			"skipped", collected.skipped,
-			"errors", len(collected.deviceErrs),
-			"dry_run", cfg.DryRun,
+			"type", rule.Type,
+			"major", *rule.Major,
+			"minor", *rule.Minor,
 		)
 	}
 
-	return nil
+	log.Info("dry-run: would set device rules", "id", containerID, "rules", len(rules))
+	p.Metrics.AddDryRunSkips(len(rules))
+}
+
+// callContext derives the context for one Docker call.
+func (p *Processor) callContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if p.CallTimeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+
+	return context.WithTimeout(ctx, p.CallTimeout)
+}
+
+// classifyApplyError turns a cgroup mutation failure into the container's
+// outcome: nil when the container is skipped for good, otherwise an error
+// that names the reason, so the caller retries it.
+func (p *Processor) classifyApplyError(
+	containerID, cgroupPath string,
+	privileged bool,
+	applyErr error,
+) error {
+	log := logger.L()
+
+	switch {
+	case errors.Is(applyErr, cgroup.ErrFilterMissing) && privileged:
+		// A privileged container runs without a device filter by design;
+		// there is nothing to add grants to and nothing to restrict.
+		log.Info("privileged container has no device filter; nothing to do",
+			"id", containerID, "cgroup", cgroupPath)
+		p.Metrics.RecordContainerSkipped("privileged_no_filter")
+
+		return nil
+
+	case errors.Is(applyErr, cgroup.ErrFilterMissing):
+		// Most likely wiped by systemd's daemon-reload before this process
+		// saw the cgroup, so the runtime's own filter cannot be rebuilt.
+		log.Warn("device filter missing and no cached original; restart the container",
+			"id", containerID, "cgroup", cgroupPath, "reason", "filter_missing")
+
+		return fmt.Errorf(
+			"container %q (reason filter_missing, retryable): %w",
+			containerID,
+			applyErr,
+		)
+
+	case errors.Is(applyErr, cgroup.ErrUnsupportedAttachMode):
+		// Permanent for this container: the runtime chose the attach mode.
+		// Nothing was attached or detached, so it keeps only the runtime's
+		// own device filter.
+		log.Error("container skipped: device filter attach mode not supported; "+
+			"the runtime must attach device filters with BPF_F_ALLOW_MULTI",
+			"id", containerID, "cgroup", cgroupPath, "err", applyErr)
+		p.Metrics.RecordContainerSkipped("unsupported_attach_mode")
+
+		return nil
+
+	case errors.Is(applyErr, cgroup.ErrOwnedBlockConflict):
+		// Nothing was changed. Only a fresh device filter (a container
+		// restart) clears it; retrying keeps the container pending.
+		log.Error(
+			"device filter carries an invalid swarm-device-access block; "+
+				"nothing was changed, restart the container to replace its device filter",
+			"id",
+			containerID,
+			"cgroup",
+			cgroupPath,
+			"reason",
+			"owned_block_conflict",
+			"err",
+			applyErr,
+		)
+
+		return fmt.Errorf(
+			"container %q (reason owned_block_conflict, retryable): %w",
+			containerID,
+			applyErr,
+		)
+
+	case errors.Is(applyErr, cgroup.ErrProgramNotWrappable):
+		return fmt.Errorf(
+			"container %q (reason program_not_wrappable, retryable): %w",
+			containerID,
+			applyErr,
+		)
+
+	case errors.Is(applyErr, cgroup.ErrFiltersInaccessible):
+		return fmt.Errorf(
+			"container %q (reason filters_inaccessible, retryable): %w",
+			containerID,
+			applyErr,
+		)
+
+	default:
+		return applyErr
+	}
 }
 
 // containerRules aggregates the per-mount results for one container.
 type containerRules struct {
-	granted    []cgroup.DeviceRule // deduplicated across mounts
+	granted    []cgroup.DeviceRule // one rule per granted device
 	skipped    int
 	deviceErrs []error
 	devMounts  int
 }
 
-// collectContainerRules walks every /dev mount of a container and merges the
-// results. Per-device errors are collected, not returned, so one bad entry
-// does not prevent the remaining rules from being applied.
-func collectContainerRules(
+// isDeviceMount reports whether mnt bind-mounts something from /dev. Only a
+// bind mount's Source is a host path; a volume or tmpfs mount is never
+// walked, whatever its Source says.
+func isDeviceMount(mnt *container.MountPoint) bool {
+	return mnt.Type == mount.TypeBind && IsMountSource(mnt.Source)
+}
+
+// collectDevices opens /dev for this pass and collects the container's
+// rules. Failing to open it leaves every device unresolved.
+func (p *Processor) collectDevices(
 	containerID string,
 	pid int,
 	mounts []container.MountPoint,
 	gpol policy.Global,
 	cpol policy.Container,
 ) containerRules {
-	var result containerRules
+	if !slices.ContainsFunc(mounts, func(mnt container.MountPoint) bool {
+		return isDeviceMount(&mnt)
+	}) {
+		return containerRules{}
+	}
 
-	seen := make(map[deviceRuleKey]struct{})
+	open := p.devfs
+	if open == nil {
+		open = func() (devFS, error) {
+			return openDevFS(devRoot, sysfsRootFor(p.HostRoot))
+		}
+	}
+
+	dev, err := open()
+	if err != nil {
+		return containerRules{
+			devMounts:  1,
+			deviceErrs: []error{fmt.Errorf("%w: %w", errUnresolved, err)},
+		}
+	}
+
+	defer func() {
+		closeErr := dev.Close()
+		if closeErr != nil {
+			logger.L().Warn("close /dev", "err", closeErr)
+		}
+	}()
+
+	return collectContainerRules(dev, containerID, pid, mounts, gpol, cpol, p.Metrics)
+}
+
+// collectContainerRules evaluates every /dev mount of a container and
+// aggregates the candidates per device across all of them: a device is
+// granted only when it is authorized and no name it was found by is denied.
+// Per-device errors are collected; any error leaves the set unknown (see
+// computeDesired).
+func collectContainerRules(
+	dev devFS,
+	containerID string,
+	pid int,
+	mounts []container.MountPoint,
+	gpol policy.Global,
+	cpol policy.Container,
+	metrics *observability.Recorder,
+) containerRules {
+	var (
+		result  containerRules
+		devices aggregation
+	)
 
 	for _, mnt := range mounts {
-		if !IsMountSource(mnt.Source) {
+		if !isDeviceMount(&mnt) {
 			continue
 		}
 
@@ -238,128 +506,24 @@ func collectContainerRules(
 			"destination", mnt.Destination,
 		)
 
-		mountResult := CollectMountRules(mnt.Source, gpol, cpol)
+		mountResult := CollectMountRules(dev, mnt.Source, gpol, cpol)
 		result.skipped += mountResult.Skipped
 		result.deviceErrs = append(result.deviceErrs, mountResult.Errs...)
 
-		for _, rule := range mountResult.Rules {
-			key := deviceRuleKey{rule.Type, *rule.Major, *rule.Minor}
-			if _, dup := seen[key]; !dup {
-				seen[key] = struct{}{}
+		for reason, count := range mountResult.Outcomes {
+			metrics.AddCandidatesSkipped(reason, count)
+		}
 
-				result.granted = append(result.granted, rule)
-			}
+		for idx := range mountResult.Candidates {
+			devices.add(&mountResult.Candidates[idx])
 		}
 	}
+
+	granted, excluded := devices.emit(containerID)
+	result.granted = granted
+	result.skipped += excluded
 
 	return result
-}
-
-// resolveServiceLabels fetches parent service labels on manager nodes. On
-// worker nodes (IsSwarmManager=false) it returns immediately with zero values
-// so ProcessContainer can continue using container-level labels only.
-func (p *Processor) resolveServiceLabels(
-	ctx context.Context,
-	containerID string,
-	containerLabels map[string]string,
-) (svc swarm.Service, serviceLabels map[string]string) {
-	log := logger.L()
-
-	if !p.IsSwarmManager {
-		return svc, nil
-	}
-
-	serviceID := containerLabels[swarmServiceIDLabel]
-	if serviceID == "" {
-		return svc, nil
-	}
-
-	inspected, svcErr := p.Inspector.ServiceInspect(
-		ctx,
-		serviceID,
-		client.ServiceInspectOptions{},
-	)
-	if svcErr != nil {
-		log.Warn("could not inspect parent service; using container labels only",
-			"id", containerID,
-			"service_id", serviceID,
-			"err", svcErr,
-		)
-
-		return swarm.Service{}, nil
-	}
-
-	svc = inspected.Service
-	serviceLabels = svc.Spec.Labels
-
-	for _, unknownKey := range policy.UnknownLabels(serviceLabels) {
-		log.Warn("unrecognized swarm-device-access label on parent service",
-			"id", containerID,
-			"service_id", serviceID,
-			"label", unknownKey,
-		)
-	}
-
-	for _, knownKey := range policy.KnownLabels(serviceLabels) {
-		log.Warn(
-			"swarm-device-access label set via deploy.labels on parent service; move to top-level labels: so worker nodes can read it",
-			"id",
-			containerID,
-			"service_id",
-			serviceID,
-			"service",
-			svc.Spec.Name,
-			"label",
-			knownKey,
-		)
-	}
-
-	return svc, serviceLabels
-}
-
-// applyRulesToCgroup logs and (unless dryRun) attaches the collected device
-// rules to the cgroup at cgroupPath via a single AddDeviceRules call.
-func (p *Processor) applyRulesToCgroup(
-	api cgroup.Interface,
-	rules []cgroup.DeviceRule,
-	cgroupPath string,
-	pid int,
-	dryRun bool,
-) error {
-	log := logger.L()
-
-	for _, rule := range rules {
-		if dryRun {
-			log.Info("dry-run: would add device rule",
-				"pid", pid,
-				"cgroup", cgroupPath,
-				"type", rule.Type,
-				"major", *rule.Major,
-				"minor", *rule.Minor,
-			)
-		} else {
-			log.Debug("adding device rule",
-				"pid", pid,
-				"cgroup", cgroupPath,
-				"type", rule.Type,
-				"major", *rule.Major,
-				"minor", *rule.Minor,
-			)
-		}
-	}
-
-	if dryRun {
-		p.Metrics.AddDryRunSkips(len(rules))
-
-		return nil
-	}
-
-	err := api.AddDeviceRules(cgroupPath, rules)
-	if err != nil {
-		return fmt.Errorf("add device rules: %w", err)
-	}
-
-	return nil
 }
 
 func hostCGroupPath(hostRoot, sysfsPath, cgroupPrefix, cgroupRoot string) string {

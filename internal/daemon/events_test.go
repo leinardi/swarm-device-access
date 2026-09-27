@@ -23,12 +23,15 @@ import (
 	"errors"
 	"maps"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/client"
+
+	"github.com/leinardi/swarm-device-access/internal/observability"
 )
 
 var errTransportEOF = errors.New("transport EOF")
@@ -98,12 +101,10 @@ func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
-		noopApply,
 	)
 	if got {
 		t.Error(
@@ -123,12 +124,10 @@ func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
-		noopApply,
 	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on stream error")
@@ -152,12 +151,10 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
-		noopApply,
 	)
 	if got {
 		t.Error("consumeEvents should return false when stream error is context.Canceled")
@@ -192,12 +189,10 @@ func TestConsumeEvents_ArbitraryStreamErrorAfterCancelNoReconnect(t *testing.T) 
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
-		noopApply,
 	)
 	if got {
 		t.Error("consumeEvents should return false when the context is already canceled")
@@ -227,7 +222,7 @@ func TestEventListOptions(t *testing.T) {
 		t.Errorf("Since = %q, want %q", got.Since, since)
 	}
 
-	want := client.Filters{"event": {"start": true, "unpause": true}}
+	want := client.Filters{"event": {"start": true, "unpause": true, "die": true, "destroy": true}}
 	if !maps.EqualFunc(got.Filters, want, maps.Equal) {
 		t.Errorf("Filters = %v, want %v", got.Filters, want)
 	}
@@ -244,12 +239,10 @@ func TestConsumeEvents_ChannelCloseReturnsReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
-		noopApply,
 	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on channel close")
@@ -263,25 +256,21 @@ func TestConsumeEvents_EventCallsApply(t *testing.T) {
 	msgs, errs := makeChans(2, 0)
 	backoff := minBackoff
 
-	var called atomic.Int32
-
-	apply := func(_ context.Context, _ string) error {
-		called.Add(1)
-
-		return nil
-	}
+	apply, called := cancelAfter(2, cancel, nil)
 
 	msgs <- events.Message{Actor: events.Actor{ID: "container-1"}}
 
 	msgs <- events.Message{Actor: events.Actor{ID: "container-2"}}
 
-	// Cancel after a brief delay so consumeEvents exits cleanly.
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
-
-	consumeEvents(ctx, msgs, errs, map[string]time.Time{}, &backoff, nil, new(int64), nil, apply)
+	consumeEvents(
+		ctx,
+		msgs,
+		errs,
+		testCoordinatorWith(apply, nil, nil),
+		&backoff,
+		new(int64),
+		nil,
+	)
 
 	if called.Load() != 2 {
 		t.Errorf("apply called %d times, want 2", called.Load())
@@ -298,22 +287,21 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 		"already-seen": time.Now(),
 	}
 
-	var called atomic.Int32
-
-	apply := func(_ context.Context, _ string) error {
-		called.Add(1)
-
-		return nil
-	}
+	apply, called := cancelAfter(1, cancel, nil)
 
 	msgs <- events.Message{Actor: events.Actor{ID: "already-seen"}}
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
-
-	consumeEvents(ctx, msgs, errs, processed, &backoff, nil, new(int64), nil, apply)
+	consumeUntilSkipped(t, ctx, cancel, func() {
+		consumeEvents(
+			ctx,
+			msgs,
+			errs,
+			testCoordinatorWith(apply, nil, processed),
+			&backoff,
+			new(int64),
+			nil,
+		)
+	})
 
 	if called.Load() != 0 {
 		t.Errorf("apply called %d times for deduplicated ID, want 0", called.Load())
@@ -324,30 +312,25 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 	}
 }
 
-func TestConsumeEvents_ClearProcessedOnTTL(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// TestCoordinator_ProcessedEntriesExpire checks that an enumeration entry
+// older than processedTTL neither suppresses an event nor survives a prune.
+func TestCoordinator_ProcessedEntriesExpire(t *testing.T) {
+	inspectedAt := time.Now()
+	coord := testCoordinator(map[string]time.Time{
+		"stale-a": inspectedAt,
+		"stale-b": inspectedAt,
+		"fresh":   inspectedAt.Add(processedTTL),
+	})
+	coord.now = func() time.Time { return inspectedAt.Add(processedTTL + time.Second) }
 
-	msgs, errs := makeChans(0, 0)
-	backoff := minBackoff
-	processed := map[string]time.Time{
-		"stale-a": time.Now(),
-		"stale-b": time.Now(),
+	if coord.skipEvent("stale-a", inspectedAt.Add(-time.Second)) {
+		t.Error("an expired entry must not suppress an event")
 	}
 
-	// Fire the TTL immediately via a closed channel.
-	clearCh := make(chan time.Time)
-	close(clearCh)
+	coord.pruneProcessed()
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
-
-	consumeEvents(ctx, msgs, errs, processed, &backoff, clearCh, new(int64), nil, noopApply)
-
-	if len(processed) != 0 {
-		t.Errorf("processed map has %d entries after TTL, want 0", len(processed))
+	if _, ok := coord.processed["stale-b"]; ok || len(coord.processed) != 1 {
+		t.Errorf("processed = %v after prune, want only the fresh entry", coord.processed)
 	}
 }
 
@@ -360,21 +343,16 @@ func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 
 	msgs <- events.Message{Actor: events.Actor{ID: "c1"}}
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
+	apply, _ := cancelAfter(1, cancel, nil)
 
 	consumeEvents(
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinatorWith(apply, nil, nil),
 		&backoff,
-		nil,
 		new(int64),
 		nil,
-		noopApply,
 	)
 
 	if backoff != minBackoff {
@@ -407,22 +385,29 @@ func TestConsumeEvents_RestartWithinWindow(t *testing.T) {
 			backoff := minBackoff
 			processed := map[string]time.Time{"c1": recordedAt}
 
-			var called atomic.Int32
-
-			apply := func(_ context.Context, _ string) error {
-				called.Add(1)
-
-				return nil
-			}
+			apply, called := cancelAfter(1, cancel, nil)
 
 			msgs <- events.Message{Actor: events.Actor{ID: "c1"}, TimeNano: tc.eventTime.UnixNano()}
 
-			go func() {
-				time.Sleep(20 * time.Millisecond)
-				cancel()
-			}()
+			consume := func() {
+				consumeEvents(
+					ctx,
+					msgs,
+					errs,
+					testCoordinatorWith(apply, nil, processed),
+					&backoff,
+					new(int64),
+					nil,
+				)
+			}
 
-			consumeEvents(ctx, msgs, errs, processed, &backoff, nil, new(int64), nil, apply)
+			// A positive case ends from inside apply; a skipped event has
+			// no apply to end it, so it waits for the skip log instead.
+			if tc.wantApply > 0 {
+				consume()
+			} else {
+				consumeUntilSkipped(t, ctx, cancel, consume)
+			}
 
 			if called.Load() != tc.wantApply {
 				t.Errorf("apply called %d times, want %d", called.Load(), tc.wantApply)
@@ -448,21 +433,16 @@ func TestConsumeEvents_TracksLastEventNano(t *testing.T) {
 
 	msgs <- events.Message{Actor: events.Actor{ID: "c2"}, TimeNano: 300}
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
+	apply, _ := cancelAfter(2, cancel, nil)
 
 	consumeEvents(
 		ctx,
 		msgs,
 		errs,
-		map[string]time.Time{},
+		testCoordinatorWith(apply, nil, nil),
 		&backoff,
-		nil,
 		&lastEventNano,
 		nil,
-		noopApply,
 	)
 
 	if lastEventNano != 300 {
@@ -494,4 +474,110 @@ func TestResubscribeSince(t *testing.T) {
 	if !parsed.Equal(last.Add(time.Nanosecond)) {
 		t.Errorf("resubscribeSince = %v, want %v", parsed, last.Add(time.Nanosecond))
 	}
+}
+
+// testCoordinator returns a coordinator for consumer tests, with processed
+// as its enumeration entries when non-nil.
+// cancelAfter returns an apply that counts its calls and returns result;
+// the n-th call cancels the context, so a test expecting n applies ends as
+// soon as the last one is observed and never earlier.
+func cancelAfter(n int32, cancel context.CancelFunc, result error) (applyFn, *atomic.Int32) {
+	var calls atomic.Int32
+
+	return func(_ context.Context, _ string) error {
+		if calls.Add(1) == n {
+			cancel()
+		}
+
+		return result
+	}, &calls
+}
+
+// skipSignalTimeout is how long a test expecting a skipped event waits for
+// the skip log before giving up. It is only an upper bound: the test goes on
+// as soon as the log line appears.
+const skipSignalTimeout = 2 * time.Second
+
+// consumeUntilSkipped runs consume in a goroutine, waits for the coordinator's
+// skip log (the positive signal that the event was handled), then cancels ctx
+// and waits for consume to return. A test expecting zero applies cannot end
+// from inside apply, and canceling before the event is handled would pass
+// without checking anything.
+func consumeUntilSkipped(
+	t *testing.T,
+	ctx context.Context,
+	cancel context.CancelFunc,
+	consume func(),
+) {
+	t.Helper()
+
+	skipped := logSignal(t, "event already covered by a pass; skipped")
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		consume()
+	}()
+
+	select {
+	case <-skipped:
+	case <-ctx.Done():
+		t.Error("context ended before the event was skipped")
+	case <-time.After(skipSignalTimeout):
+		t.Error("the event was not reported as skipped")
+	}
+
+	cancel()
+	<-done
+}
+
+// logSignal sends logger.L() to a writer that closes the returned channel
+// the first time a line contains msg. The writer is safe for the concurrent
+// use a running consumer makes of it.
+func logSignal(t *testing.T, msg string) <-chan struct{} {
+	t.Helper()
+
+	sink := &signalWriter{want: msg, seen: make(chan struct{})}
+	setTestLogger(t, sink)
+
+	return sink.seen
+}
+
+type signalWriter struct {
+	mu   sync.Mutex
+	want string
+	seen chan struct{}
+	done bool
+}
+
+func (w *signalWriter) Write(line []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.done && strings.Contains(string(line), w.want) {
+		w.done = true
+		close(w.seen)
+	}
+
+	return len(line), nil
+}
+
+func testCoordinator(processed map[string]time.Time) *coordinator {
+	return testCoordinatorWith(noopApply, nil, processed)
+}
+
+// testCoordinatorWith is testCoordinator with the reconcile the events
+// trigger and the recorder it reports to.
+func testCoordinatorWith(
+	apply applyFn,
+	metrics *observability.Recorder,
+	processed map[string]time.Time,
+) *coordinator {
+	coord := newCoordinator(nil, apply, metrics, DockerCallTimeout)
+	if processed != nil {
+		coord.processed = processed
+	}
+
+	return coord
 }
