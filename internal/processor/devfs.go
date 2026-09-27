@@ -21,6 +21,7 @@ package processor
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -90,6 +91,10 @@ type devFS interface {
 	readLink(rel string) (string, error)
 	// readUevent returns the sysfs uevent of a device.
 	readUevent(id deviceID) ([]byte, error)
+	// walk enumerates the names under base (a path under root), like
+	// filepath.WalkDir. It is for names only: every name is then resolved
+	// with openBeneath.
+	walk(base string, visit fs.WalkDirFunc) error
 	Close() error
 }
 
@@ -183,6 +188,11 @@ func (r *realDevFS) readLink(rel string) (string, error) {
 	}
 
 	return string(buf[:n]), nil
+}
+
+func (*realDevFS) walk(base string, visit fs.WalkDirFunc) error {
+	//nolint:wrapcheck // WalkDir only returns what visit returned
+	return filepath.WalkDir(base, visit)
 }
 
 func (r *realDevFS) readUevent(id deviceID) ([]byte, error) {

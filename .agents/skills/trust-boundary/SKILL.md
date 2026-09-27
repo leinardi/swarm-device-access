@@ -103,36 +103,41 @@ Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`,
 
 `collectContainerRules` (`internal/processor/processor.go`) passes a mount to
 `processor.CollectMountRules` only when `processor.IsMountSource` says its `Source` is `/dev` or
-under `/dev/`. `CollectMountRules` (`internal/processor/rules.go`) resolves a symlinked mount
-source, walks directory mounts, applies `DeviceAllowed` to each resolved entry, and emits a rule only
-for a character or block device. Unresolvable symlinks get two different treatments:
+under `/dev/`. From there every name (the source, each walked entry, each symlink) goes through one
+`evaluateCandidate` (`internal/processor/rules.go`) on file descriptors, never re-walked paths:
 
-- a dangling or unresolvable symlink **found while walking a directory mount** is skipped, with a
-  warning only when an explicit allow glob names it (`skipUnresolvable`, the fix merged in commit
-  `244d2a5`);
-- a mount **source** that is itself an unresolvable symlink returns an error in
-  `MountResult.Errs`, which `Reconcile` logs as a rule failure. Any entry in `Errs` makes the
-  container's whole desired set empty (reason `incomplete_device_set`) until a retry resolves every
-  device: a partly resolved set is never applied.
-Covered by `TestIsDeviceMountSource`, `TestCollectMountRules_*` and
-`TestCollectMountRules_UnresolvableSymlinks_ExplicitAllow` / `_NoAllowGlobs`.
+- a lexical gate: the name must be clean and under `/dev`, so `/dev/../etc/x` is skipped
+  (`outside_dev`);
+- `openat2` beneath a `/dev` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (the `devFS`
+  seam in `devfs.go`): no symlink step can leave `/dev`. An absolute link back into `/dev` is
+  followed by hand, bounded to 40 hops; any other escape is skipped with a warning. The daemon
+  refuses to start without `openat2` (`ProbeOpenat2`);
+- `fstat` on that descriptor gives the device number, and sysfs `DEVNAME` gives the canonical name,
+  so a node planted under `/dev/shm` is judged as the device it is;
+- `Denied` is checked on the alias, the resolved and the canonical name, `Authorized` on the
+  canonical and the resolved name; candidates are aggregated per device across all mounts, and one
+  deny vote suppresses the device.
+
+A dangling name found while walking is skipped (a warning only when an explicit allow glob names it).
+Everything that leaves the set unknown is an entry in `MountResult.Errs` and makes the container's
+whole desired set empty (reason `incomplete_device_set`) until a retry succeeds: a missing mount
+source, an identity that cannot be established for a candidate policy would otherwise grant, any
+walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
+Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName`, `TestCollect_*`,
+`TestProcessor_*EmptiesTheSet` and `TestRealDevFS_Openat2Containment`.
 
 - [ ] No new code path turns a non-`/dev` source into a rule.
-- [ ] A new resolution step (symlink, bind, overlay) fails only that entry on error — a skip or a
-      per-mount error in `MountResult.Errs` — and never falls back to the unresolved path.
-- [ ] **Known gap:** `IsMountSource` is a lexical prefix check on the unresolved `Source`, and
-      the mount `Source` comes from whoever writes the service spec — the same untrusted deployer
-      who sets the labels — so `/dev/../etc` passes it. The resolved targets in
-      `CollectMountRules` and `visitSymlink` are policy-checked but not re-checked against
-      `/dev`, and `/dev/shm` and `/dev/mqueue` are world-writable (mode 1777) on normal hosts, so
-      a non-root host user or a container that bind-mounts `/dev/shm` can plant symlinks the walk
-      follows. What bounds this today is not who can write to `/dev`; it is that
-      `DeviceAllowed` runs on the **resolved** path, so allow globs anchored at `/dev/...` reject a
-      target they do not name, and that only character and block device nodes become rules. With
-      no allow globs configured (the default) that bound is only as tight as the deployer's
-      ability to mount the target directly. A change that touches resolution must not widen
-      this; the right fix is `filepath.Clean` plus an `IsMountSource` check on every resolved
-      path.
+- [ ] A new resolution step goes through `evaluateCandidate`; it skips a name that names nothing
+      under `/dev`, and anything it cannot establish is an error that empties the set — never a
+      fallback to path-only policy and never a silent skip.
+- [ ] Policy keeps judging the canonical identity: deny on every name, allow on the canonical and
+      resolved names. An alias-level deny is only a reconciliation-time veto (a container can hide
+      the alias between passes); the durable boundary is a glob on the canonical name.
+- [x] **Closed gap (containment):** mount sources and symlink targets are contained to `/dev` by
+      the lexical gate and `openat2 RESOLVE_BENEATH`, not by a prefix check on the unresolved path.
+- [x] **Closed gap (planted nodes):** a node planted in a world-writable `/dev` directory
+      (`/dev/shm`, `/dev/mqueue`) is judged by its sysfs `DEVNAME`, so `/dev/shm/x` made as `b 8:0`
+      is denied by a deny on `/dev/sd*` and not authorized by an allow on `/dev/shm/*`.
 
 ## 5. Hot reload never widens access on a parse error
 
@@ -188,6 +193,6 @@ a static binary onto `dhi.io/static` with `USER 0` and nothing else in the runti
 - [ ] Empty and unknown mode deny; a test covers both
 - [ ] Enum-like config and flags validated at load, by name
 - [ ] Malformed labels skip the container; labels only narrow; deny beats allow
-- [ ] Only resolved `/dev` device nodes become rules; unresolvable symlinks are skipped
+- [ ] Only device nodes resolved beneath `/dev` become rules; an unknown identity or walk empties the set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional

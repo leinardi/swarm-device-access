@@ -25,6 +25,18 @@ are ignored, and the daemon does not inspect services or the node's Swarm role,
 so a decision cannot differ between manager and worker nodes or change after a
 daemon restart.
 
+**Device identity.** A mount source, and every name under a mounted
+directory, is resolved beneath `/dev` with `openat2(RESOLVE_BENEATH)`, so no
+path or symlink can lead the daemon outside `/dev`. Each device is identified
+by the device number of the opened node and its kernel name from sysfs
+(`DEVNAME`), and policy is applied to that identity: a node planted in a
+world-writable `/dev` directory is judged as the device it is. A device whose
+identity cannot be established, or a directory mount that cannot be
+enumerated completely, leaves the container with no grants until a retry
+succeeds. Deny globs also apply to aliases, but only as a best-effort veto at
+evaluation time; the boundary to rely on is a glob on the kernel name (see the
+README's Security section).
+
 **Opt-in default.** The daemon defaults to `-policy-mode=opt-in`, processing only
 containers that carry `swarm-device-access.enable: "true"`. This minimises blast
 radius — containers that happen to bind-mount `/dev/...` paths are not silently

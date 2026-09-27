@@ -35,8 +35,11 @@ import (
 )
 
 const (
-	maxDirDepth    = 8
-	maxLogChildren = 32
+	// maxMountEntries bounds the names enumerated under one directory
+	// mount. A walk that cannot see every name cannot know that no alias
+	// denies a device it did see, so overflow is an error, not a cutoff.
+	maxMountEntries = 4096
+	maxLogChildren  = 32
 	// maxLinkHops bounds the absolute symlinks followed by hand (see
 	// evaluateCandidate), like the kernel's own symlink limit.
 	maxLinkHops = 40
@@ -55,6 +58,11 @@ var (
 	errBadDevname = errors.New("uevent has no single valid DEVNAME")
 	// errTooManyLinks reports a chain of absolute symlinks over maxLinkHops.
 	errTooManyLinks = errors.New("too many levels of symbolic links")
+	// errIncompleteWalk marks a directory mount whose names could not all
+	// be enumerated; like an unresolved candidate, it leaves the set unknown.
+	errIncompleteWalk = errors.New("device mount enumeration incomplete")
+	// errMountTooLarge reports a directory mount over maxMountEntries.
+	errMountTooLarge = errors.New("mount too large; narrow the bind mount")
 )
 
 // Candidate skip reasons, also the sda_device_candidates_skipped_total
@@ -184,9 +192,10 @@ func walkMount(
 		result: result,
 	}
 
-	walkErr := filepath.WalkDir(state.base, state.visitEntry)
+	walkErr := dev.walk(state.base, state.visitEntry)
 	if walkErr != nil {
-		state.result.Errs = append(state.result.Errs, fmt.Errorf("walk %q: %w", source, walkErr))
+		state.result.Errs = append(state.result.Errs,
+			fmt.Errorf("%w: %s: %w", errIncompleteWalk, source, walkErr))
 	}
 
 	granted := 0
@@ -220,36 +229,39 @@ type mountWalkState struct {
 	// policyExcluded counts device candidates the policy did not grant.
 	policyExcluded int
 	childrenSeen   []string
+	// entries counts every name enumerated, directories included.
+	entries int
 }
 
 func (s *mountWalkState) visitEntry(walkedPath string, entry fs.DirEntry, entryErr error) error {
+	alias := s.source + strings.TrimPrefix(walkedPath, s.base)
+
+	// The root failing to open, a directory that cannot be read, any walk
+	// error: some name was not seen, so the set is unknown.
 	if entryErr != nil {
-		s.result.Errs = append(s.result.Errs, entryErr)
+		s.result.Errs = append(s.result.Errs,
+			fmt.Errorf("%w: %s: %w", errIncompleteWalk, alias, entryErr))
 
 		return nil
 	}
 
+	if walkedPath == s.base {
+		return nil
+	}
+
+	s.entries++
+	if s.entries > maxMountEntries {
+		s.result.Errs = append(s.result.Errs, fmt.Errorf("%w: %s: %w: more than %d entries",
+			errIncompleteWalk, s.source, errMountTooLarge, maxMountEntries))
+
+		return filepath.SkipAll
+	}
+
 	if entry.IsDir() {
-		if walkedPath == s.base {
-			return nil
-		}
-
-		depth := strings.Count(
-			strings.TrimPrefix(walkedPath, s.base),
-			string(filepath.Separator),
-		)
-		if depth > maxDirDepth {
-			logger.L().Debug("walk depth cap reached", "path", walkedPath)
-
-			return filepath.SkipDir
-		}
-
 		return nil
 	}
 
 	s.trackChild(walkedPath)
-
-	alias := s.source + strings.TrimPrefix(walkedPath, s.base)
 
 	found := evaluateCandidate(s.dev, alias, s.gpol, s.cpol)
 

@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	dockerclient "github.com/moby/moby/client"
+	"golang.org/x/sys/unix"
 
 	"github.com/leinardi/swarm-device-access/internal/policy"
 )
@@ -127,6 +129,7 @@ func TestEnforce_GrantsDeviceAccess(t *testing.T) {
 
 	requireProcessed(ctx, t, proc, target, 1, 0)
 	requireAllowed(ctx, t, cli, target, device, "labeled container after the daemon granted it")
+	requireNoOverGrant(ctx, t, cli, target, device)
 
 	sibling := startTestContainer(ctx, t, cli, nil, []string{bind})
 	requireSkipped(ctx, t, proc, sibling, msgSkippedPolicy)
@@ -524,8 +527,61 @@ func probeOpen(
 ) (exitCode int, stderrText string) {
 	t.Helper()
 
+	return execIn(ctx, t, cli, containerID, "sh", "-c", `exec 3< "$1"`, "probe", device)
+}
+
+// requireNoOverGrant creates, inside the opted-in container, nodes the daemon
+// must not have granted along with device: the same major with the next
+// minor, and the same numbers as the other device type (a block node when
+// device is a character device). Opening each must still be denied.
+func requireNoOverGrant(
+	ctx context.Context,
+	t *testing.T,
+	cli *dockerclient.Client,
+	containerID, device string,
+) {
+	t.Helper()
+
+	var st unix.Stat_t
+
+	err := unix.Stat(device, &st)
+	if err != nil {
+		t.Fatalf("stat %s: %v", device, err)
+	}
+
+	major, minor := strconv.FormatUint(uint64(unix.Major(st.Rdev)), 10), unix.Minor(st.Rdev)
+
+	typ, other := "c", "b"
+	if st.Mode&unix.S_IFMT == unix.S_IFBLK {
+		typ, other = "b", "c"
+	}
+
+	for _, node := range [][]string{
+		{"/tmp/sda-next-minor", typ, major, strconv.FormatUint(uint64(minor)+1, 10)},
+		{"/tmp/sda-other-type", other, major, strconv.FormatUint(uint64(minor), 10)},
+	} {
+		exitCode, stderr := execIn(ctx, t, cli, containerID, append([]string{"mknod"}, node...)...)
+		if exitCode != 0 {
+			t.Fatalf("mknod %v in the opted-in container: exit %d: %s", node, exitCode, stderr)
+		}
+
+		requireDenied(ctx, t, cli, containerID, node[0],
+			fmt.Sprintf("node %s %s:%s next to the granted %s", node[1], node[2], node[3], device))
+	}
+}
+
+// execIn runs cmd inside containerID and returns its exit code and stderr.
+func execIn(
+	ctx context.Context,
+	t *testing.T,
+	cli *dockerclient.Client,
+	containerID string,
+	cmd ...string,
+) (exitCode int, stderrText string) {
+	t.Helper()
+
 	created, err := cli.ExecCreate(ctx, containerID, dockerclient.ExecCreateOptions{
-		Cmd:          []string{"sh", "-c", `exec 3< "$1"`, "probe", device},
+		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
 	})

@@ -302,6 +302,9 @@ Consumer services opt in and narrow their allowed device set with labels:
 | `swarm-device-access.device-allow` | Comma-separated globs | Allow only matching `/dev/...` paths. Empty means inherit. |
 | `swarm-device-access.device-deny` | Comma-separated globs | Deny matching `/dev/...` paths. Deny overrides allow. |
 
+Write deny globs against kernel device names (`/dev/sd*`, `/dev/nvme*`), not
+against aliases such as `/dev/disk/by-id/*`: see [Security](#-security).
+
 Declare these labels under top-level `labels:` in your service definition.
 Docker copies top-level labels into each task container, so the daemon can read
 them on every node — including worker nodes.
@@ -335,7 +338,18 @@ under `/dev` is therefore judged as the device it really is. A name that
 leads outside `/dev` is skipped with a warning; a device whose identity cannot
 be established (no or ambiguous `DEVNAME` in sysfs, an unreadable node) leaves
 the container with no grants until a retry succeeds, unless policy already
-excludes it under its other names.
+excludes it under its other names. The same holds when a directory mount
+cannot be enumerated completely: a read error, or more than 4096 entries
+(`mount too large; narrow the bind mount`). A whole-`/dev` mount counts
+everything under it, including files programs keep in `/dev/shm`, so on a busy
+host it can hit that limit: mount the device directories you need instead.
+
+Some pseudo devices have no `DEVNAME`; `/dev/pts/*` nodes, for example, have
+no `/sys/dev/char/136:0` entry. To see why a device blocks a container, look
+up its numbers (`ls -l /dev/pts/0` shows `136, 0`) and check
+`ls /sys/dev/char/136:0` (`/sys/dev/block/M:m` for block devices). Blocking
+such a device is intentional: bind-mount only the devices you need, or
+exclude the rest with an allow list.
 
 Global `-device-allow` and `-device-deny` define the broadest access the daemon
 may grant. Per-container labels can only narrow that access. Deny rules always
@@ -354,6 +368,17 @@ happen to bind-mount something under `/dev` are not silently granted access.
 If every workload on the node is trusted, `-policy-mode=all` can be used to
 process all containers unless they explicitly set
 `swarm-device-access.enable: "false"`.
+
+The security authority is a device's canonical identity: its device number,
+named by its kernel name (`DEVNAME` in sysfs). Cgroup rules grant a
+`major:minor`, not a path. A deny glob that matches only an alias (a
+`/dev/disk/by-id/...` link, a node someone planted under `/dev/shm`) vetoes the
+device while that alias is present when the daemon evaluates the container,
+but a container that can change the directory it mounts can hide the alias
+before a later pass. Treat alias-level deny as a best-effort veto, and write
+the denies you rely on against kernel names, for example `/dev/sd*` and
+`/dev/nvme*`. Allow globs are always checked against the kernel name and the
+node a name resolves to, so an alias alone never grants a device.
 
 See [SECURITY.md](SECURITY.md) for the threat model and disclosure policy.
 

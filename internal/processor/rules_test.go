@@ -21,6 +21,7 @@ package processor
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,6 +47,8 @@ type fakeDevFS struct {
 	errs    map[string]error
 	links   map[string]string
 	uevents map[deviceID]string
+	// walkErrs injects an error for a name (relative to dir) into the walk.
+	walkErrs map[string]error
 }
 
 type fakeNode struct {
@@ -62,12 +65,13 @@ func newFakeDevFS(t *testing.T) *fakeDevFS {
 	t.Helper()
 
 	return &fakeDevFS{
-		t:       t,
-		dir:     t.TempDir(),
-		nodes:   make(map[string]fakeNode),
-		errs:    make(map[string]error),
-		links:   make(map[string]string),
-		uevents: make(map[deviceID]string),
+		t:        t,
+		dir:      t.TempDir(),
+		nodes:    make(map[string]fakeNode),
+		errs:     make(map[string]error),
+		links:    make(map[string]string),
+		uevents:  make(map[deviceID]string),
+		walkErrs: make(map[string]error),
 	}
 }
 
@@ -108,6 +112,18 @@ func (f *fakeDevFS) readUevent(id deviceID) ([]byte, error) {
 	}
 
 	return []byte(data), nil
+}
+
+func (f *fakeDevFS) walk(base string, visit fs.WalkDirFunc) error {
+	//nolint:wrapcheck // WalkDir only returns what visit returned
+	return filepath.WalkDir(base, func(path string, entry fs.DirEntry, err error) error {
+		rel, relErr := filepath.Rel(f.dir, path)
+		if injected, ok := f.walkErrs[rel]; ok && relErr == nil && err == nil {
+			return visit(path, entry, injected)
+		}
+
+		return visit(path, entry, err)
+	})
 }
 
 // touch creates the name under dir so a walk enumerates it.
@@ -241,13 +257,19 @@ func wantRules(t *testing.T, got containerRules, want ...deviceID) {
 func wantUnresolved(t *testing.T, got containerRules, fragments ...string) {
 	t.Helper()
 
+	wantIncomplete(t, got, errUnresolved, fragments...)
+}
+
+func wantIncomplete(t *testing.T, got containerRules, sentinel error, fragments ...string) {
+	t.Helper()
+
 	if len(got.deviceErrs) == 0 {
-		t.Fatal("want an unresolved-identity error, got none")
+		t.Fatalf("want a %v error, got none", sentinel)
 	}
 
 	joined := errors.Join(got.deviceErrs...)
-	if !errors.Is(joined, errUnresolved) {
-		t.Errorf("err = %v, want errUnresolved", joined)
+	if !errors.Is(joined, sentinel) {
+		t.Errorf("err = %v, want %v", joined, sentinel)
 	}
 
 	for _, fragment := range fragments {
@@ -692,6 +714,97 @@ func TestCollect_DirectorySkips(t *testing.T) {
 		if !strings.Contains(buf.String(), debug) {
 			t.Errorf("want DEBUG %q, got:\n%s", debug, buf.String())
 		}
+	}
+}
+
+// Every way a directory mount's names can go unseen leaves the set unknown:
+// an alias that was not enumerated might deny a device that was.
+func TestCollect_IncompleteEnumeration(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		setup func(dev *fakeDevFS)
+		want  error
+	}{
+		"root cannot be opened": {func(dev *fakeDevFS) {
+			dev.directory("dri")
+			dev.device("dri/card0", devCard, "dri/card0")
+			dev.errs["dri"] = fmt.Errorf("openat2 dri: %w", unix.EACCES)
+		}, errUnresolved},
+		"root vanished before the walk": {func(dev *fakeDevFS) {
+			dev.nodes["dri"] = fakeNode{kind: nodeDir, path: "/dev/dri"}
+		}, errIncompleteWalk},
+		"directory read error": {func(dev *fakeDevFS) {
+			dev.directory("dri")
+			dev.directory("dri/by-path")
+			dev.walkErrs["dri/by-path"] = unix.EACCES
+		}, errIncompleteWalk},
+		"entry error": {func(dev *fakeDevFS) {
+			dev.directory("dri")
+			dev.touch("dri/renderD128")
+			dev.walkErrs["dri/renderD128"] = unix.EIO
+		}, errIncompleteWalk},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dev := newFakeDevFS(t)
+			dev.device("null", devNull, "null")
+			tc.setup(dev)
+
+			got := collectFrom(dev, policy.Global{Mode: policy.ModeAll}, "/dev/null", "/dev/dri")
+			wantIncomplete(t, got, tc.want, "/dev/dri")
+
+			proc := &Processor{devfs: func() (devFS, error) { return dev, nil }}
+			info := &container.InspectResponse{
+				State: &container.State{Running: true, Pid: 1},
+				Mounts: []container.MountPoint{
+					{Source: "/dev/null", Destination: "/dev/null"},
+					{Source: "/dev/dri", Destination: "/dev/dri"},
+				},
+			}
+
+			desired := proc.computeDesired(
+				"abc",
+				info,
+				config.Runtime{Policy: policy.Global{Mode: policy.ModeAll}},
+			)
+			if len(desired.rules) != 0 || !errors.Is(desired.incomplete, tc.want) {
+				t.Errorf("desired = %+v, want an empty set and a %v error", desired, tc.want)
+			}
+		})
+	}
+}
+
+func TestCollect_EntryCapOverflowIsAnError(t *testing.T) {
+	t.Parallel()
+
+	dev := newFakeDevFS(t)
+	dev.directory("big")
+
+	for idx := range maxMountEntries + 1 {
+		dev.device(
+			"big/n"+strconv.Itoa(idx),
+			deviceID{typ: "c", major: 250, minor: int64(idx)},
+			"n",
+		)
+	}
+
+	got := collectFrom(dev, policy.Global{Mode: policy.ModeAll}, "/dev/big")
+	wantIncomplete(t, got, errMountTooLarge, "/dev/big", "narrow the bind mount")
+
+	// At the cap exactly, the mount is enumerated in full.
+	delete(dev.nodes, "big/n0")
+
+	err := os.Remove(filepath.Join(dev.dir, "big", "n0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got = collectFrom(dev, policy.Global{Mode: policy.ModeAll}, "/dev/big")
+	if len(got.deviceErrs) != 0 || len(got.granted) != maxMountEntries {
+		t.Errorf("at the cap: granted %d, errs %v; want %d and none",
+			len(got.granted), got.deviceErrs, maxMountEntries)
 	}
 }
 

@@ -33,6 +33,10 @@ Docker daemon
 |   ├─ New(version) → Interface                     |
 |   ├─ GetDeviceCGroupMountPath(procRootPath, pid)   |
 |   └─ for each /dev/... mount:                     |
+|        enumerate names (complete, ≤ 4096)         |
+|        each name: openat2 beneath /dev → fstat    |
+|          → sysfs DEVNAME → deny/allow on names    |
+|        aggregate per device across mounts         |
 |        applyMount → applyDeviceRules              |
 |          └─ api.AddDeviceRules(cgroupPath, rules)  |
 +---------------------------------------------------+
@@ -115,8 +119,10 @@ For every bind mount whose source is `/dev` or lives under `/dev/`, the processo
 
 - **Single-file mount** (e.g. `/dev/nvidia0`): the source is one candidate. A missing or non-device source is an error, because it was mounted
   explicitly.
-- **Directory mount** (e.g. `/dev`, `/dev/dri`): the tree is walked (depth-capped) only to enumerate names; each entry is one candidate named
-  after the mount source.
+- **Directory mount** (e.g. `/dev`, `/dev/dri`): the tree is walked only to enumerate names; each entry is one candidate named after the mount
+  source. Enumeration must be complete: a root that cannot be opened, a directory that cannot be read, any walk error, or more than 4096
+  entries in one mount (`mount too large; narrow the bind mount`) makes the container's whole desired set empty with a retryable error, since
+  an alias that was not seen might deny a device that was. There is no depth cap and no subtree exception.
 
 `/dev` is opened once per pass. Each candidate goes through one evaluation on file descriptors, so an entry swapped between enumeration and use
 is judged by what it is when opened, not by its name:
