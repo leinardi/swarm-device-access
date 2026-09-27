@@ -122,6 +122,69 @@ func TestRun_EstablishmentBounded(t *testing.T) {
 	}
 }
 
+// A Docker call that ignores its canceled context (the hijacked attach reads
+// the upgrade response on a raw connection) must not hold the launcher past
+// the timeout; the result it returns later is released.
+func TestRun_EstablishmentIgnoringCancel(t *testing.T) {
+	t.Parallel()
+
+	const callTimeout = 50 * time.Millisecond
+
+	docker := newFakeDocker()
+	docker.attachStuck = make(chan struct{})
+
+	run := newTestRun(docker)
+	run.runner.callTimeout = callTimeout
+
+	began := time.Now()
+
+	res := result(t, run.start(t.Context()))
+	if !errors.Is(res.err, errEstablishTimeout) || res.status != 1 {
+		t.Fatalf("run = %d, %v; want 1, %v", res.status, res.err, errEstablishTimeout)
+	}
+
+	if elapsed := time.Since(began); elapsed > 20*callTimeout {
+		t.Errorf("returned after %s, want soon after the %s timeout", elapsed, callTimeout)
+	}
+
+	if !slices.Equal(docker.removedIDs(), []string{testDaemonID}) {
+		t.Errorf("removed %v, want the created daemon", docker.removedIDs())
+	}
+
+	close(docker.attachStuck)
+
+	// Positive eventual: the late connection is closed by the background
+	// release; closed is the observable.
+	select {
+	case <-waitStuckConn(t, docker).closed:
+	case <-time.After(2 * time.Second):
+		t.Error("late attach result was not released")
+	}
+}
+
+// waitStuckConn polls until the stuck attach has returned its connection.
+func waitStuckConn(t *testing.T, docker *fakeDocker) *hijackedConn {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+
+	for time.Now().Before(deadline) {
+		docker.mu.Lock()
+		conn := docker.stuckConn
+		docker.mu.Unlock()
+
+		if conn != nil {
+			return conn
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatal("stuck attach never returned")
+
+	return nil
+}
+
 func TestRun_AttachErrorRemovesCreated(t *testing.T) {
 	t.Parallel()
 
@@ -210,10 +273,24 @@ func TestRun_LogStreamLost(t *testing.T) {
 	requireStopped(t, run.docker)
 }
 
+// With the wait stream broken, the launcher still stops the daemon by ID,
+// confirms its removal by inspecting it, and drains its last lines.
 func TestRun_WaitStreamError(t *testing.T) {
 	t.Parallel()
 
+	const step = 50 * time.Millisecond
+
 	run := newTestRun(newFakeDocker())
+	run.docker.stop = func(context.Context) {
+		go func() {
+			time.Sleep(step)
+			run.docker.emit(streamStdout, "daemon last words")
+			run.docker.closeOutput(nil)
+			time.Sleep(step)
+			run.docker.markGone()
+		}()
+	}
+
 	done := run.start(t.Context())
 	run.waitStarted(t)
 
@@ -224,7 +301,55 @@ func TestRun_WaitStreamError(t *testing.T) {
 		t.Fatalf("run = %d, %v; want 1, %v", res.status, res.err, errWaitStream)
 	}
 
+	if errors.Is(res.err, errShutdownBudget) {
+		t.Errorf("removal not confirmed: %v", res.err)
+	}
+
 	requireStopped(t, run.docker)
+
+	calls := run.docker.recorded()
+	if !contains(calls[slices.Index(calls, "stop "+testDaemonID):], "inspect "+testDaemonID) {
+		t.Errorf("calls %v, want the removal confirmed by inspect after the stop", calls)
+	}
+
+	if !strings.Contains(run.stdout.String(), "daemon last words") {
+		t.Errorf("stdout = %q, want the daemon's last line", run.stdout.String())
+	}
+}
+
+// A daemon that never disappears after a broken wait stream ends the
+// shutdown at the budget.
+func TestRun_WaitStreamErrorBudget(t *testing.T) {
+	t.Parallel()
+
+	const budget = 200 * time.Millisecond
+
+	run := newTestRun(newFakeDocker())
+	run.runner.shutdownBudget = budget
+	run.docker.stop = func(context.Context) {}
+
+	done := run.start(t.Context())
+	run.waitStarted(t)
+
+	began := time.Now()
+
+	run.docker.waitErr <- errInjected
+
+	res := result(t, done)
+	if !errors.Is(res.err, errWaitStream) || !errors.Is(res.err, errShutdownBudget) ||
+		res.status != 1 {
+		t.Fatalf(
+			"run = %d, %v; want 1, %v and %v",
+			res.status,
+			res.err,
+			errWaitStream,
+			errShutdownBudget,
+		)
+	}
+
+	if elapsed := time.Since(began); elapsed > 3*budget {
+		t.Errorf("shutdown took %s, want within the %s budget", elapsed, budget)
+	}
 }
 
 // A signal stops the daemon by ID; the launcher still waits for its

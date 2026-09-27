@@ -54,10 +54,20 @@ var errInjected = errors.New("injected failure")
 type hijackedConn struct {
 	net.Conn
 
-	reader *io.PipeReader
+	reader    *io.PipeReader
+	closeOnce sync.Once
+	closed    chan struct{}
 }
 
-func (c *hijackedConn) Close() error { return c.reader.Close() } //nolint:wrapcheck // fake connection
+func newHijackedConn(reader *io.PipeReader) *hijackedConn {
+	return &hijackedConn{reader: reader, closed: make(chan struct{})}
+}
+
+func (c *hijackedConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+
+	return c.reader.Close() //nolint:wrapcheck // fake connection
+}
 
 type stopCall struct {
 	id      string
@@ -82,6 +92,13 @@ type fakeDocker struct {
 	// attachHang and waitHang block the call until its context ends.
 	attachHang bool
 	waitHang   bool
+	// attachStuck blocks the attach, whatever its context, until it is
+	// closed, like a dockerd that accepts the upgrade and never answers.
+	attachStuck chan struct{}
+	// stuckConn is the connection the stuck attach returns once released.
+	stuckConn *hijackedConn
+	// daemonGone reports the created daemon as removed to inspect.
+	daemonGone bool
 	// stop replaces the default stop, which ends the daemon.
 	stop func(ctx context.Context)
 
@@ -116,9 +133,19 @@ func (f *fakeDocker) ContainerInspect(
 ) (client.ContainerInspectResult, error) {
 	f.record("inspect " + containerID)
 
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	err, failed := f.inspectEr[containerID]
 	if failed {
 		return client.ContainerInspectResult{}, err
+	}
+
+	if containerID == testDaemonID && !f.daemonGone {
+		return client.ContainerInspectResult{Container: container.InspectResponse{
+			ID:    testDaemonID,
+			State: &container.State{Running: true},
+		}}, nil
 	}
 
 	res, found := f.inspect[containerID]
@@ -186,6 +213,22 @@ func (f *fakeDocker) ContainerAttach(
 		return client.ContainerAttachResult{}, fmt.Errorf("attach: %w", ctx.Err())
 	}
 
+	if f.attachStuck != nil {
+		<-f.attachStuck
+
+		reader, _ := io.Pipe()
+		conn := newHijackedConn(reader)
+
+		f.mu.Lock()
+		f.stuckConn = conn
+		f.mu.Unlock()
+
+		return client.ContainerAttachResult{HijackedResponse: client.HijackedResponse{
+			Conn:   conn,
+			Reader: bufio.NewReader(reader),
+		}}, nil
+	}
+
 	if f.attachErr != nil {
 		return client.ContainerAttachResult{}, f.attachErr
 	}
@@ -194,7 +237,7 @@ func (f *fakeDocker) ContainerAttach(
 	f.output = writer
 
 	return client.ContainerAttachResult{HijackedResponse: client.HijackedResponse{
-		Conn:   &hijackedConn{reader: reader},
+		Conn:   newHijackedConn(reader),
 		Reader: bufio.NewReader(reader),
 	}}, nil
 }
@@ -324,8 +367,17 @@ func (f *fakeDocker) closeOutput(err error) {
 // exit ends the daemon's output and reports its removal with status.
 func (f *fakeDocker) exit(status int64) {
 	f.closeOutput(nil)
+	f.markGone()
 
 	f.waitResult <- container.WaitResponse{StatusCode: status}
+}
+
+// markGone makes inspect report the daemon removed.
+func (f *fakeDocker) markGone() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.daemonGone = true
 }
 
 // syncBuffer is a bytes.Buffer safe for the copy goroutine and the test.
@@ -375,6 +427,7 @@ func newTestRun(docker *fakeDocker) *testRun {
 			selfID:         func() (string, error) { return testLauncherID, nil },
 			callTimeout:    2 * time.Second,
 			shutdownBudget: 5 * time.Second,
+			pollInterval:   10 * time.Millisecond,
 		},
 	}
 }

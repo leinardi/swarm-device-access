@@ -161,11 +161,14 @@ unprivileged and with only the Docker socket (`internal/launcher`):
    registered before it, so no output and no exit is missed. Any failure after the create removes
    the created container.
 4. **Supervision.** The attach and wait streams each run on their own context, detached from the
-   signal context; only their establishment is bounded (`DockerCallTimeout`). The launcher returns
-   the daemon's status after it is removed and its output drained. `SIGTERM`, a broken wait stream
-   or a lost log stream stop the daemon **by ID**, and every shutdown shares one 20s budget (a 10s
-   stop plus `DockerCallTimeout`) for the stop, the wait for the removal and the drain, inside the
-   compose files' `stop_grace_period: 30s`.
+   signal context; only their establishment is bounded (`DockerCallTimeout`), and a call that ignores
+   its canceled context (the hijacked attach reads the upgrade response on a raw connection) is
+   abandoned at the deadline, its late result released in the background. The launcher returns the
+   daemon's status after it is removed and its output drained. `SIGTERM`, a broken wait stream or a
+   lost log stream stop the daemon **by ID**, and every shutdown shares one 20s budget (a 10s stop
+   plus `DockerCallTimeout`) for the stop, the wait for the removal and the drain, inside the compose
+   files' `stop_grace_period: 30s`. With the wait stream broken, the removal is confirmed by polling
+   inspect until the daemon is gone.
 
 ## BPF program structure
 

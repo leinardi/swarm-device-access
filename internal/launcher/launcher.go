@@ -58,6 +58,8 @@ const (
 	// compose files' stop_grace_period of 30s, so Swarm never kills a
 	// launcher that is still stopping its daemon.
 	shutdownBudget = stopTimeout + daemon.DockerCallTimeout
+
+	removalPollInterval = 250 * time.Millisecond
 )
 
 var (
@@ -119,6 +121,9 @@ type runner struct {
 
 	callTimeout    time.Duration
 	shutdownBudget time.Duration
+	// pollInterval spaces the inspects that confirm a removal the wait
+	// stream can no longer report.
+	pollInterval time.Duration
 }
 
 // session is a created daemon container with its log and wait streams.
@@ -151,6 +156,7 @@ func Run(ctx context.Context, docker dockerAPI, opts *Options) (int, error) {
 		selfID:         selfIDFromMountinfo,
 		callTimeout:    daemon.DockerCallTimeout,
 		shutdownBudget: shutdownBudget,
+		pollInterval:   removalPollInterval,
 	}
 
 	return run.run(ctx)
@@ -298,9 +304,13 @@ func (r *runner) prepare(ctx context.Context, containerID string) (*session, err
 // gets its own context, detached from ctx: a signal must not cut the
 // stream before the daemon's status and last lines arrive, and a deadline
 // would kill it once established. The call is raced against a timer
-// instead; on timeout (or ctx ending first) its context is canceled and the
-// goroutine is waited for, and a result it still returns is released. On
-// success the returned cancel func owns the stream context.
+// instead; on timeout (or ctx ending first) its context is canceled and
+// establish returns at once. It does not wait for the call: the client's
+// hijacked attach reads the upgrade response on a raw connection that no
+// context reaches, so a dockerd that accepts and never answers would block
+// the launcher forever. A result the call still returns later is released
+// by a background goroutine. On success the returned cancel func owns the
+// stream context.
 //
 //nolint:ireturn // T is the concrete result of the one streaming call; generic over the two stream kinds
 func establish[T any](
@@ -347,10 +357,12 @@ func establish[T any](
 
 	cancel()
 
-	out := <-done
-	if out.err == nil {
-		release(out.val)
-	}
+	go func() {
+		out := <-done
+		if out.err == nil {
+			release(out.val)
+		}
+	}()
 
 	return zero, func() {}, cause
 }
@@ -369,12 +381,9 @@ func (r *runner) supervise(ctx context.Context, sess *session) (int, error) {
 			return status, nil
 
 		case waitErr := <-sess.wait.Error:
-			budgetCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.shutdownBudget)
-			r.stop(budgetCtx, sess.id)
+			launcherLog().Error("daemon wait stream failed; stopping the daemon", "err", waitErr)
 
-			cancel()
-
-			return 1, fmt.Errorf("%w: %w", errWaitStream, waitErr)
+			return r.shutdown(ctx, sess, waitErr)
 
 		case copyErr := <-sess.pendingCopy():
 			sess.recordCopy(copyErr)
@@ -386,34 +395,74 @@ func (r *runner) supervise(ctx context.Context, sess *session) (int, error) {
 
 			launcherLog().Error("daemon log stream lost; stopping the daemon", "err", copyErr)
 
-			_, shutdownErr := r.shutdown(ctx, sess)
+			_, shutdownErr := r.shutdown(ctx, sess, nil)
 
 			return 1, errors.Join(fmt.Errorf("%w: %w", errLogStream, copyErr), shutdownErr)
 
 		case <-ctx.Done():
 			launcherLog().Info("stopping daemon", "id", shortID(sess.id))
 
-			return r.shutdown(ctx, sess)
+			return r.shutdown(ctx, sess, nil)
 		}
 	}
 }
 
 // shutdown stops the daemon and waits for its removal and its last log
-// lines, all within one shutdownBudget.
-func (r *runner) shutdown(ctx context.Context, sess *session) (int, error) {
+// lines, all within one shutdownBudget. waitErr is set when the wait stream
+// has already failed, or it fails here: the removal is then confirmed by
+// polling inspect instead, the output is still drained, and the status,
+// which nothing reports any more, is 1.
+func (r *runner) shutdown(ctx context.Context, sess *session, waitErr error) (int, error) {
 	budgetCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.shutdownBudget)
 	defer cancel()
 
 	r.stop(budgetCtx, sess.id)
 
-	select {
-	case res := <-sess.wait.Result:
-		return sess.finish(budgetCtx, &res), nil
-	case waitErr := <-sess.wait.Error:
-		return 1, fmt.Errorf("%w: %w", errWaitStream, waitErr)
-	case <-budgetCtx.Done():
-		return 1, fmt.Errorf("%w (%s)", errShutdownBudget, r.shutdownBudget)
+	if waitErr == nil {
+		select {
+		case res := <-sess.wait.Result:
+			return sess.finish(budgetCtx, &res), nil
+		case waitErr = <-sess.wait.Error:
+		case <-budgetCtx.Done():
+			return 1, r.budgetExceeded()
+		}
 	}
+
+	removeErr := r.awaitRemoval(budgetCtx, sess.id)
+	sess.drain(budgetCtx)
+
+	return 1, errors.Join(fmt.Errorf("%w: %w", errWaitStream, waitErr), removeErr)
+}
+
+// awaitRemoval polls until inspect reports containerID gone, or ctx ends.
+func (r *runner) awaitRemoval(ctx context.Context, containerID string) error {
+	ticker := time.NewTicker(r.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		inspectCtx, cancel := context.WithTimeout(ctx, r.callTimeout)
+		_, err := r.docker.ContainerInspect(
+			inspectCtx,
+			containerID,
+			client.ContainerInspectOptions{},
+		)
+
+		cancel()
+
+		if cerrdefs.IsNotFound(err) {
+			return nil
+		}
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return r.budgetExceeded()
+		}
+	}
+}
+
+func (r *runner) budgetExceeded() error {
+	return fmt.Errorf("%w (%s)", errShutdownBudget, r.shutdownBudget)
 }
 
 // stop stops the daemon by ID, never by name, so a launcher cannot stop a
@@ -430,6 +479,19 @@ func (r *runner) stop(ctx context.Context, id string) {
 // finish drains the daemon's remaining output within ctx and returns its
 // exit status.
 func (s *session) finish(ctx context.Context, res *container.WaitResponse) int {
+	s.drain(ctx)
+
+	if res.Error != nil && res.Error.Message != "" {
+		launcherLog().Warn("daemon wait reported an error", "err", res.Error.Message)
+	}
+
+	launcherLog().Info("daemon exited", "id", shortID(s.id), "status", res.StatusCode)
+
+	return int(res.StatusCode)
+}
+
+// drain waits, within ctx, for the daemon's output to end.
+func (s *session) drain(ctx context.Context) {
 	if !s.copyFinished {
 		select {
 		case copyErr := <-s.copyDone:
@@ -442,14 +504,6 @@ func (s *session) finish(ctx context.Context, res *container.WaitResponse) int {
 	if s.copyErr != nil {
 		launcherLog().Warn("daemon log stream ended with an error", "err", s.copyErr)
 	}
-
-	if res.Error != nil && res.Error.Message != "" {
-		launcherLog().Warn("daemon wait reported an error", "err", res.Error.Message)
-	}
-
-	launcherLog().Info("daemon exited", "id", shortID(s.id), "status", res.StatusCode)
-
-	return int(res.StatusCode)
 }
 
 // pendingCopy returns copyDone until its one result is recorded, then nil,
