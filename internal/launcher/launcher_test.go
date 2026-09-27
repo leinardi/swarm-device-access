@@ -273,6 +273,36 @@ func TestRun_LogStreamLost(t *testing.T) {
 	requireStopped(t, run.docker)
 }
 
+// An inspect that keeps failing while the removal is polled is reported
+// with the budget, not replaced by it.
+func TestRun_WaitStreamErrorKeepsInspectError(t *testing.T) {
+	t.Parallel()
+
+	run := newTestRun(newFakeDocker())
+	run.runner.shutdownBudget = 100 * time.Millisecond
+	run.docker.stop = func(context.Context) {}
+
+	done := run.start(t.Context())
+	run.waitStarted(t)
+
+	run.docker.mu.Lock()
+	run.docker.inspectEr[testDaemonID] = errDenied
+	run.docker.mu.Unlock()
+
+	run.docker.waitErr <- errInjected
+
+	res := result(t, done)
+	if !errors.Is(res.err, errShutdownBudget) || !errors.Is(res.err, errDenied) || res.status != 1 {
+		t.Fatalf(
+			"run = %d, %v; want 1, %v and %v",
+			res.status,
+			res.err,
+			errShutdownBudget,
+			errDenied,
+		)
+	}
+}
+
 // With the wait stream broken, the launcher still stops the daemon by ID,
 // confirms its removal by inspecting it, and drains its last lines.
 func TestRun_WaitStreamError(t *testing.T) {

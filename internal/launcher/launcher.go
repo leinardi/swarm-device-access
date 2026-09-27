@@ -435,6 +435,9 @@ func (r *runner) shutdown(ctx context.Context, sess *session, waitErr error) (in
 }
 
 // awaitRemoval polls until inspect reports containerID gone, or ctx ends.
+// At the budget, the latest inspect error, if the last inspect failed, is
+// returned with the timeout: a permission or connection error is the
+// diagnosis, not the budget.
 func (r *runner) awaitRemoval(ctx context.Context, containerID string) error {
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
@@ -456,6 +459,13 @@ func (r *runner) awaitRemoval(ctx context.Context, containerID string) error {
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
+			if err != nil {
+				return errors.Join(
+					r.budgetExceeded(),
+					fmt.Errorf("last inspect of daemon: %w", err),
+				)
+			}
+
 			return r.budgetExceeded()
 		}
 	}

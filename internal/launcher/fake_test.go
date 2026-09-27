@@ -47,7 +47,10 @@ const (
 	streamStderr = 2
 )
 
-var errInjected = errors.New("injected failure")
+var (
+	errInjected = errors.New("injected failure")
+	errDenied   = errors.New("permission denied")
+)
 
 // hijackedConn is the launcher's end of a fake attach connection: closing it
 // ends the reader, as closing a real hijacked connection does.
