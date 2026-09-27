@@ -9,7 +9,7 @@
 ########################
 # deps: download modules in a layer keyed on go.mod and go.sum only
 ########################
-FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev@sha256:0d95d4f9889abcf60c182228d28fa83fde3e0dc2330bb1365e5960273b43ed57 AS deps
+FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev@sha256:ab0da7884e1e7960d971aa371a4fd7c3ffd9b9e2e90bf0fbcedd4cc954d7d4cd AS deps
 WORKDIR /src
 RUN --mount=type=cache,target=/var/cache/apk \
 	apk add --no-cache git
