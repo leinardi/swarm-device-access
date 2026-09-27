@@ -31,8 +31,9 @@ services:
       - /dev:/dev
       - ghcr.io/leinardi/swarm-device-access:latest
       # Daemon flags go after the image name; before it they are docker run flags.
-      # Restrict to USB bus devices only:
-      # - -device-allow=/dev/bus/usb/*
+      # Restrict to USB bus devices only. Nodes are /dev/bus/usb/<bus>/<device>,
+      # and * does not match across "/", so the glob needs both levels:
+      # - -device-allow=/dev/bus/usb/*/*
     entrypoint: docker
     deploy:
       mode: global
@@ -48,7 +49,7 @@ services:
     # Use top-level labels: so they reach the container; deploy.labels: are ignored.
     labels:
       swarm-device-access.enable: "true"
-      swarm-device-access.device-allow: "/dev/bus/usb/*"
+      swarm-device-access.device-allow: "/dev/bus/usb/*/*"
     deploy:
       mode: replicated
       replicas: 1
