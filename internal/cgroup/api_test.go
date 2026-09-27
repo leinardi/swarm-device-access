@@ -94,48 +94,48 @@ func TestDeviceRule_JSON_RoundTrip(t *testing.T) {
 }
 
 func TestNew_InvalidVersion(t *testing.T) {
-	_, err := New(-1, &Ledger{})
+	_, err := New(-1, &Ledger{}, nil)
 	if err == nil {
-		t.Error("New(-1, &Ledger{}) must return an error")
+		t.Error("New(-1, &Ledger{}, nil) must return an error")
 	}
 
-	_, err = New(99, &Ledger{})
+	_, err = New(99, &Ledger{}, nil)
 	if err == nil {
-		t.Error("New(99, &Ledger{}) must return an error")
+		t.Error("New(99, &Ledger{}, nil) must return an error")
 	}
 }
 
 func TestNew_ValidVersions(t *testing.T) {
-	v1, err := New(1, &Ledger{})
+	v1, err := New(1, &Ledger{}, nil)
 	if err != nil {
-		t.Errorf("New(1, &Ledger{}) returned err: %v", err)
+		t.Errorf("New(1, &Ledger{}, nil) returned err: %v", err)
 	}
 
 	if v1 == nil {
-		t.Error("New(1, &Ledger{}) returned nil Interface")
+		t.Error("New(1, &Ledger{}, nil) returned nil Interface")
 	}
 
-	v2, err := New(2, nil)
+	v2, err := New(2, nil, nil)
 	if err != nil {
-		t.Errorf("New(2, nil) returned err: %v", err)
+		t.Errorf("New(2, nil, nil) returned err: %v", err)
 	}
 
 	if v2 == nil {
-		t.Error("New(2, nil) returned nil Interface")
+		t.Error("New(2, nil, nil) returned nil Interface")
 	}
 }
 
 func TestNew_V1RequiresLedger(t *testing.T) {
-	_, err := New(1, nil)
+	_, err := New(1, nil, nil)
 	if !errors.Is(err, errMissingLedger) {
-		t.Fatalf("New(1, nil) err = %v, want errMissingLedger", err)
+		t.Fatalf("New(1, nil, nil) err = %v, want errMissingLedger", err)
 	}
 }
 
 func TestNew_InvalidVersionIncludesValue(t *testing.T) {
-	_, err := New(42, &Ledger{})
+	_, err := New(42, &Ledger{}, nil)
 	if err == nil {
-		t.Fatal("New(42, &Ledger{}) must return an error")
+		t.Fatal("New(42, &Ledger{}, nil) must return an error")
 	}
 
 	if !strings.Contains(err.Error(), "42") {

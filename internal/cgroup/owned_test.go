@@ -400,7 +400,7 @@ func ownedOps(t *testing.T, programs map[string][]byte) *fakeOps {
 func setRules(ops *fakeOps, rules []DeviceRule) error {
 	c := &cgroupv2{ops: ops, replace: probeIn(replaceSupported)}
 
-	return c.setDeviceRules(3, "/sys/fs/cgroup/test", rules)
+	return c.setDeviceRules(3, testIdentity, rules)
 }
 
 func attachedRaw(t *testing.T, ops *fakeOps, name string) []byte {
@@ -501,15 +501,21 @@ func TestSet_EmptyRulesLeaveUnmarkedProgramsAlone(t *testing.T) {
 	ops.assertAllClosed(t)
 }
 
-func TestSet_EmptyRulesWithNothingAttachedIsANoOp(t *testing.T) {
-	ops := newFakeOps()
+func TestSet_NothingAttachedAndNothingCachedIsFilterMissing(t *testing.T) {
+	for _, rules := range [][]DeviceRule{nil, {rule("c", 10, 200, "rwm")}} {
+		ops := newFakeOps()
 
-	err := setRules(ops, nil)
-	if err != nil {
-		t.Fatalf("err = %v, want a no-op", err)
+		err := setRules(ops, rules)
+		if !errors.Is(err, ErrFilterMissing) {
+			t.Fatalf(
+				"rules %v: err = %v, want ErrFilterMissing (never a silent success)",
+				rules,
+				err,
+			)
+		}
+
+		assertCalls(t, ops)
 	}
-
-	assertCalls(t, ops)
 }
 
 func TestSet_ConflictMutatesNothing(t *testing.T) {

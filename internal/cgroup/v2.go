@@ -155,36 +155,34 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 // cgroup behind handle equal exactly rules.
 //
 // Each attached program is either one of this daemon's wrappers (see
-// owned.go), which is stripped back to the runtime original it wraps, or an
-// unmarked program, which is the original itself. Non-empty rules replace
-// every program with a fresh wrapper around its original; empty rules
-// replace every wrapper with its bare original and leave unmarked programs
-// alone, so a cgroup this daemon never touched is never touched. Nothing
-// but the programs themselves carries state, so this works the same after
-// a daemon restart.
+// owned.go), stripped back to the runtime original it wraps, or an unmarked
+// program, which is a runtime original itself. Non-empty rules leave one
+// wrapper per lineage around its original; empty rules put the bare
+// originals back and leave unmarked programs alone, so a cgroup this daemon
+// never touched is never touched. The programs carry all the state this
+// needs, so it works the same after a daemon restart; the one exception is
+// a cgroup whose filters were all detached (systemd daemon-reload), which
+// is rebuilt from FilterCache when this process saw it before.
 //
 // Unmarked programs are never interpreted: a wrapper written by a version
 // that predates the ownership markers looks exactly like a runtime program,
-// so its grants are kept until the container restarts.
+// so its grants are kept until the container restarts. Kernel program IDs
+// are reused and are never used as identity; every equality decision
+// compares full canonical instruction bytes.
 //
 // Unlike NVIDIA's upstream code, which detaches every program before
 // attaching the replacements because it runs strictly before the container
 // starts, this daemon mutates live containers: detaching first would leave
 // the container unfiltered in between, and permanently so if the attach
-// failed or the daemon died. Programs are therefore replaced pairwise, each
-// new program attached (or atomically swapped in) before its original goes.
+// failed or the daemon died. Every new program is therefore attached (or
+// atomically swapped in) before anything it replaces is detached.
 func (c *cgroupv2) SetDeviceRules(handle *CgroupHandle, rules []DeviceRule) error {
-	return c.setDeviceRules(handle.fd, handle.Identity().Path, rules)
+	return c.setDeviceRules(handle.fd, handle.Identity(), rules)
 }
 
-// replacement is the planned new program for one attached program.
-type replacement struct {
-	old  progHandle
-	raw  []byte
-	name string
-}
+const multiFlag = unix.BPF_F_ALLOW_MULTI
 
-func (c *cgroupv2) setDeviceRules(dirFD int, cgroupPath string, rules []DeviceRule) error {
+func (c *cgroupv2) setDeviceRules(dirFD int, id Identity, rules []DeviceRule) error {
 	// Find any existing eBPF device filter programs attached to this cgroup.
 	oldProgs, total, inaccessible, attachFlags, err := c.ops.query(dirFD)
 	if err != nil {
@@ -198,10 +196,8 @@ func (c *cgroupv2) setDeviceRules(dirFD int, cgroupPath string, rules []DeviceRu
 	switch {
 	case inaccessible > 0:
 		return fmt.Errorf("%w: %d of %d programs", ErrFiltersInaccessible, inaccessible, total)
-	case total == 0 && len(rules) == 0:
-		return nil
 	case total == 0:
-		return ErrFilterMissing
+		return c.rebuild(dirFD, id, rules)
 	case attachFlags&unix.BPF_F_ALLOW_MULTI == 0:
 		return fmt.Errorf(
 			"%w: attach mode %s",
@@ -210,128 +206,88 @@ func (c *cgroupv2) setDeviceRules(dirFD int, cgroupPath string, rules []DeviceRu
 		)
 	}
 
-	// Plan every replacement before touching the cgroup: a conflict, an
-	// unwrappable program or a load failure anywhere mutates nothing.
-	plans := make([]replacement, 0, len(oldProgs))
+	// Classify and plan everything before touching the cgroup: a conflict,
+	// an unwrappable program or a load failure anywhere mutates nothing.
+	classified := make([]attachedProg, 0, len(oldProgs))
 
 	for _, oldProg := range oldProgs {
-		var (
-			plan replacement
-			keep bool
-		)
+		var prog attachedProg
 
-		plan, keep, err = c.planReplacement(oldProg, cgroupPath, rules)
+		prog, err = c.classify(oldProg)
 		if err != nil {
 			return err
 		}
 
-		if !keep {
-			plans = append(plans, plan)
-		}
+		classified = append(classified, prog)
 	}
 
-	newProgs := make([]progHandle, 0, len(plans))
-	defer func() { closeAll(newProgs) }()
+	groups, bares := groupWrappers(classified)
 
-	for _, plan := range plans {
-		var newProg progHandle
+	var plan passPlan
 
-		newProg, err = c.loadCanonical(plan.raw, plan.name)
+	if len(rules) == 0 {
+		plan = planRestore(groups, bares)
+	} else {
+		plan, err = planGrant(groups, bares, rules, id.Path)
 		if err != nil {
 			return err
 		}
-
-		newProgs = append(newProgs, newProg)
 	}
 
-	// Pairs are independent: under BPF_F_ALLOW_MULTI the verdict is the AND of
-	// every program, so a half-replaced set is narrower, never wider (an
-	// original not yet replaced masks the new grant). A failure therefore
-	// stops here without undoing earlier pairs; a retry completes the rest.
-	for idx, plan := range plans {
-		err = c.swap(dirFD, plan.old, newProgs[idx])
+	// A rebuild that stopped halfway left some lineages attached and others
+	// not; the missing ones were lost to the wipe, so they are attached
+	// again rather than dropped from the cache.
+	entry := c.cache.get(id)
+	if entry.rebuilding {
+		err = plan.addRebuild(missingLineages(entry.lineages, groups, bares), rules)
 		if err != nil {
-			return fmt.Errorf(
-				"replace device filter program %d of %d: %w",
-				idx+1,
-				len(plans),
-				err,
-			)
+			return err
 		}
+	}
+
+	return c.commit(dirFD, id, plan, entry.rebuilding)
+}
+
+// commit records plan's lineages and executes it. rebuilding stays set in
+// the cache until a pass that reattaches every lineage has succeeded.
+func (c *cgroupv2) commit(dirFD int, id Identity, plan passPlan, rebuilding bool) error {
+	c.cache.set(id, cacheEntry{lineages: plan.lineages, rebuilding: rebuilding})
+
+	err := c.execute(dirFD, plan)
+	if err != nil {
+		return err
+	}
+
+	if rebuilding {
+		c.cache.set(id, cacheEntry{lineages: plan.lineages})
 	}
 
 	return nil
 }
 
-// planReplacement decides what replaces oldProg. keep reports that oldProg
-// stays as it is (an unmarked program under empty rules).
-func (c *cgroupv2) planReplacement(
-	oldProg progHandle,
-	cgroupPath string,
-	rules []DeviceRule,
-) (replacement, bool, error) {
-	insts, meta, err := c.ops.instructions(oldProg)
+// rebuild handles a cgroup with no device filter at all. That is what
+// systemd's daemon-reload leaves behind, so it is not a no-op for a
+// container that had one: its runtime originals are attached again from
+// FilterCache. Without a cached entry nothing can be rebuilt, and
+// ErrFilterMissing lets the caller decide (a privileged container never had
+// a filter; anything else must not be reported as done).
+func (c *cgroupv2) rebuild(dirFD int, id Identity, rules []DeviceRule) error {
+	entry := c.cache.get(id)
+	if len(entry.lineages) == 0 {
+		return ErrFilterMissing
+	}
+
+	var plan passPlan
+
+	err := plan.addRebuild(entry.lineages, rules)
 	if err != nil {
-		return replacement{}, false, err
+		return err
 	}
 
-	raw, err := canonicalBytes(insts)
-	if err != nil {
-		return replacement{}, false, err
-	}
+	logger.L().Info("device filter missing; reattaching the cached runtime originals",
+		"cgroup", id.Path, "programs", len(entry.lineages), "with_grants", len(rules) > 0)
 
-	owned, isOwned, err := parseOwned(raw)
-	if err != nil {
-		return replacement{}, false, err
-	}
-
-	if !isOwned && len(rules) == 0 {
-		return replacement{}, true, nil
-	}
-
-	original := raw
-	if isOwned {
-		original = owned.original
-	}
-
-	origInsts, err := fromCanonical(original)
-	if err != nil {
-		return replacement{}, false, err
-	}
-
-	err = checkWrappable(origInsts, meta)
-	if err != nil {
-		return replacement{}, false, err
-	}
-
-	if len(rules) == 0 {
-		return replacement{old: oldProg, raw: original}, false, nil
-	}
-
-	var nonce uint64
-
-	if isOwned {
-		nonce = owned.nonce
-	} else {
-		nonce, err = newNonce()
-		if err != nil {
-			return replacement{}, false, err
-		}
-
-		logger.L().
-			Info("wrapping device filter with no prior owned block; pre-upgrade grants, if any, are not managed",
-				"cgroup", cgroupPath)
-	}
-
-	wrapped, err := emitOwned(rules, nonce, original)
-	if err != nil {
-		return replacement{}, false, fmt.Errorf(
-			"unable to generate new device filter program: %w",
-			err,
-		)
-	}
-
-	return replacement{old: oldProg, raw: wrapped, name: ownedProgramName}, false, nil
+	return c.commit(dirFD, id, plan, true)
 }
 
 // loadCanonical loads a program from canonical bytes. A verifier rejection

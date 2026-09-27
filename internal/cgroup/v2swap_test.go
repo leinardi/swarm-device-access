@@ -205,6 +205,9 @@ func testRules() []DeviceRule {
 	return []DeviceRule{{Allow: true, Type: "c", Major: &major, Minor: &minor, Access: "rwm"}}
 }
 
+// testIdentity is the cgroup the fake ops stand for.
+var testIdentity = Identity{Path: "/sys/fs/cgroup/test", Inode: 4242}
+
 func probeIn(state int32) *replaceProbe {
 	probe := &replaceProbe{}
 	probe.state.Store(state)
@@ -215,7 +218,7 @@ func probeIn(state int32) *replaceProbe {
 func run(ops *fakeOps, probe *replaceProbe) error {
 	c := &cgroupv2{ops: ops, replace: probe}
 
-	return c.setDeviceRules(3, "/sys/fs/cgroup/test", testRules())
+	return c.setDeviceRules(3, testIdentity, testRules())
 }
 
 func assertCalls(t *testing.T, ops *fakeOps, want ...string) {

@@ -89,9 +89,13 @@ type Processor struct {
 	// Set can revoke them without touching the runtime's own exceptions.
 	ledger cgroup.Ledger
 
+	// filterCache remembers the cgroup v2 runtime device filters seen per
+	// cgroup, so a filter wiped by systemd's daemon-reload can be rebuilt.
+	filterCache cgroup.FilterCache
+
 	// newCgroup builds the cgroup API for a version; nil means cgroup.New.
 	// Tests replace it to observe or fail the mutation without a kernel.
-	newCgroup func(version int, ledger *cgroup.Ledger) (cgroup.Interface, error)
+	newCgroup func(version int, ledger *cgroup.Ledger, cache *cgroup.FilterCache) (cgroup.Interface, error)
 
 	// afterCompute, when set, runs under mu after the rules are computed
 	// and before they are applied. Tests use it to hold a worker mid-flight.
@@ -179,7 +183,7 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		newCgroup = cgroup.New
 	}
 
-	api, apiErr := newCgroup(cgroupVersion, &p.ledger)
+	api, apiErr := newCgroup(cgroupVersion, &p.ledger, &p.filterCache)
 	if apiErr != nil {
 		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
 	}
@@ -216,7 +220,9 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 	if len(collected.granted) > 0 {
 		applyErr := p.applyRulesToCgroup(api, collected.granted, cgroupPath, pid, cfg.DryRun)
 		if applyErr != nil {
-			return p.classifyApplyError(containerID, cgroupPath, applyErr)
+			privileged := info.HostConfig != nil && info.HostConfig.Privileged
+
+			return p.classifyApplyError(containerID, cgroupPath, privileged, applyErr)
 		}
 	}
 
@@ -246,10 +252,35 @@ func (p *Processor) callContext(ctx context.Context) (context.Context, context.C
 // classifyApplyError turns a cgroup mutation failure into the container's
 // outcome: nil when the container is skipped for good, otherwise an error
 // that names the reason, so the caller retries it.
-func (p *Processor) classifyApplyError(containerID, cgroupPath string, applyErr error) error {
+func (p *Processor) classifyApplyError(
+	containerID, cgroupPath string,
+	privileged bool,
+	applyErr error,
+) error {
 	log := logger.L()
 
 	switch {
+	case errors.Is(applyErr, cgroup.ErrFilterMissing) && privileged:
+		// A privileged container runs without a device filter by design;
+		// there is nothing to add grants to and nothing to restrict.
+		log.Info("privileged container has no device filter; nothing to do",
+			"id", containerID, "cgroup", cgroupPath)
+		p.Metrics.RecordContainerSkipped("privileged_no_filter")
+
+		return nil
+
+	case errors.Is(applyErr, cgroup.ErrFilterMissing):
+		// Most likely wiped by systemd's daemon-reload before this process
+		// saw the cgroup, so the runtime's own filter cannot be rebuilt.
+		log.Warn("device filter missing and no cached original; restart the container",
+			"id", containerID, "cgroup", cgroupPath, "reason", "filter_missing")
+
+		return fmt.Errorf(
+			"container %q (reason filter_missing, retryable): %w",
+			containerID,
+			applyErr,
+		)
+
 	case errors.Is(applyErr, cgroup.ErrUnsupportedAttachMode):
 		// Permanent for this container: the runtime chose the attach mode.
 		// Nothing was attached or detached, so it keeps only the runtime's

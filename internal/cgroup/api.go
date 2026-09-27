@@ -50,11 +50,12 @@ type Interface interface {
 }
 
 // New returns the cgroup API for version. ledger records the cgroup v1
-// grants this daemon made; it must outlive the call (one per Processor)
-// and is required for version 1.
+// grants this daemon made and cache the cgroup v2 runtime originals it has
+// seen; both must outlive the call (one per Processor). ledger is required
+// for version 1; a nil cache disables rebuilding wiped cgroup v2 filters.
 //
 //nolint:ireturn // intentional: callers use the interface
-func New(version int, ledger *Ledger) (Interface, error) {
+func New(version int, ledger *Ledger, cache *FilterCache) (Interface, error) {
 	switch version {
 	case 1:
 		if ledger == nil {
@@ -63,7 +64,7 @@ func New(version int, ledger *Ledger) (Interface, error) {
 
 		return &cgroupv1{ledger: ledger, files: openatFiles{}}, nil
 	case 2:
-		return &cgroupv2{ops: kernelOps{}, replace: processReplaceProbe}, nil
+		return &cgroupv2{ops: kernelOps{}, replace: processReplaceProbe, cache: cache}, nil
 	default:
 		return nil, fmt.Errorf( //nolint:err113 // dynamic content
 			"invalid cgroup version %d",
@@ -82,6 +83,7 @@ type (
 	cgroupv2 struct {
 		ops     v2ops
 		replace *replaceProbe
+		cache   *FilterCache
 	}
 )
 

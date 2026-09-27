@@ -73,8 +73,16 @@ than removing it first, so the container is never left unfiltered. That needs:
   changed and the container is retried: an unreadable program cannot be
   checked or safely replaced. This is stricter than runc, which ignores such
   programs, and such policies are unsupported.
-- A device filter attached at all. A container whose cgroup has none (for
-  example after `systemctl daemon-reload` wiped it) is not granted anything.
+- A device filter attached at all, or one this daemon has seen before.
+  `systemctl daemon-reload` can detach every device filter of a container; the
+  daemon remembers (in memory) the runtime filters it has seen per cgroup and
+  reattaches them, with its grants if the container has any. This puts the
+  runtime's own restrictions back too, which the reload would otherwise have
+  lifted. A daemon that did not see the container before the reload (for
+  example one started after it) cannot rebuild the filter: an unprivileged
+  container with no filter is retried with reason `filter_missing` and a
+  warning to restart the container, and is never reported as done. Privileged
+  containers have no device filter and are left alone.
 - A device filter made only of the instructions device filters normally use
   (context loads, simple ALU, jumps inside the program, exit; no helper calls,
   maps or 64-bit immediates) on Linux 4.16 or newer. The daemon rebuilds the
@@ -90,6 +98,13 @@ therefore replace each other instead of piling up, and survive a daemon restart
 without any saved state. A program that starts like such a header but does not
 check out completely is never modified: the daemon logs an error with reason
 `owned_block_conflict` and the container has to be restarted.
+
+Every change attaches the new program before detaching the one it replaces, so
+an interrupted change leaves the container narrower, never wider, and the next
+pass finishes it. The daemon never tracks kernel program IDs. When it cannot
+tell a runtime program from the leftover of a change that failed halfway, it
+wraps both, which leaves one redundant, identical wrapper: the same grants,
+never wider, and stable from then on.
 
 > **Upgrading from versions without these markers:** programs attached by
 > earlier versions look exactly like the runtime's own filter, so the grants

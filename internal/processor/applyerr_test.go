@@ -72,7 +72,7 @@ func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
 
 	const pid = 70
 
-	real2, err := cgroup.New(2, nil)
+	real2, err := cgroup.New(2, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +86,12 @@ func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
 				{Source: "/dev/null", Destination: "/dev/null", Type: mount.TypeBind},
 			},
 		}},
-		Cfg:       newStore(policy.ModeAll, false),
-		HostRoot:  hostRootWithCgroup(t),
-		ProcRoot:  buildProcRoot(t, pid),
-		newCgroup: func(int, *cgroup.Ledger) (cgroup.Interface, error) { return fake, nil },
+		Cfg:      newStore(policy.ModeAll, false),
+		HostRoot: hostRootWithCgroup(t),
+		ProcRoot: buildProcRoot(t, pid),
+		newCgroup: func(int, *cgroup.Ledger, *cgroup.FilterCache) (cgroup.Interface, error) {
+			return fake, nil
+		},
 	}
 }
 
@@ -181,5 +183,36 @@ func TestProcessContainer_NotWrappableIsRetryableError(t *testing.T) {
 	if !errors.Is(err, cgroup.ErrProgramNotWrappable) ||
 		!strings.Contains(err.Error(), "program_not_wrappable") {
 		t.Fatalf("err = %v, want ErrProgramNotWrappable with its reason", err)
+	}
+}
+
+func TestProcessContainer_FilterMissing(t *testing.T) {
+	for _, privileged := range []bool{true, false} {
+		buf := captureLogger(t)
+		fake := &failingCgroup{err: cgroup.ErrFilterMissing}
+		proc := devNullProcessor(t, fake)
+
+		insp, ok := proc.Inspector.(*fakeInspector)
+		if !ok {
+			t.Fatal("unexpected inspector")
+		}
+
+		insp.result.HostConfig = &container.HostConfig{Privileged: privileged}
+
+		err := proc.ProcessContainer(context.Background(), "abc")
+
+		switch {
+		case privileged && err != nil:
+			t.Errorf("privileged: err = %v, want a no-op", err)
+		case privileged && !strings.Contains(buf.String(), "privileged container has no device filter"):
+			t.Errorf("privileged: expected INFO, got:\n%s", buf.String())
+		case !privileged && (!errors.Is(err, cgroup.ErrFilterMissing) || !strings.Contains(err.Error(), "filter_missing")):
+			t.Errorf(
+				"unprivileged: err = %v, want a retryable ErrFilterMissing with its reason",
+				err,
+			)
+		case !privileged && !strings.Contains(buf.String(), "restart the container"):
+			t.Errorf("unprivileged: expected WARN with remedy, got:\n%s", buf.String())
+		}
 	}
 }
