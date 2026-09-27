@@ -52,17 +52,19 @@ fixed set, it must be rejected at load time, naming the key and the bad value.
 
 `policy.ParseMode` rejects an unknown `policy-mode`, and `policy.Global.Validate` wraps glob errors
 as `device-allow: …` / `device-deny: …` via `policy.ValidateGlobs`. `run` in
-`cmd/swarm-device-access/main.go` calls `Validate` after `applyFileConfig` merges the file into the
-flags, and exits `1` with `invalid config: …` on failure; an unreadable or unparsable file from
-`config.LoadFile` (`internal/config/loader.go`) makes it exit `1` with `config file error: …`. Covered by
-`TestGlobalValidate` and `TestValidateGlobs`.
+`cmd/swarm-device-access/main.go` calls `Validate` and `config.ValidateEnums` (log-format, log-level,
+policy-mode) on the effective values after `applyFileConfig` merges the file into the flags, and exits
+`1` with `invalid config: …` on failure. `config.LoadFile` (`internal/config/loader.go`) is strict: it
+checks every known key's exact YAML shape (following aliases; explicit `null`, a quoted `"yes"` for a
+bool and `[null]` in a list are errors), refuses merge keys, unknown keys and a second document, and
+validates the enums; any failure makes the daemon exit `1` with `config file error: …`. Covered by
+`TestGlobalValidate`, `TestValidateGlobs`, `TestLoadFile_*` and `TestValidateEnums`.
 
 - [ ] A new enum-like key or flag is checked in `Validate` (or an equivalent load-time check) with
       a table test covering an unknown value.
 - [ ] The error names the key, so an operator can fix it without reading Go.
-- [ ] **Known gap:** `log-format` and `log-level` are not validated — `logger.Configure` falls back
-      to `text` and `INFO` on anything it does not recognize. That cannot widen device access, but
-      it is the pattern this item forbids; do not copy it for a key that can.
+- [ ] A new file key gets an entry in `keyShapes` (`internal/config/loader.go`), so an explicit
+      `null` or a wrong type is rejected instead of decoding as "not set".
 
 ## 3. Labels are untrusted input
 

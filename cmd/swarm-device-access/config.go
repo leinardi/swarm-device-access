@@ -136,6 +136,26 @@ func watchSIGHUP(ctx context.Context, sigCh <-chan os.Signal, proc *processor.Pr
 				effectiveLogTime = *fileCfg.LogTime
 			}
 
+			// Checked again on the effective values before anything is
+			// applied, so a bad value never reaches the logger or the
+			// published config.
+			effectivePolicyMode := *policyMode
+			if !cliSet["policy-mode"] && fileCfg.PolicyMode != "" {
+				effectivePolicyMode = fileCfg.PolicyMode
+			}
+
+			enumErr := config.ValidateEnums(
+				effectiveLogFormat,
+				effectiveLogLevel,
+				effectivePolicyMode,
+				"setting",
+			)
+			if enumErr != nil {
+				log.Error("config reload: invalid setting; keeping previous config", "err", enumErr)
+
+				continue
+			}
+
 			logger.Configure(effectiveLogFormat, effectiveLogLevel, effectiveLogTime)
 
 			newDryRun := *dryRun

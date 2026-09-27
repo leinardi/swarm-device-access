@@ -229,11 +229,27 @@ value is set in both places, the CLI flag wins.
 | `-config` | `""` | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |
 | `-help` |  | Print this flag list and exit |
 
+`-log-level`, `-log-format` and `-policy-mode` (and their config file keys)
+accept only the values listed; anything else is an error at startup and makes a
+reload keep the previous config. The undocumented `-log-level` aliases
+`warning`, `fatal` and `panic`, which earlier versions mapped to `warn` and
+`error`, are no longer accepted.
+
 ### Config File
 
 All CLI flags can be represented in YAML and loaded with `-config`. See
 [`deployments/docker/config.yaml`](deployments/docker/config.yaml) for an
 example.
+
+The file is checked strictly: an unknown key (for example `device_deny` for
+`device-deny`), a second YAML document, a YAML merge key (`<<`) or a value of
+the wrong type is an error. `dry-run` and `log-time` must be `true` or
+`false` (not `"yes"`); `policy-mode`, `log-format`, `log-level` and
+`docker-socket` must be non-empty strings; `metrics-addr` and `debug-addr` must
+be strings, and an empty one disables the listener; `device-allow` and
+`device-deny` must be lists of non-empty strings. An explicit `null` (also
+through an alias) is an error, never a silent "not set": leave a key out to
+keep the flag's value.
 
 Send `SIGHUP` to reload the config file without restarting the daemon:
 

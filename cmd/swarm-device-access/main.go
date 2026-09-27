@@ -23,6 +23,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -71,7 +72,12 @@ func run() int {
 	signal.Notify(sighup, syscall.SIGHUP)
 	defer signal.Stop(sighup)
 
-	startupValidationErr := store.Load().Policy.Validate()
+	// The file's values were checked when it was loaded; the effective
+	// values (flags included) are checked here.
+	startupValidationErr := errors.Join(
+		config.ValidateEnums(*logFormat, *logLevel, *policyMode, "setting"),
+		store.Load().Policy.Validate(),
+	)
 	if startupValidationErr != nil {
 		fmt.Fprintf(os.Stderr, "invalid config: %v\n", startupValidationErr)
 
