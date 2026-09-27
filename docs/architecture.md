@@ -99,7 +99,8 @@ The coordinator's `processed map[string]time.Time` records, for every container 
 it was inspected. A `start` or `unpause` event for a container in the map is skipped only if its timestamp is not newer than that time: Docker
 emits `start` after the container is running, so an older event was already visible to the inspect. A newer event (for example `docker restart`
 shortly after the daemon started) belongs to a new run with a new cgroup and is applied. The entry is removed by the first event for that ID
-either way, and entries older than `processedTTL` (2 × the 30 s maximum backoff) are ignored and pruned. Event time and daemon time come from
+either way, and entries older than `processedTTL` (2 × the 30 s maximum backoff) are ignored and pruned; the prune timer is armed only while
+the map has entries, so an idle daemon does not wake for it. Event time and daemon time come from
 the same host clock.
 
 Passes, retries and events share the same per-container code path (`processOne`), so all of them record the same metrics and log a `Warn` on
