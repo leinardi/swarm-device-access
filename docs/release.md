@@ -80,8 +80,9 @@ a tag happens before the tag exists, and everything after it can be finished by 
    every other job waits on it. `workflow_dispatch` lets the caller pick any branch, and the release job holds `contents: write`,
    `packages: write` and an OIDC identity.
 2. **Verify.** `test` (`make go-vet`, `make go-test`), `audit` (`make audit-deps`: govulncheck and the banned-module check) and
-   `integration` (`make go-test-integration`). They are copies of the CI jobs rather than a call into `ci.yaml`, so a release never
-   depends on which pull request last ran CI, and all of them take Go from `go.mod`, the toolchain the release builds with.
+   `integration` (`make go-test-integration` with `SDA_IT_ENFORCE=1` after a `dhi.io` login, failing if any test skipped). They are
+   copies of the CI jobs rather than a call into `ci.yaml` and `integration.yaml`, so a release never depends on which pull request
+   last ran CI, and all of them take Go from `go.mod`, the toolchain the release builds with.
 3. **Resolve the version**, as in [Versioning](#versioning).
 4. **Check the tag.** If `refs/tags/<version>` already exists on the remote, the run continues only when it points at `HEAD`, as a
    recovery. Pointing anywhere else is a hard failure. The tag is then created **locally only**.

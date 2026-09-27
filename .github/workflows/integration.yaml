@@ -15,11 +15,23 @@ concurrency:
 permissions: {}
 
 jobs:
+  # A pull request from another repository (a fork) gets no secrets, so it
+  # cannot log in to dhi.io to build the daemon image the enforcement tests
+  # run. The gate is where the pull request comes from, never whether the
+  # secret is set: a same-repo pull request or a push without DHI_TOKEN is a
+  # misconfiguration and fails, instead of silently dropping to the dry-run
+  # tests.
   integration:
+    name: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'integration (fork: enforcement skipped)' || 'integration' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      # A pull request whose head is another repository. Not head.repo.fork,
+      # which is also true for this repository's own branches when the
+      # repository itself is a GitHub fork.
+      FROM_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
     steps:
       - name: Checkout
@@ -31,9 +43,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Require the dhi.io token
+        if: env.FROM_FORK != 'true'
+        env:
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+        run: |
+          if [ -z "$DHI_TOKEN" ]; then
+            echo "::error::DHI_TOKEN is not set; enforcement tests are mandatory outside fork pull requests"
+            exit 1
+          fi
+
       # The daemon image the enforcement test runs is built from dhi.io base
       # images, which require a login.
       - name: Log in to Docker Hardened Images (dhi.io)
+        if: env.FROM_FORK != 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: dhi.io
@@ -46,6 +69,7 @@ jobs:
       # enforcement flags turn every missing prerequisite into a failure, and
       # the SKIP check below makes sure a green run really exercised BPF.
       - name: Run integration tests
+        if: env.FROM_FORK != 'true'
         env:
           SDA_IT_ENFORCE: "1"
           SDA_IT_REQUIRE_RELOAD: "1"
@@ -56,3 +80,9 @@ jobs:
             echo "::error::integration tests were skipped; SDA_IT_ENFORCE=1 requires every test to run"
             exit 1
           fi
+
+      # Fork pull requests: the dry-run tests only; the enforcement tests
+      # skip themselves without SDA_IT_ENFORCE.
+      - name: Run integration tests (fork, enforcement skipped)
+        if: env.FROM_FORK == 'true'
+        run: make go-test-integration

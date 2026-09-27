@@ -27,8 +27,8 @@ make go-test-integration SDA_IT_ENFORCE=1                       # plus the enfor
 make go-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
 ```
 
-The GitHub integration workflow runs the guarded enforcement test on every pull
-request and push, with both variables set:
+The GitHub integration workflow runs the guarded enforcement test on every push
+and on every pull request from this repository, with both variables set:
 
 - `SDA_IT_ENFORCE=1` is the guard. With it set, a missing prerequisite fails the
   run instead of skipping it, and the workflow also fails the job if any test
@@ -37,6 +37,15 @@ request and push, with both variables set:
   first proves that `daemon-reload` wipes the device program on this host;
   without the variable, a host where that cannot be proven skips only that
   subtest.
+
+Pull requests from another repository (a fork) are the exception: GitHub gives
+them no secrets, so they cannot log in to `dhi.io` to build the daemon image.
+For them the job is named `integration (fork: enforcement skipped)` and runs
+only the dry-run tests. The gate is where the pull request comes from, not
+whether the secret is set: on a same-repository pull request or a push, a
+missing `DHI_TOKEN` fails the job. A push to a branch of a contributor's fork
+therefore fails that check, since the fork has no `DHI_TOKEN`. The release
+workflow runs the same enforced suite.
 
 Prerequisites for the enforcement test:
 
