@@ -23,7 +23,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -55,6 +54,15 @@ func run() int {
 		return 0
 	}
 
+	// Registered before anything slow, so a SIGHUP during startup is queued
+	// for watchSIGHUP instead of terminating the process (its default).
+	sighup := make(chan os.Signal, 1)
+
+	signal.Notify(sighup, syscall.SIGHUP)
+	defer signal.Stop(sighup)
+
+	flags, cliSet := flagSettings()
+
 	// Load config file; CLI flags override file values.
 	fileCfg, fileErr := config.LoadFile(*configFile)
 	if fileErr != nil {
@@ -63,28 +71,20 @@ func run() int {
 		return 1
 	}
 
-	store, publisher := config.NewStore(applyFileConfig(&fileCfg))
-
-	// Registered before anything slow, so a SIGHUP during startup is queued
-	// for watchSIGHUP instead of terminating the process (its default).
-	sighup := make(chan os.Signal, 1)
-
-	signal.Notify(sighup, syscall.SIGHUP)
-	defer signal.Stop(sighup)
+	effective := mergeSettings(flags, cliSet, fileCfg)
 
 	// The file's values were checked when it was loaded; the effective
-	// values (flags included) are checked here.
-	startupValidationErr := errors.Join(
-		config.ValidateEnums(*logFormat, *logLevel, *policyMode, "setting"),
-		store.Load().Policy.Validate(),
-	)
+	// values (flags included) are checked here, before anything uses them.
+	startupValidationErr := effective.validate()
 	if startupValidationErr != nil {
 		fmt.Fprintf(os.Stderr, "invalid config: %v\n", startupValidationErr)
 
 		return 1
 	}
 
-	logger.Configure(*logFormat, *logLevel, *logTime)
+	logger.Configure(effective.LogFormat, effective.LogLevel, effective.LogTime)
+
+	store, publisher := config.NewStore(effective.runtime())
 
 	log := logger.L()
 
@@ -129,7 +129,7 @@ func run() int {
 	defer cancelRoot()
 
 	// API version negotiation is the client default; it runs lazily on the first request.
-	cli, err := client.New(client.WithHost("unix://" + *dockerSocket))
+	cli, err := client.New(client.WithHost("unix://" + effective.DockerSocket))
 	if err != nil {
 		log.Error("docker client init failed", "err", err)
 
@@ -141,12 +141,12 @@ func run() int {
 
 	// Start optional observability servers before the main loop so they are
 	// reachable during startup enumeration.
-	if *metricsAddr != "" {
-		observability.StartMetricsServer(rootCtx, *metricsAddr)
+	if effective.MetricsAddr != "" {
+		observability.StartMetricsServer(rootCtx, effective.MetricsAddr)
 	}
 
-	if *debugAddr != "" {
-		observability.StartDebugServer(rootCtx, *debugAddr)
+	if effective.DebugAddr != "" {
+		observability.StartDebugServer(rootCtx, effective.DebugAddr)
 	}
 
 	proc := &processor.Processor{
@@ -161,7 +161,14 @@ func run() int {
 
 	// SIGHUP: reload the config file, update the logger and publish the
 	// new config through the processor.
-	go watchSIGHUP(rootCtx, sighup, proc)
+	go watchSIGHUP(rootCtx, sighup, &reloader{
+		path:            *configFile,
+		flags:           flags,
+		cliSet:          cliSet,
+		current:         effective,
+		configureLogger: logger.Configure,
+		publish:         proc.PublishAndReconcile,
+	})
 
 	runErr := daemon.Run(rootCtx, daemon.Options{
 		Docker:  cli,

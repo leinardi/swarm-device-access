@@ -136,22 +136,22 @@ Covered by `TestIsDeviceMountSource`, `TestCollectMountRules_*` and
 
 ## 5. Hot reload never widens access on a parse error
 
-`watchSIGHUP` (`cmd/swarm-device-access/config.go`) re-reads the file on `SIGHUP`. On a read or
-parse error from `config.LoadFile` it logs `config reload failed` and keeps the running config; on
-a `policy.Global.Validate` failure it logs `config reload: invalid policy; keeping previous config`
-and keeps it too. `config.Store.Set` swaps the whole `config.Runtime` (policy and `dry-run`)
-atomically, so no reader sees half a policy.
+`watchSIGHUP` (`cmd/swarm-device-access/config.go`) calls `reloader.reload` on `SIGHUP`. It
+re-reads the file and recomputes every setting with the pure `mergeSettings(flags, cliSet, file)`
+from the flag snapshot taken right after `flag.Parse`, so a key removed from the file falls back to
+the command line or the default. Validation (`settings.validate`: enums and policy) and the dry-run
+rule (a reload may turn `dry-run` off, never on) run before anything is applied; any failure is
+logged as `config reload rejected; keeping previous config` and leaves the store, the logger and
+the in-force settings untouched. On success the logger is reconfigured and the runtime is published
+through `Processor.PublishAndReconcile`, which swaps the whole `config.Runtime` (policy and
+`dry-run`) atomically and reconciles every running container. Restart-only settings changed in the
+file are logged and ignored. Covered by `TestReload_*` and `TestMergeSettings_*`.
 
-- [ ] Every new reloadable key is validated before `store.Set`, and a failure `continue`s without
-      touching the store.
+- [ ] Every new setting goes through `settings`/`mergeSettings`, is checked in
+      `settings.validate`, and a failure returns before `configureLogger` or `publish`.
 - [ ] A reload that fails leaves the previous policy and `dry-run` in force — never a zero value,
       never a partially merged one.
-- [ ] **Known gap:** `watchSIGHUP` calls `logger.Configure` with the file's `log-format`,
-      `log-level` and `log-time` before `Validate` runs, so a reload rejected for its policy still
-      changes logging. Device access is unaffected, but do not move any access-relevant setting
-      ahead of validation the same way.
-- [ ] **Known gap:** there is no test for the reload path. A change to `watchSIGHUP` adds one that
-      sends an invalid file and asserts the previous policy is still loaded.
+- [ ] A new restart-only setting is added to `settings.coldChanges`.
 
 ## 6. Least privilege in the image and the deployment
 

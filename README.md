@@ -220,7 +220,7 @@ value is set in both places, the CLI flag wins.
 | `-log-format` | `text` | `text`, `json`, `plain` |
 | `-log-time` | `false` | Include timestamps in log lines |
 | `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
-| `-dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay (see [Config File](#config-file)) |
+| `-dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay, and a reload can turn it off but not on (see [Config File](#config-file)) |
 | `-policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
 | `-device-allow` | `""` | Glob for `/dev/...` paths to allow, repeatable. Empty means allow all. |
 | `-device-deny` | `""` | Glob for `/dev/...` paths to deny, repeatable. Deny takes priority over allow. |
@@ -258,7 +258,22 @@ kill -HUP $(docker inspect --format '{{.State.Pid}}' swarm-device-access)
 ```
 
 Some settings are only read at startup and still require a restart:
-`docker-socket`, `metrics-addr`, and `debug-addr`.
+`docker-socket`, `metrics-addr`, and `debug-addr`. A reload that changes one of
+them logs that it was ignored and applies the rest.
+
+A reload computes every setting afresh from the command line, the file and the
+defaults, in that order: a key removed from the file falls back to the flag
+given on the command line, or to the default, not to what the file said
+before. A reload that fails for any reason (unreadable or invalid file, invalid
+value or policy) changes nothing, logging included, and the previous config
+stays in force.
+
+`dry-run` can be turned off by a reload, and the daemon then applies the
+current policy for real. It cannot be turned on: a reload that would enable it
+is rejected with `dry-run cannot be enabled on a running daemon; to stop
+enforcing, restart the daemon live with a narrower policy, or restart the
+affected containers`, and the previous config is kept, because dry-run would
+stop revoking while every grant stayed in place.
 
 A reload, a daemon start and a `systemctl daemon-reload` each reconcile every
 running container under the current config, so narrowing the policy revokes
