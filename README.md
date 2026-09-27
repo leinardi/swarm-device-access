@@ -160,28 +160,51 @@ is dropped only once its cgroup is verified gone; a periodic sweep checks.
 services:
   swarm-device-access:
     image: docker:29
-    entrypoint: docker
     # Swarm rejects privileged/cgroup/pid/userns on services. This wrapper
     # launches the actual daemon with `docker run`, where those flags are valid.
+    entrypoint: ["sh", "-c"]
     command:
-      - run
-      - -i
-      - --rm
-      - --privileged
-      - --cgroupns=host
-      - --pid=host
-      - --userns=host
-      - -v
-      - /sys:/host/sys
-      - -v
-      - /var/run/docker.sock:/var/run/docker.sock
-      - -v
-      - /dev:/dev
-      # Optional: reapply device rules after systemctl daemon-reload.
-      # NOTE: dhi.io/static has no /var/run→/run symlink; use /var/run/dbus/... inside the container.
-      # - -v
-      # - /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
-      - ghcr.io/leinardi/swarm-device-access:latest
+      - |
+        # docker run options, before the image. Uncomment a line to add it.
+        set -- --rm --name=swarm-device-access \
+          --privileged --cgroupns=host --pid=host --userns=host \
+          -v /sys:/host/sys \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v /dev:/dev
+        # Reapply device rules after systemctl daemon-reload, which wipes cgroup
+        # BPF programs (without it the daemon warns and skips reload handling).
+        # The container-side path must be under /var/run: dhi.io/static has no
+        # /var/run -> /run symlink.
+        # set -- "$$@" -v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+        # A config file for -config below. Mount the directory, not the file:
+        # an editor that replaces the file would leave a file mount on the old
+        # content, and a reload would silently apply it.
+        # set -- "$$@" -v /etc/swarm-device-access:/etc/swarm-device-access:ro
+        set -- "$$@" ghcr.io/leinardi/swarm-device-access:latest
+        # Daemon flags, after the image; before it they are docker run flags.
+        # Reload the config file with: docker kill -s HUP swarm-device-access
+        # set -- "$$@" -config /etc/swarm-device-access/config.yaml
+
+        # On SIGTERM or SIGINT from Swarm, stop the daemon and exit with its
+        # status. The trap is set before the daemon starts, and the daemon runs
+        # in the background: a shell waiting on a foreground child only runs
+        # its traps after the child exits.
+        pid=
+        stop_daemon() {
+          docker stop -t 10 swarm-device-access >/dev/null 2>&1
+          wait $$pid
+          exit $$?
+        }
+        trap stop_daemon TERM INT
+
+        # Clear a daemon container left behind by a wrapper that was killed.
+        docker rm -f swarm-device-access >/dev/null 2>&1 || true
+        docker run "$$@" &
+        pid=$$!
+        wait "$$pid"
+        exit $$?
+    # Leaves time for docker stop -t 10 before Swarm kills the wrapper.
+    stop_grace_period: 30s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
@@ -209,6 +232,26 @@ services:
 
 The daemon compose file is also available at
 [`deployments/docker/docker-compose.yaml`](deployments/docker/docker-compose.yaml).
+
+The wrapper is a small `sh` script rather than a bare `docker run`, so that
+there is exactly one daemon container per node, always named
+`swarm-device-access`:
+
+- It builds the `docker run` arguments with one `set -- "$$@" ...` line each:
+  options before the image, daemon flags after it. To enable an optional mount
+  or flag, uncomment its line; it cannot end up on the wrong side of the image.
+- It sets a `SIGTERM`/`SIGINT` trap, then removes any `swarm-device-access`
+  container a killed wrapper left behind, so the replacement task does not
+  start a second daemon next to an orphan or, normally, hit a name conflict (if
+  it does, Swarm restarts the task and the next attempt clears it).
+- It starts `docker run` in the background and waits on it, because a shell
+  blocked on a foreground child runs its traps only after the child exits.
+- On `SIGTERM` from Swarm the trap runs `docker stop -t 10
+  swarm-device-access`, waits for the daemon to exit, and exits with its
+  status. `stop_grace_period: 30s` gives it time to do so.
+
+Compose interpolates `$` in the file, so the script writes `$$` for a literal
+`$`.
 
 ## ⚙️ Configuration
 
@@ -255,8 +298,14 @@ keep the flag's value.
 Send `SIGHUP` to reload the config file without restarting the daemon:
 
 ```bash
-kill -HUP $(docker inspect --format '{{.State.Pid}}' swarm-device-access)
+docker kill -s HUP swarm-device-access
 ```
+
+Mount the directory holding the file into the daemon container and pass
+`-config` after the image name; the compose files above show both as commented
+lines. Mount the directory rather than the file: editors and tools that write a
+new file and rename it over the old one would leave a single-file mount on the
+old content, and the reload would silently apply that.
 
 Some settings are only read at startup and still require a restart:
 `docker-socket`, `metrics-addr`, and `debug-addr`. A reload that changes one of
