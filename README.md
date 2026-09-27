@@ -377,6 +377,15 @@ If you bind-mount a directory (for example `source: /dev/dri`), the
 `device-allow` glob is evaluated **per child node** inside that directory —
 write the glob against the children, e.g. `/dev/dri/*` or `/dev/dri/renderD128`.
 
+Globs use Go's `filepath.Match` syntax, and `*` does not match across a `/`:
+`/dev/bus/usb/*` matches the bus directories `/dev/bus/usb/001`, not the device
+node `/dev/bus/usb/001/002`. Write one `*` per level, e.g. `/dev/bus/usb/*/*`.
+Every glob, in flags, the config file and labels, must be an absolute, clean
+path under `/dev/` (no relative pattern, `..`, `//` or trailing `/`); anything
+else is rejected at startup or reload, and in a label it makes the container
+get no devices. Such a glob could never match a device path, so a deny written
+that way would silently deny nothing.
+
 A device can be reached under several names: the mounted name (an alias such
 as `/dev/disk/by-id/usb-...`), the node it resolves to, and its kernel name
 (`DEVNAME` in sysfs, e.g. `/dev/sda`). Deny globs are checked against all three,

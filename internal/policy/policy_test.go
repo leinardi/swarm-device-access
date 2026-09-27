@@ -317,6 +317,16 @@ func TestParseContainer(t *testing.T) {
 			map[string]string{policy.LabelDeviceDeny: "/dev/bad["},
 			nil, nil, nil, true,
 		},
+		{
+			"relative glob in device-deny fails closed",
+			map[string]string{policy.LabelDeviceDeny: "/dev/null, sda"},
+			nil, nil, nil, true,
+		},
+		{
+			"uncleaned glob in device-allow fails closed",
+			map[string]string{policy.LabelDeviceAllow: "/dev/dri/../sda"},
+			nil, nil, nil, true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -367,6 +377,19 @@ func TestValidateGlobs(t *testing.T) {
 		{[]string{"/dev/nvidia*", "/dev/dri/*"}, false},
 		{[]string{"/dev/nvidia["}, true},
 		{[]string{"/dev/valid", "/dev/bad["}, true},
+		{[]string{"/dev/bus/usb/*/*"}, false},
+		// Relative, uncleaned and outside-/dev patterns never match a
+		// device path; for a deny that would fail open.
+		{[]string{"sda"}, true},
+		{[]string{"dev/sda"}, true},
+		{[]string{"*"}, true},
+		{[]string{"/dev//sda"}, true},
+		{[]string{"/dev/dri/"}, true},
+		{[]string{"/dev/./sda"}, true},
+		{[]string{"/dev/../etc/*"}, true},
+		{[]string{"/etc/*"}, true},
+		{[]string{"/dev"}, true},
+		{[]string{"/devices/*"}, true},
 	}
 
 	for _, tc := range cases {
@@ -397,6 +420,16 @@ func TestGlobalValidate(t *testing.T) {
 		{
 			"bad deny glob",
 			policy.Global{Mode: policy.ModeAll, DeviceDeny: []string{"/dev/bad["}},
+			true,
+		},
+		{
+			"relative deny glob",
+			policy.Global{Mode: policy.ModeAll, DeviceDeny: []string{"sd*"}},
+			true,
+		},
+		{
+			"allow glob outside /dev",
+			policy.Global{Mode: policy.ModeAll, DeviceAllow: []string{"/sys/*"}},
 			true,
 		},
 	}

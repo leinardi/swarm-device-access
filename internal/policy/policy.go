@@ -19,6 +19,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -32,6 +33,15 @@ const (
 	LabelEnable      = LabelPrefix + "enable"
 	LabelDeviceAllow = LabelPrefix + "device-allow"
 	LabelDeviceDeny  = LabelPrefix + "device-deny"
+)
+
+// devPrefix is what every glob must start with: only paths under /dev are
+// ever matched against it.
+const devPrefix = "/dev/"
+
+var (
+	errGlobNotClean   = errors.New("glob pattern is not a clean path")
+	errGlobOutsideDev = errors.New("glob pattern must start with /dev/")
 )
 
 // Mode controls which containers the daemon processes by default.
@@ -139,13 +149,22 @@ func splitAndTrim(s string) []string {
 }
 
 // ValidateGlobs returns an error if any pattern in patterns is syntactically
-// invalid. Malformed globs silently never match; this prevents silent
-// policy misconfiguration.
+// invalid, not clean, or not under /dev/. Such a glob silently never
+// matches a device path, which for a deny means a device the operator meant
+// to deny stays grantable; rejecting it prevents that misconfiguration.
 func ValidateGlobs(patterns []string) error {
-	for _, p := range patterns {
-		_, err := filepath.Match(p, "")
+	for _, pattern := range patterns {
+		_, err := filepath.Match(pattern, "")
 		if err != nil {
-			return fmt.Errorf("invalid glob pattern %q: %w", p, err)
+			return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+		}
+
+		if filepath.Clean(pattern) != pattern {
+			return fmt.Errorf("%w: %q", errGlobNotClean, pattern)
+		}
+
+		if !strings.HasPrefix(pattern, devPrefix) {
+			return fmt.Errorf("%w: %q", errGlobOutsideDev, pattern)
 		}
 	}
 
@@ -153,7 +172,7 @@ func ValidateGlobs(patterns []string) error {
 }
 
 // Validate checks that the Global policy is well-formed: mode is valid and
-// all glob lists are syntactically correct.
+// every glob passes ValidateGlobs.
 func (g Global) Validate() error {
 	_, err := ParseMode(string(g.Mode))
 	if err != nil {
