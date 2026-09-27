@@ -116,8 +116,11 @@ not cut off a reconcile in the middle of its cgroup mutation.
 ### systemd daemon-reload handling
 
 `systemctl daemon-reload` can detach cgroup BPF programs. The optional DBus watcher (`internal/systemd/`) subscribes to
-`org.freedesktop.systemd1.Manager.Reloading` and requests a pass when it receives the completion edge (`active=false`). It gracefully degrades
-to a warning when the DBus socket is not mounted.
+`org.freedesktop.systemd1.Manager.Reloading` and requests a pass when it receives the completion edge (`active=false`). Any client on the
+system bus can emit a signal with that name, so the watcher only counts one sent from `/org/freedesktop/systemd1` by the unique bus name that
+owns `org.freedesktop.systemd1` (resolved with `GetNameOwner` at startup and followed through the bus daemon's `NameOwnerChanged`). Re-applies
+are coalesced: reloads that complete while one runs lead to a single trailing run. It gracefully degrades to a warning when the DBus socket is
+not mounted.
 
 ## BPF program structure
 
