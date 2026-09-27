@@ -143,8 +143,8 @@ func (e *reconcileEnv) grantOnce(t *testing.T) {
 		)
 	}
 
-	if len(e.proc.known) != 1 {
-		t.Fatalf("known = %v, want the lifecycle recorded", e.proc.known)
+	if len(verifiedRecords(e.proc)) != 1 {
+		t.Fatalf("known = %v, want the lifecycle recorded", verifiedRecords(e.proc))
 	}
 }
 
@@ -188,9 +188,9 @@ func TestReconcile_PidRecycledBeforePinDoesNotMutate(t *testing.T) {
 		t.Fatalf("err = %v, want errLifecycleChanged", err)
 	}
 
-	if env.fake.calls != 0 || len(env.proc.known) != 0 {
+	if env.fake.calls != 0 || len(verifiedRecords(env.proc)) != 0 {
 		t.Errorf("SetDeviceRules calls = %d, known = %v; want no mutation and nothing recorded",
-			env.fake.calls, env.proc.known)
+			env.fake.calls, verifiedRecords(env.proc))
 	}
 }
 
@@ -279,8 +279,11 @@ func TestReconcile_RevokeAfterExitWithMatchingInode(t *testing.T) {
 		t.Errorf("pins = %v, want only the grant to pin", env.pinner.pins)
 	}
 
-	if len(env.proc.known) != 1 {
-		t.Errorf("known = %v, want the entry kept until the cgroup is gone", env.proc.known)
+	if len(verifiedRecords(env.proc)) != 1 {
+		t.Errorf(
+			"known = %v, want the entry kept until the cgroup is gone",
+			verifiedRecords(env.proc),
+		)
 	}
 }
 
@@ -320,8 +323,8 @@ func TestReconcile_InodeMismatchReleasesWithoutMutation(t *testing.T) {
 		t.Errorf("SetDeviceRules calls = %d, want only the grant", env.fake.calls)
 	}
 
-	if len(env.proc.known) != 0 {
-		t.Errorf("known = %v, want the entry released", env.proc.known)
+	if len(verifiedRecords(env.proc)) != 0 {
+		t.Errorf("known = %v, want the entry released", verifiedRecords(env.proc))
 	}
 }
 
@@ -337,9 +340,9 @@ func TestReconcile_ExitAfterCgroupRemovedReleases(t *testing.T) {
 	env.insp.then(exited())
 
 	err = env.reconcile()
-	if err != nil || env.fake.calls != 1 || len(env.proc.known) != 0 {
+	if err != nil || env.fake.calls != 1 || len(verifiedRecords(env.proc)) != 0 {
 		t.Fatalf("err = %v, calls = %d, known = %v; want release without mutation",
-			err, env.fake.calls, env.proc.known)
+			err, env.fake.calls, verifiedRecords(env.proc))
 	}
 }
 
@@ -372,8 +375,11 @@ func TestReconcile_InspectFailureRevokesKnownIdentity(t *testing.T) {
 		t.Fatalf("known: rules = %v, want the empty set applied", env.fake.rules)
 	}
 
-	if len(env.proc.known) != 1 {
-		t.Errorf("known = %v, want the entry kept (not-found alone never releases)", env.proc.known)
+	if len(verifiedRecords(env.proc)) != 1 {
+		t.Errorf(
+			"known = %v, want the entry kept (not-found alone never releases)",
+			verifiedRecords(env.proc),
+		)
 	}
 }
 
@@ -624,4 +630,18 @@ func TestReconcile_NotFoundIsContainerGone(t *testing.T) {
 			t.Fatalf("err = %v, want the revoke failure and the container kept pending", err)
 		}
 	})
+}
+
+// verifiedRecords returns the lifecycle records that name a cgroup.
+func verifiedRecords(proc *Processor) []LifecycleRecord {
+	var out []LifecycleRecord
+
+	recs := proc.lifecycleStore().all()
+	for idx := range recs {
+		if recs[idx].HasIdentity() {
+			out = append(out, recs[idx])
+		}
+	}
+
+	return out
 }

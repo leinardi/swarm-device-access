@@ -44,17 +44,18 @@ const (
 
 var errSubscribeTimeout = errors.New("docker event stream not established before timeout")
 
-// applyFn is the per-container rule-application callback injected into consumeEvents.
-// In production this wraps Processor.Reconcile; in tests it is replaced by a fake.
+// applyFn is the per-container reconcile the coordinator runs. In
+// production it wraps Processor.Reconcile; in tests it is replaced by a fake.
 type applyFn func(ctx context.Context, id string) error
 
 // eventListOptions returns the Docker event subscription options: "start"
-// and "unpause" container events at or after since.
+// and "unpause" container events, which reconcile a container, and "die"
+// and "destroy", which end a run and clean up after it, at or after since.
 func eventListOptions(since string) client.EventsListOptions {
 	return client.EventsListOptions{
 		Since: since,
 		// make, not the zero value: a nil client.Filters panics on Add.
-		Filters: make(client.Filters).Add("event", "start", "unpause"),
+		Filters: make(client.Filters).Add("event", "start", "unpause", "die", "destroy"),
 	}
 }
 
@@ -142,8 +143,6 @@ func listenEvents(
 			&backoff,
 			&lastEventNano,
 			opts.Metrics,
-			processorApply(opts.Proc),
-			timeout,
 		)
 
 		// The stream context lives exactly as long as this subscription: a
@@ -229,8 +228,6 @@ func consumeEvents(
 	backoff *time.Duration,
 	lastEventNano *int64,
 	metrics *observability.Recorder,
-	apply applyFn,
-	timeout time.Duration,
 ) bool {
 	log := logger.L()
 
@@ -285,20 +282,7 @@ func consumeEvents(
 
 			metrics.RecordEvent(string(msg.Action))
 
-			if coord.skipEvent(msg.Actor.ID, time.Unix(0, msg.TimeNano)) {
-				continue
-			}
-
-			key := coord.current()
-			applyErr := processOne(
-				ctx,
-				msg.Actor.ID,
-				metrics,
-				apply,
-				timeout,
-				"could not process container",
-			)
-			coord.eventApplied(msg.Actor.ID, key, applyErr)
+			coord.handleEvent(ctx, &msg)
 		}
 	}
 }

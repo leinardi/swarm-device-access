@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/client"
 
 	"github.com/leinardi/swarm-device-access/internal/logger"
@@ -38,6 +39,10 @@ import (
 // passed; a remaining entry belongs to a container that exited before its
 // event was consumed.
 const processedTTL = 2 * maxBackoff
+
+// sweepInterval is how often the lifecycle history is re-checked for runs
+// whose cgroup is gone.
+const sweepInterval = time.Minute
 
 // passKey is what a pass reconciles for: a config generation and a trigger
 // epoch. Every request bumps the epoch, so two systemd reloads under one
@@ -74,13 +79,28 @@ const (
 // finishes its current container, then starts again under the newest
 // request, so no result is reported on behalf of an older one.
 //
-// It also owns the processed map the event consumer uses to skip start
-// events already covered by an enumeration.
+// It also adjudicates and applies container events: the event consumer
+// only submits them (handleEvent). Every reconcile or cleanup of a
+// container first reserves it, so work requested for a container that is
+// already being handled coalesces into one follow-up instead of running
+// twice; a start event not newer than the running apply is already covered
+// by it. The coordinator keeps the lifecycle history of container runs
+// (shared with the processor, which records into it) and sweeps it
+// periodically, and owns the processed map that skips start events an
+// enumeration already covered.
 type coordinator struct {
 	docker  dockerAPI
 	apply   applyFn
 	metrics *observability.Recorder
 	timeout time.Duration
+
+	// terminate and sweep are Processor.Terminate and Processor.Sweep;
+	// nil in tests that do not exercise them.
+	terminate func(containerID string, eventTime time.Time) error
+	sweep     func() int
+	// lifecycles is the history of container runs, installed into the
+	// processor by Run.
+	lifecycles *processor.Lifecycles
 
 	minBackoff time.Duration
 	maxBackoff time.Duration
@@ -104,6 +124,24 @@ type coordinator struct {
 	pending   map[string]*pendingEntry
 	processed map[string]time.Time
 	firstDone bool
+	// inFlight holds a reservation for every container being handled.
+	inFlight map[string]*reservation
+}
+
+// reservation marks a container as being handled and collects the work
+// requested for it meanwhile.
+type reservation struct {
+	// applyStart is when the current reconcile began; a start event not
+	// newer than it is covered by that reconcile. Zero while the holder
+	// only cleans up, which covers no start event.
+	applyStart time.Time
+	// running is set while the holder's work includes a reconcile, whose
+	// outcome completion must wait for.
+	running bool
+	// reconcile asks for another reconcile after the current work.
+	reconcile bool
+	// terminateAt is the latest end-of-run event received meanwhile.
+	terminateAt time.Time
 }
 
 func newCoordinator(
@@ -124,6 +162,8 @@ func newCoordinator(
 		passEnded:  make(chan struct{}),
 		pending:    make(map[string]*pendingEntry),
 		processed:  make(map[string]time.Time),
+		inFlight:   make(map[string]*reservation),
+		lifecycles: &processor.Lifecycles{},
 	}
 }
 
@@ -173,6 +213,9 @@ func (c *coordinator) run(ctx context.Context) {
 	prune := time.NewTicker(processedTTL)
 	defer prune.Stop()
 
+	sweep := time.NewTicker(sweepInterval)
+	defer sweep.Stop()
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -210,6 +253,8 @@ func (c *coordinator) run(ctx context.Context) {
 			c.retryDue(ctx)
 		case <-prune.C:
 			c.pruneProcessed()
+		case <-sweep.C:
+			c.runSweep()
 		}
 	}
 }
@@ -263,16 +308,12 @@ func (c *coordinator) pass(ctx context.Context, key passKey) passOutcome {
 			return passSuperseded
 		}
 
-		containerID := list.Items[idx].ID
-		inspectedAt := c.now()
-
-		applyErr := processOne(ctx, containerID, c.metrics, c.apply, c.timeout,
-			"could not process running container")
-		c.settle(containerID, key, applyErr)
-
-		if applyErr == nil {
-			c.markProcessed(containerID, inspectedAt)
-		}
+		_ = c.reconcileContainer(
+			ctx,
+			list.Items[idx].ID,
+			time.Time{},
+			"could not process running container",
+		)
 	}
 
 	c.finishPass(key)
@@ -287,10 +328,12 @@ func (c *coordinator) retryDue(ctx context.Context) {
 			return
 		}
 
-		key := c.current()
-		applyErr := processOne(ctx, containerID, c.metrics, c.apply, c.timeout,
-			"could not reconcile pending container")
-		c.settle(containerID, key, applyErr)
+		_ = c.reconcileContainer(
+			ctx,
+			containerID,
+			time.Time{},
+			"could not reconcile pending container",
+		)
 	}
 
 	c.mu.Lock()
@@ -298,17 +341,182 @@ func (c *coordinator) retryDue(ctx context.Context) {
 	c.mu.Unlock()
 }
 
-// eventApplied records the outcome of an event-driven reconcile that
-// started under key: a failure makes the container pending.
-func (c *coordinator) eventApplied(containerID string, key passKey, applyErr error) {
-	c.settle(containerID, key, applyErr)
+// handleEvent adjudicates one container event from the stream. start and
+// unpause reconcile the container unless an enumeration already covered
+// the event; die and destroy end a run and clean up after it.
+func (c *coordinator) handleEvent(ctx context.Context, msg *events.Message) {
+	eventTime := time.Unix(0, msg.TimeNano)
+	containerID := msg.Actor.ID
 
-	if applyErr != nil {
-		// Wake run so the new entry's retry is scheduled.
-		select {
-		case c.wake <- struct{}{}:
-		default:
+	switch msg.Action { //nolint:exhaustive // the stream is filtered to these four actions
+	case events.ActionDie, events.ActionDestroy:
+		c.terminateContainer(ctx, containerID, eventTime)
+	default:
+		if c.skipEvent(containerID, eventTime) {
+			return
 		}
+
+		applyErr := c.reconcileContainer(ctx, containerID, eventTime, "could not process container")
+		if applyErr != nil {
+			// Wake run so the new pending entry's retry is scheduled.
+			select {
+			case c.wake <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// reconcileContainer reconciles one container unless it is already being
+// handled, in which case the work is left to the holder (see reserve). It
+// returns the error of the last reconcile it ran.
+func (c *coordinator) reconcileContainer(
+	ctx context.Context,
+	containerID string,
+	eventTime time.Time,
+	logMsg string,
+) error {
+	if !c.reserve(containerID, eventTime, false) {
+		return nil
+	}
+
+	// Only an enumeration (no event) marks the container processed: its
+	// inspect is what covers start events that are delivered later.
+	return c.hold(ctx, containerID, true, time.Time{}, eventTime.IsZero(), logMsg)
+}
+
+// terminateContainer cleans up after a run that ended at eventTime.
+func (c *coordinator) terminateContainer(
+	ctx context.Context,
+	containerID string,
+	eventTime time.Time,
+) {
+	if !c.reserve(containerID, eventTime, true) {
+		return
+	}
+
+	_ = c.hold(ctx, containerID, false, eventTime, false, "could not process container")
+}
+
+// hold does the work for a reserved container, then whatever was requested
+// for it meanwhile, until nothing is left; it then releases the
+// reservation. A cleanup runs before a reconcile, so the reconcile sees
+// the final state.
+func (c *coordinator) hold(
+	ctx context.Context,
+	containerID string,
+	reconcile bool,
+	terminateAt time.Time,
+	enumerated bool,
+	logMsg string,
+) error {
+	var lastErr error
+
+	for {
+		if !terminateAt.IsZero() && c.terminate != nil {
+			termErr := c.terminate(containerID, terminateAt)
+			if termErr != nil {
+				logger.L().
+					Warn("could not clean up after container", "id", containerID, "err", termErr)
+			}
+		}
+
+		if reconcile {
+			key := c.current()
+			started := c.now()
+
+			lastErr = processOne(ctx, containerID, c.metrics, c.apply, c.timeout, logMsg)
+			c.settle(containerID, key, lastErr)
+
+			if lastErr == nil && enumerated {
+				c.markProcessed(containerID, started)
+			}
+		}
+
+		reconcile, terminateAt = c.next(containerID)
+		if !reconcile && terminateAt.IsZero() {
+			return lastErr
+		}
+	}
+}
+
+// reserve claims containerID for the caller and reports whether it got
+// it. If the container is already being handled, the request is left to
+// the holder: an end-of-run event is queued; a reconcile is queued unless
+// it is a start event not newer than the running apply, which that apply
+// already covers.
+func (c *coordinator) reserve(containerID string, eventTime time.Time, terminal bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	held, busy := c.inFlight[containerID]
+	if !busy {
+		fresh := &reservation{running: !terminal}
+		if !terminal {
+			fresh.applyStart = c.now()
+		}
+
+		c.inFlight[containerID] = fresh
+
+		return true
+	}
+
+	switch {
+	case terminal:
+		if eventTime.After(held.terminateAt) {
+			held.terminateAt = eventTime
+		}
+	case eventTime.IsZero() || held.applyStart.IsZero() || eventTime.After(held.applyStart):
+		held.reconcile = true
+	}
+
+	return false
+}
+
+// next returns the work queued for a reserved container, or releases the
+// reservation when there is none.
+func (c *coordinator) next(containerID string) (bool, time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	held := c.inFlight[containerID]
+	if !held.reconcile && held.terminateAt.IsZero() {
+		delete(c.inFlight, containerID)
+
+		// Its retries were held back while the container was reserved.
+		if _, isPending := c.pending[containerID]; isPending {
+			select {
+			case c.wake <- struct{}{}:
+			default:
+			}
+		}
+
+		c.announceLocked()
+
+		return false, time.Time{}
+	}
+
+	reconcile, terminateAt := held.reconcile, held.terminateAt
+	held.reconcile, held.terminateAt = false, time.Time{}
+	held.running = reconcile
+	held.applyStart = time.Time{}
+
+	if reconcile {
+		held.applyStart = c.now()
+	}
+
+	return reconcile, terminateAt
+}
+
+// runSweep re-checks the lifecycle history (Processor.Sweep).
+func (c *coordinator) runSweep() {
+	if c.sweep == nil {
+		return
+	}
+
+	released := c.sweep()
+	if released > 0 {
+		logger.L().Debug("lifecycle sweep released records", "released", released)
 	}
 }
 
@@ -370,12 +578,25 @@ func (c *coordinator) reportLocked() {
 		return
 	}
 
-	if c.announced == c.latest {
+	c.announceLocked()
+}
+
+// announceLocked logs completion once per request, when nothing is left
+// for the latest request: no pass outstanding, nothing pending, and no
+// follow-up queued behind a reservation.
+func (c *coordinator) announceLocked() {
+	if c.incomplete || len(c.pending) > 0 || c.announced == c.latest {
 		return
 	}
 
+	for _, held := range c.inFlight {
+		if held.reconcile || held.running {
+			return
+		}
+	}
+
 	c.announced = c.latest
-	log.Info("config reload complete",
+	logger.L().Info("config reload complete",
 		"generation", c.latest.generation, "epoch", c.latest.epoch)
 }
 
@@ -409,7 +630,13 @@ func (c *coordinator) nextDue() (time.Time, bool) {
 		found bool
 	)
 
-	for _, entry := range c.pending {
+	for containerID, entry := range c.pending {
+		// A reserved container is retried by its holder's settle, or
+		// once the reservation ends (next wakes run).
+		if _, reserved := c.inFlight[containerID]; reserved {
+			continue
+		}
+
 		if !found || entry.due.Before(next) {
 			next, found = entry.due, true
 		}
@@ -427,6 +654,10 @@ func (c *coordinator) dueIDs() []string {
 	var ids []string
 
 	for containerID, entry := range c.pending {
+		if _, reserved := c.inFlight[containerID]; reserved {
+			continue
+		}
+
 		if !entry.due.After(now) {
 			ids = append(ids, containerID)
 		}

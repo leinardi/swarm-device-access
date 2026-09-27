@@ -95,10 +95,11 @@ type Processor struct {
 	// cgroup, so a filter wiped by systemd's daemon-reload can be rebuilt.
 	filterCache cgroup.FilterCache
 
-	// known maps each container lifecycle to the cgroup it was last
-	// verified in (guarded by mu). It is how grants are revoked once the
-	// process is gone or Docker cannot be asked: see revokeKnown.
-	known map[lifecycleKey]knownCgroup
+	// lifecycles is the history of container runs and the cgroups they
+	// were verified in (written under mu). It is how grants are revoked
+	// once the process is gone or Docker cannot be asked: see revokeAt.
+	// The daemon's coordinator installs its own; nil means a private one.
+	lifecycles *Lifecycles
 
 	// requestPass receives each generation PublishAndReconcile publishes
 	// (guarded by mu).
@@ -115,23 +116,6 @@ type Processor struct {
 	// computed and before they are applied. Tests use it to hold a worker
 	// mid-flight.
 	afterCompute func()
-}
-
-// lifecycleKey names one run of a container. A restart under the same ID
-// has a new StartedAt, so what is known about the old run never applies to
-// the new one.
-type lifecycleKey struct {
-	containerID string
-	startedAt   string
-}
-
-// knownCgroup is the cgroup a lifecycle was last verified in: the identity
-// of the directory its handle was opened on, the cgroup version, and
-// whether the container is privileged (it then has no device filter).
-type knownCgroup struct {
-	identity   cgroup.Identity
-	version    int
-	privileged bool
 }
 
 // desiredSet is the outcome of evaluating a container's labels, the
@@ -191,9 +175,7 @@ func (p *Processor) Reconcile(ctx context.Context, containerID string) error {
 			return nil
 		}
 
-		return p.revokeKnown(
-			lifecycleKey{containerID: containerID, startedAt: startedAt(info.State)},
-		)
+		return p.revokeEnded(containerID, startedAt(info.State))
 	}
 
 	desired := p.computeDesired(containerID, &info, cfg)

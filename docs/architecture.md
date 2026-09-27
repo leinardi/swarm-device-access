@@ -14,7 +14,7 @@ The daemon watches Docker for container-start events and, for each new container
 ```
 Docker daemon
     |
-    | container start / unpause events (Unix socket)
+    | container start / unpause / die / destroy events (Unix socket)
     v
 +---------------------------------------------------+
 |  cmd/swarm-device-access/main.go                  |
@@ -219,7 +219,7 @@ Metrics exposed:
 
 | Metric | Type | Labels | Description |
 | --- | --- | --- | --- |
-| `sda_events_total` | counter | `event` | Docker events received (`start`, `unpause`) |
+| `sda_events_total` | counter | `event` | Docker events received (`start`, `unpause`, `die`, `destroy`) |
 | `sda_rules_applied_total` | counter | `result` | Containers handled: `ok` = no container-level failure (includes policy, label and no-pid skips and partial per-device failures); `error` = container-level failure |
 | `sda_reload_reapplies_total` | counter | — | Re-applies after systemd daemon-reload |
 | `sda_docker_reconnects_total` | counter | — | Docker event stream reconnects |

@@ -92,6 +92,9 @@ func run(
 	}
 
 	coord := newCoordinator(opts.Docker, processorApply(opts.Proc), opts.Metrics, opts.timeout())
+	coord.terminate = opts.Proc.Terminate
+	coord.sweep = opts.Proc.Sweep
+	opts.Proc.SetLifecycles(coord.lifecycles)
 
 	// Every later publication goes to the coordinator; installed before
 	// the startup request, so no generation published from here on is

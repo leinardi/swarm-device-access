@@ -547,12 +547,10 @@ func TestProcessOne_StartupFailureMatchesEventPath(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(failingApply, metrics, nil),
 		&backoff,
 		new(int64),
 		metrics,
-		failingApply,
-		DockerCallTimeout,
 	)
 
 	assertFailureReported(t, before, readMetrics(t), buf.String(), "could not process container")

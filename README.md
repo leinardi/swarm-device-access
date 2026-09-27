@@ -28,8 +28,9 @@ At runtime the daemon:
 
 - Processes already-running containers at startup, so daemon restarts do not
   leave existing tasks without device access.
-- Subscribes to Docker `start` and `unpause` events, with reconnect and backoff
-  if the Docker event stream drops.
+- Subscribes to Docker `start` and `unpause` events (to grant) and `die` and
+  `destroy` events (to clean up after a run), with reconnect and backoff if the
+  Docker event stream drops.
 - Inspects each eligible container for bind mounts whose source is under
   `/dev`.
 - Walks directory mounts such as `/dev/bus/usb` and applies one rule per device
@@ -145,6 +146,12 @@ that cgroup. A recycled pid therefore never directs grants to another cgroup.
 Once a container has exited, or when Docker cannot be asked about it, its
 grants are revoked in the cgroup the daemon last verified for it, and only if
 that directory is still the same one (same inode) and was not recreated.
+
+The daemon keeps a short history of each container's runs. A `die` or
+`destroy` event revokes the grants of the run it ended (the latest run that
+started before the event, so a late event for an earlier run never touches a
+container restarted under the same ID). What the daemon remembers about a run
+is dropped only once its cgroup is verified gone; a periodic sweep checks.
 
 ### Docker Compose for Swarm
 

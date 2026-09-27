@@ -29,6 +29,8 @@ import (
 
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/client"
+
+	"github.com/leinardi/swarm-device-access/internal/observability"
 )
 
 var errTransportEOF = errors.New("transport EOF")
@@ -98,12 +100,10 @@ func TestConsumeEvents_ContextCancelledReturnsNoReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
 		new(int64),
 		nil,
-		noopApply,
-		DockerCallTimeout,
 	)
 	if got {
 		t.Error(
@@ -123,12 +123,10 @@ func TestConsumeEvents_StreamErrorReturnsReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
 		new(int64),
 		nil,
-		noopApply,
-		DockerCallTimeout,
 	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on stream error")
@@ -152,12 +150,10 @@ func TestConsumeEvents_ContextErrFromStreamErrorNoReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
 		new(int64),
 		nil,
-		noopApply,
-		DockerCallTimeout,
 	)
 	if got {
 		t.Error("consumeEvents should return false when stream error is context.Canceled")
@@ -192,12 +188,10 @@ func TestConsumeEvents_ArbitraryStreamErrorAfterCancelNoReconnect(t *testing.T) 
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
 		new(int64),
 		nil,
-		noopApply,
-		DockerCallTimeout,
 	)
 	if got {
 		t.Error("consumeEvents should return false when the context is already canceled")
@@ -227,7 +221,7 @@ func TestEventListOptions(t *testing.T) {
 		t.Errorf("Since = %q, want %q", got.Since, since)
 	}
 
-	want := client.Filters{"event": {"start": true, "unpause": true}}
+	want := client.Filters{"event": {"start": true, "unpause": true, "die": true, "destroy": true}}
 	if !maps.EqualFunc(got.Filters, want, maps.Equal) {
 		t.Errorf("Filters = %v, want %v", got.Filters, want)
 	}
@@ -244,12 +238,10 @@ func TestConsumeEvents_ChannelCloseReturnsReconnect(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
 		new(int64),
 		nil,
-		noopApply,
-		DockerCallTimeout,
 	)
 	if !got {
 		t.Error("consumeEvents should return true (reconnect) on channel close")
@@ -285,12 +277,10 @@ func TestConsumeEvents_EventCallsApply(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(apply, nil, nil),
 		&backoff,
 		new(int64),
 		nil,
-		apply,
-		DockerCallTimeout,
 	)
 
 	if called.Load() != 2 {
@@ -327,12 +317,10 @@ func TestConsumeEvents_DeduplicatesProcessedIDs(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(processed),
+		testCoordinatorWith(apply, nil, processed),
 		&backoff,
 		new(int64),
 		nil,
-		apply,
-		DockerCallTimeout,
 	)
 
 	if called.Load() != 0 {
@@ -384,12 +372,10 @@ func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
 		new(int64),
 		nil,
-		noopApply,
-		DockerCallTimeout,
 	)
 
 	if backoff != minBackoff {
@@ -441,12 +427,10 @@ func TestConsumeEvents_RestartWithinWindow(t *testing.T) {
 				ctx,
 				msgs,
 				errs,
-				testCoordinator(processed),
+				testCoordinatorWith(apply, nil, processed),
 				&backoff,
 				new(int64),
 				nil,
-				apply,
-				DockerCallTimeout,
 			)
 
 			if called.Load() != tc.wantApply {
@@ -482,12 +466,10 @@ func TestConsumeEvents_TracksLastEventNano(t *testing.T) {
 		ctx,
 		msgs,
 		errs,
-		testCoordinator(nil),
+		testCoordinatorWith(noopApply, nil, nil),
 		&backoff,
 		&lastEventNano,
 		nil,
-		noopApply,
-		DockerCallTimeout,
 	)
 
 	if lastEventNano != 300 {
@@ -524,7 +506,17 @@ func TestResubscribeSince(t *testing.T) {
 // testCoordinator returns a coordinator for consumer tests, with processed
 // as its enumeration entries when non-nil.
 func testCoordinator(processed map[string]time.Time) *coordinator {
-	coord := newCoordinator(nil, noopApply, nil, DockerCallTimeout)
+	return testCoordinatorWith(noopApply, nil, processed)
+}
+
+// testCoordinatorWith is testCoordinator with the reconcile the events
+// trigger and the recorder it reports to.
+func testCoordinatorWith(
+	apply applyFn,
+	metrics *observability.Recorder,
+	processed map[string]time.Time,
+) *coordinator {
+	coord := newCoordinator(nil, apply, metrics, DockerCallTimeout)
 	if processed != nil {
 		coord.processed = processed
 	}

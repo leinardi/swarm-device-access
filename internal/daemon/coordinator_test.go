@@ -404,8 +404,6 @@ func TestCoordinator_DedupSharedWithConsumer(t *testing.T) {
 			&backoff,
 			new(int64),
 			nil,
-			noopApply,
-			DockerCallTimeout,
 		)
 	}()
 
@@ -510,4 +508,221 @@ func TestCoordinator_DedupAcrossReconnectUnderRace(t *testing.T) {
 	waitFor(t, coord.settled)
 	cancel()
 	<-done
+}
+
+func startEvent(containerID string, at time.Time) *events.Message {
+	return &events.Message{
+		Action:   events.ActionStart,
+		Actor:    events.Actor{ID: containerID},
+		TimeNano: at.UnixNano(),
+	}
+}
+
+// TestCoordinator_EventDuringEnumerationAppliesOnce: a start event for the
+// container an enumeration is applying, and not newer than that apply,
+// coalesces into it (exactly one apply); a newer event (a restart) queues
+// exactly one follow-up.
+func TestCoordinator_EventDuringEnumerationAppliesOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		delay time.Duration
+		want  int
+	}{
+		{"event covered by the apply", -time.Second, 1},
+		{"newer event", time.Hour, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			docker := &fakeDocker{containers: []container.Summary{{ID: "c1"}}}
+			recorder := gatedApply()
+			coord := startCoordinator(t, docker, recorder.apply)
+
+			coord.request(1)
+			<-recorder.entered
+
+			coord.handleEvent(context.Background(), startEvent("c1", time.Now().Add(tc.delay)))
+			close(recorder.gate)
+
+			waitFor(t, func() bool { return coord.settled() && coord.idle() })
+
+			if got := len(recorder.seen()); got != tc.want {
+				t.Errorf("applies = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCoordinator_DieEventTerminates: die and destroy are adjudicated by
+// the coordinator; one arriving while the container is being reconciled
+// runs after that reconcile, not alongside it.
+func TestCoordinator_DieEventTerminates(t *testing.T) {
+	docker := &fakeDocker{containers: []container.Summary{{ID: "c1"}}}
+	recorder := gatedApply()
+	coord := startCoordinator(t, docker, recorder.apply)
+
+	var (
+		mu         sync.Mutex
+		terminated []string
+	)
+
+	coord.terminate = func(containerID string, _ time.Time) error {
+		mu.Lock()
+		defer mu.Unlock()
+
+		terminated = append(terminated, containerID)
+
+		return nil
+	}
+
+	coord.request(1)
+	<-recorder.entered
+
+	dieAt := time.Now()
+	coord.handleEvent(context.Background(), &events.Message{
+		Action: events.ActionDie, Actor: events.Actor{ID: "c1"}, TimeNano: dieAt.UnixNano(),
+	})
+
+	mu.Lock()
+	early := len(terminated)
+	mu.Unlock()
+
+	if early != 0 {
+		t.Fatal("die was handled while the container was still being reconciled")
+	}
+
+	close(recorder.gate)
+	waitFor(t, coord.idle)
+
+	coord.handleEvent(context.Background(), &events.Message{
+		Action:   events.ActionDestroy,
+		Actor:    events.Actor{ID: "c2"},
+		TimeNano: time.Now().UnixNano(),
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !slices.Equal(terminated, []string{"c1", "c2"}) {
+		t.Errorf("terminated = %v, want the queued die for c1, then the destroy for c2", terminated)
+	}
+}
+
+// idle reports whether no container is being handled.
+func (c *coordinator) idle() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return len(c.inFlight) == 0
+}
+
+func warnCount(logOutput string) int {
+	return strings.Count(logOutput, `msg="reconciliation incomplete; retrying"`)
+}
+
+// TestCoordinator_ReservedPendingDoesNotSpin: a pending container that
+// another holder is handling is not retried (nor its due time polled)
+// until the reservation ends; then it is retried once.
+func TestCoordinator_ReservedPendingDoesNotSpin(t *testing.T) {
+	logs := captureSafeLogs(t)
+	recorder := &recordingApply{}
+	coord := startCoordinator(t, &fakeDocker{}, recorder.apply)
+
+	if !coord.reserve("c1", time.Time{}, false) {
+		t.Fatal("could not reserve c1")
+	}
+
+	coord.settle("c1", coord.current(), errApplyFailed)
+
+	coord.wake <- struct{}{}
+
+	time.Sleep(20 * testBackoff)
+
+	if got := warnCount(logs.String()); got > 1 || len(recorder.seen()) != 0 {
+		t.Fatalf(
+			"while reserved: %d warnings, applies %v; want no retry and no spinning",
+			got,
+			recorder.seen(),
+		)
+	}
+
+	if again, _ := coord.next("c1"); again {
+		t.Fatal("a skipped retry must not queue work on the holder")
+	}
+
+	waitFor(t, coord.settled)
+
+	if got := recorder.seen(); !slices.Equal(got, []string{"c1"}) {
+		t.Errorf("applies = %v, want one retry after the reservation ended", got)
+	}
+}
+
+// TestCoordinator_StartDuringCleanupQueuesReconcile: a cleanup covers no
+// start event, so a start (a restart) arriving while a die is being
+// handled is reconciled afterwards, whatever its timestamp.
+func TestCoordinator_StartDuringCleanupQueuesReconcile(t *testing.T) {
+	recorder := &recordingApply{}
+	coord := startCoordinator(t, &fakeDocker{}, recorder.apply)
+
+	entered, gate := make(chan struct{}), make(chan struct{})
+	coord.terminate = func(string, time.Time) error {
+		close(entered)
+		<-gate
+
+		return nil
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		coord.handleEvent(context.Background(), &events.Message{
+			Action:   events.ActionDie,
+			Actor:    events.Actor{ID: "c1"},
+			TimeNano: time.Now().UnixNano(),
+		})
+	}()
+
+	<-entered
+	coord.handleEvent(context.Background(), startEvent("c1", time.Now().Add(-time.Second)))
+	close(gate)
+	<-done
+
+	if got := recorder.seen(); !slices.Equal(got, []string{"c1"}) {
+		t.Errorf("applies = %v, want the start reconciled after the cleanup", got)
+	}
+}
+
+// TestCoordinator_NoCompletionWhileReconcileRunning: a pass that finishes
+// while another reconcile is still running must not report completion
+// until that reconcile has settled.
+func TestCoordinator_NoCompletionWhileReconcileRunning(t *testing.T) {
+	logs := captureSafeLogs(t)
+	recorder := gatedApply()
+	coord := startCoordinator(t, &fakeDocker{}, recorder.apply)
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		coord.handleEvent(context.Background(), startEvent("c1", time.Now()))
+	}()
+
+	<-recorder.entered
+	coord.request(1)
+
+	waitFor(t, func() bool {
+		_, incomplete := coord.state()
+
+		return !incomplete
+	})
+
+	if gens := completions(logs.String()); len(gens) != 0 {
+		t.Fatalf("completion logged while a reconcile was running: %v", gens)
+	}
+
+	close(recorder.gate)
+	<-done
+
+	waitFor(t, func() bool { return len(completions(logs.String())) == 1 })
 }
