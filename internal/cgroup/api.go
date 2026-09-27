@@ -43,14 +43,25 @@ type DeviceRule struct {
 type Interface interface {
 	GetDeviceCGroupMountPath(procRootPath string, pid int) (string, string, error)
 	GetDeviceCGroupRootPath(procRootPath string, prefix string, pid int) (string, error)
-	AddDeviceRules(cgroupPath string, devices []DeviceRule) error
+	// SetDeviceRules makes the daemon-owned device grants of the cgroup
+	// behind handle equal exactly devices. Every read and write goes through
+	// the handle's descriptor, never the path.
+	SetDeviceRules(handle *CgroupHandle, devices []DeviceRule) error
 }
 
+// New returns the cgroup API for version. ledger records the cgroup v1
+// grants this daemon made; it must outlive the call (one per Processor)
+// and is required for version 1.
+//
 //nolint:ireturn // intentional: callers use the interface
-func New(version int) (Interface, error) {
+func New(version int, ledger *Ledger) (Interface, error) {
 	switch version {
 	case 1:
-		return &cgroupv1{}, nil
+		if ledger == nil {
+			return nil, errMissingLedger
+		}
+
+		return &cgroupv1{ledger: ledger, files: openatFiles{}}, nil
 	case 2:
 		return &cgroupv2{ops: kernelOps{}, replace: processReplaceProbe}, nil
 	default:
@@ -64,7 +75,10 @@ func New(version int) (Interface, error) {
 var errNoDeviceOrUnifiedCgroup = errors.New("no devices or unified cgroup entries found")
 
 type (
-	cgroupv1 struct{}
+	cgroupv1 struct {
+		ledger *Ledger
+		files  v1files
+	}
 	cgroupv2 struct {
 		ops     v2ops
 		replace *replaceProbe

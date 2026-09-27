@@ -22,7 +22,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
@@ -37,14 +40,31 @@ import (
 type failingCgroup struct {
 	cgroup.Interface
 
-	err   error
-	calls int
+	err      error
+	calls    int
+	identity cgroup.Identity
 }
 
-func (f *failingCgroup) AddDeviceRules(string, []cgroup.DeviceRule) error {
+func (f *failingCgroup) SetDeviceRules(handle *cgroup.CgroupHandle, _ []cgroup.DeviceRule) error {
 	f.calls++
+	f.identity = handle.Identity()
 
 	return f.err
+}
+
+// hostRootWithCgroup returns a host root holding the cgroup directory that
+// buildProcRoot's /proc resolves to, so the processor can open it.
+func hostRootWithCgroup(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+
+	err := os.MkdirAll(filepath.Join(root, "sys", "fs", "cgroup", "docker", "testcontainer"), 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return root
 }
 
 func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
@@ -52,7 +72,7 @@ func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
 
 	const pid = 70
 
-	real2, err := cgroup.New(2)
+	real2, err := cgroup.New(2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +87,38 @@ func devNullProcessor(t *testing.T, fake *failingCgroup) *Processor {
 			},
 		}},
 		Cfg:       newStore(policy.ModeAll, false),
-		HostRoot:  "/host",
+		HostRoot:  hostRootWithCgroup(t),
 		ProcRoot:  buildProcRoot(t, pid),
-		newCgroup: func(int) (cgroup.Interface, error) { return fake, nil },
+		newCgroup: func(int, *cgroup.Ledger) (cgroup.Interface, error) { return fake, nil },
+	}
+}
+
+// TestProcessContainer_SetsRulesThroughOpenedHandle checks that the
+// processor opens the resolved cgroup directory itself and hands the cgroup
+// API a handle carrying that directory's inode.
+func TestProcessContainer_SetsRulesThroughOpenedHandle(t *testing.T) {
+	fake := &failingCgroup{}
+	proc := devNullProcessor(t, fake)
+
+	err := proc.ProcessContainer(context.Background(), "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantPath := filepath.Join(proc.HostRoot, "sys", "fs", "cgroup", "docker", "testcontainer")
+
+	info, err := os.Stat(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatal("no stat_t")
+	}
+
+	if fake.identity != (cgroup.Identity{Path: wantPath, Inode: stat.Ino}) {
+		t.Errorf("handle identity = %+v, want %s inode %d", fake.identity, wantPath, stat.Ino)
 	}
 }
 
@@ -85,7 +134,7 @@ func TestProcessContainer_UnsupportedAttachModeSkipsContainer(t *testing.T) {
 	}
 
 	if fake.calls != 1 {
-		t.Fatalf("AddDeviceRules calls = %d, want 1", fake.calls)
+		t.Fatalf("SetDeviceRules calls = %d, want 1", fake.calls)
 	}
 
 	out := buf.String()

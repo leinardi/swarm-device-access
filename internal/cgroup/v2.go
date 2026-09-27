@@ -150,7 +150,10 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 	return "", errNoCgroupV2Entry
 }
 
-// AddDeviceRules adds a set of device rules for the device cgroup at cgroupPath.
+// SetDeviceRules adds rules to the device filter of the cgroup behind handle.
+//
+// It is still grant-only: rules are prepended to the attached programs, and
+// earlier grants are not replaced or revoked. An empty rule set is a no-op.
 //
 // Every attached program is replaced by a copy with the rules prepended.
 // Unlike NVIDIA's upstream code, which detaches every program before
@@ -159,15 +162,12 @@ func scanProcCgroupV2(r io.Reader, path string, prefix string) (string, error) {
 // the container unfiltered in between, and permanently so if the attach
 // failed or the daemon died. Programs are therefore replaced pairwise, each
 // new program attached (or atomically swapped in) before its original goes.
-func (c *cgroupv2) AddDeviceRules(cgroupPath string, rules []DeviceRule) error {
-	// Open the cgroup path.
-	dirFD, err := unix.Open(cgroupPath, unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return fmt.Errorf("unable to open the cgroup path: %w", err)
+func (c *cgroupv2) SetDeviceRules(handle *CgroupHandle, rules []DeviceRule) error {
+	if len(rules) == 0 {
+		return nil
 	}
-	defer unix.Close(dirFD)
 
-	return c.addDeviceRules(dirFD, rules)
+	return c.addDeviceRules(handle.fd, rules)
 }
 
 func (c *cgroupv2) addDeviceRules(dirFD int, rules []DeviceRule) error {

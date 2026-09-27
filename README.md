@@ -81,6 +81,13 @@ Atomic replacement (`BPF_F_REPLACE`) is used when the kernel supports it
 before the original is detached, which is narrower, never wider, if it is
 interrupted.
 
+On cgroup v1 hosts the daemon writes `devices.allow` and, to take a grant back,
+`devices.deny`. It remembers in memory which exceptions it added itself, so it
+never revokes one the runtime made. A restarted daemon has lost that memory:
+exceptions granted by the previous instance are then indistinguishable from the
+runtime's and are not revoked when policy narrows, until the container is
+restarted. cgroup v2 hosts do not have this gap.
+
 ### Docker Compose for Swarm
 
 ```yaml

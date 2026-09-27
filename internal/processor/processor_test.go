@@ -305,7 +305,7 @@ func TestProcessContainer_DevMountFilterApplied(t *testing.T) {
 	err := proc.ProcessContainer(context.Background(), "abc")
 	if err == nil {
 		t.Fatal(
-			"ProcessContainer should return error when AddDeviceRules fails on fake cgroup path",
+			"ProcessContainer should return error when the cgroup path cannot be opened",
 		)
 	}
 }

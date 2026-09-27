@@ -6,7 +6,7 @@
 
 - Connects to the host Docker socket (`/var/run/docker.sock`) and subscribes to container events.
 - Reads `/proc/<pid>/{cgroup,mountinfo}` for every starting container.
-- Writes eBPF `BPF_CGROUP_DEVICE` programs into the host cgroup v2 hierarchy, or writes to `devices.allow` on cgroup v1 hosts.
+- Writes eBPF `BPF_CGROUP_DEVICE` programs into the host cgroup v2 hierarchy, or writes to `devices.allow` and `devices.deny` on cgroup v1 hosts.
 - Requires `privileged: true`, `cgroupns: host`, `pid: host`, `userns: host`, and bind mounts of the host `/sys` and `/dev`.
 
 The combination of `privileged: true`, host `/dev` bind mount, and host Docker
@@ -51,4 +51,11 @@ Expected response time: acknowledgment within 7 days, patch or mitigation plan w
 
 - The daemon must run as root. Dropping to a minimal capability set (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_ADMIN`, `CAP_SYS_RESOURCE`) is theoretically possible but has not been tested across kernel versions and is not supported at this time.
 - The daemon uses `privileged: true` in the reference Swarm deployment. This is required because Swarm rejects `--cap-add` on service definitions. In non-Swarm deployments, explicit capabilities can be used instead.
+- **cgroup v1: grants made by a previous daemon instance are not revoked.** On cgroup v1 the daemon
+  can only tell its own `devices.allow` exceptions from the runtime's through an in-memory ledger. A
+  restarted daemon starts with an empty ledger, so exceptions its predecessor added look like the
+  runtime's baseline and are never revoked by a later narrowing; they go away when the container is
+  restarted. Within one daemon run, narrowing revokes exactly what was granted and never touches the
+  runtime's own exceptions. cgroup v1 is deprecated by Docker and systemd; cgroup v2 hosts are not
+  affected by this gap.
 - The cgroup BPF code in `internal/cgroup/` is derived from [NVIDIA's container toolkit](https://github.com/NVIDIA/libnvidia-container) (Apache 2.0). Security issues in that code should also be reported to NVIDIA.

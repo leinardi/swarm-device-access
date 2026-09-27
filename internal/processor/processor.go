@@ -85,9 +85,13 @@ type Processor struct {
 	// CallTimeout.
 	mu sync.Mutex
 
+	// ledger records the cgroup v1 grants this processor made, so a later
+	// Set can revoke them without touching the runtime's own exceptions.
+	ledger cgroup.Ledger
+
 	// newCgroup builds the cgroup API for a version; nil means cgroup.New.
 	// Tests replace it to observe or fail the mutation without a kernel.
-	newCgroup func(version int) (cgroup.Interface, error)
+	newCgroup func(version int, ledger *cgroup.Ledger) (cgroup.Interface, error)
 
 	// afterCompute, when set, runs under mu after the rules are computed
 	// and before they are applied. Tests use it to hold a worker mid-flight.
@@ -175,7 +179,7 @@ func (p *Processor) ProcessContainer(ctx context.Context, containerID string) er
 		newCgroup = cgroup.New
 	}
 
-	api, apiErr := newCgroup(cgroupVersion)
+	api, apiErr := newCgroup(cgroupVersion, &p.ledger)
 	if apiErr != nil {
 		return fmt.Errorf("init cgroup api (version=%d): %w", cgroupVersion, apiErr)
 	}
@@ -312,8 +316,10 @@ func collectContainerRules(
 	return result
 }
 
-// applyRulesToCgroup logs and (unless dryRun) attaches the collected device
-// rules to the cgroup at cgroupPath via a single AddDeviceRules call.
+// applyRulesToCgroup logs and (unless dryRun) sets the collected device rules
+// on the cgroup at cgroupPath. The directory is opened once here; the cgroup
+// API then works on that descriptor only, so the rules cannot land in a
+// different cgroup recreated at the same path.
 func (p *Processor) applyRulesToCgroup(
 	api cgroup.Interface,
 	rules []cgroup.DeviceRule,
@@ -349,9 +355,21 @@ func (p *Processor) applyRulesToCgroup(
 		return nil
 	}
 
-	err := api.AddDeviceRules(cgroupPath, rules)
+	handle, err := cgroup.OpenCgroup(cgroupPath)
 	if err != nil {
-		return fmt.Errorf("add device rules: %w", err)
+		return fmt.Errorf("set device rules: %w", err)
+	}
+
+	defer func() {
+		closeErr := handle.Close()
+		if closeErr != nil {
+			log.Warn("close cgroup handle", "cgroup", cgroupPath, "err", closeErr)
+		}
+	}()
+
+	err = api.SetDeviceRules(handle, rules)
+	if err != nil {
+		return fmt.Errorf("set device rules: %w", err)
 	}
 
 	return nil
