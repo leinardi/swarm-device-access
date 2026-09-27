@@ -400,8 +400,10 @@ and a match on any name of a device, in any of the container's mounts, denies
 it. Allow globs must match the kernel name and the resolved node; an alias
 that no allow glob names does not deny anything. A node planted elsewhere
 under `/dev` is therefore judged as the device it really is. A name that
-leads outside `/dev` is skipped with a warning; a device whose identity cannot
-be established (no or ambiguous `DEVNAME` in sysfs, an unreadable node) leaves
+leads outside `/dev` is skipped (logged as a warning only when an allow glob
+names it, since every whole-`/dev` mount has such links, like `/dev/stdin`); a
+device whose identity cannot be established (no or ambiguous `DEVNAME` in
+sysfs, an unreadable node) leaves
 the container with no grants until a retry succeeds, unless policy already
 excludes it under its other names. The same holds when a directory mount
 cannot be enumerated completely: a read error, or more than 4096 entries

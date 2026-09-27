@@ -110,7 +110,8 @@ under `/dev/`. From there every name (the source, each walked entry, each symlin
   (`outside_dev`);
 - `openat2` beneath a `/dev` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (the `devFS`
   seam in `devfs.go`): no symlink step can leave `/dev`. An absolute link back into `/dev` is
-  followed by hand, bounded to 40 hops; any other escape is skipped with a warning. The daemon
+  followed by hand, bounded to 40 hops; any other escape is skipped (a warning only when an explicit
+  allow glob names it, as for a dangling name; the skip itself never depends on the log level). The daemon
   refuses to start without `openat2` (`ProbeOpenat2`);
 - `fstat` on that descriptor gives the device number, and sysfs `DEVNAME` gives the canonical name,
   so a node planted under `/dev/shm` is judged as the device it is;

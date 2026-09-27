@@ -417,7 +417,48 @@ func TestCollect_SymlinkOutsideDevRejected(t *testing.T) {
 
 	if strings.Count(buf.String(), "device path resolves outside /dev") != 2 ||
 		!strings.Contains(buf.String(), "reason=outside_dev") {
-		t.Errorf("want one outside_dev WARN per link, got:\n%s", buf.String())
+		t.Errorf("want one outside_dev record per link, got:\n%s", buf.String())
+	}
+
+	if strings.Contains(buf.String(), "level=WARN") {
+		t.Errorf("a link no allow glob names must log at DEBUG, got:\n%s", buf.String())
+	}
+}
+
+// Symlinks out of /dev are in every whole-/dev mount; only one an explicit
+// allow glob names, where the operator expected a device, is a warning.
+func TestCollect_SymlinkOutsideDevWarnsOnlyWhenAllowed(t *testing.T) {
+	dev := newFakeDevFS(t)
+	dev.directory("dri")
+	dev.absLink("dri/stdin", "/proc/self/fd/0")
+	dev.absLink("dri/card9", "/tmp/card9")
+
+	buf := captureLogger(t)
+
+	gpol := policy.Global{Mode: policy.ModeAll, DeviceAllow: []string{"/dev/dri/card*"}}
+	wantRules(t, collectFrom(dev, gpol, "/dev/dri"))
+
+	var warned, debugged []string
+
+	for line := range strings.SplitSeq(buf.String(), "\n") {
+		if !strings.Contains(line, "device path resolves outside /dev") {
+			continue
+		}
+
+		switch {
+		case strings.Contains(line, "level=WARN"):
+			warned = append(warned, line)
+		case strings.Contains(line, "level=DEBUG"):
+			debugged = append(debugged, line)
+		}
+	}
+
+	if len(warned) != 1 || !strings.Contains(warned[0], "path=/dev/dri/card9") {
+		t.Errorf("WARN records %v, want one for /dev/dri/card9", warned)
+	}
+
+	if len(debugged) != 1 || !strings.Contains(debugged[0], "path=/dev/dri/stdin") {
+		t.Errorf("DEBUG records %v, want one for /dev/dri/stdin", debugged)
 	}
 }
 
