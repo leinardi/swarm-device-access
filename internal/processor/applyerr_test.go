@@ -47,6 +47,8 @@ type failingCgroup struct {
 	identity   cgroup.Identity
 	identities []cgroup.Identity
 	rules      [][]cgroup.DeviceRule
+	// onSet, when set, runs inside every call, after it is recorded.
+	onSet func()
 }
 
 func (f *failingCgroup) SetDeviceRules(
@@ -57,6 +59,10 @@ func (f *failingCgroup) SetDeviceRules(
 	f.identity = handle.Identity()
 	f.identities = append(f.identities, f.identity)
 	f.rules = append(f.rules, rules)
+
+	if f.onSet != nil {
+		f.onSet()
+	}
 
 	return f.err
 }

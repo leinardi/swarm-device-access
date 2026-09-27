@@ -116,6 +116,15 @@ func (p *Processor) applyPinned(
 		if err != nil {
 			return cgroupPath, err
 		}
+
+		// The revoke is real work between the check above and the
+		// mutation below, and the run can move again meanwhile: check once
+		// more, membership included even for the empty set, so the record
+		// never names a cgroup the run was not verified in.
+		err = p.verifyPinned(ctx, containerID, state, pinned, handle, true)
+		if err != nil {
+			return cgroupPath, err
+		}
 	}
 
 	// Recorded after verification, so an identity resolved through a

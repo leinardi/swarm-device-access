@@ -416,6 +416,39 @@ func TestReconcile_MovedRunRevokesPreviousCgroup(t *testing.T) {
 	}
 }
 
+// TestReconcile_MovedAgainDuringRevokeIsRechecked: the run leaves the new
+// cgroup while the previous one is revoked, so the new one is neither
+// granted nor recorded, and the container is retried.
+func TestReconcile_MovedAgainDuringRevokeIsRechecked(t *testing.T) {
+	env := newReconcileEnv(t, policy.ModeAll, false)
+	env.grantOnce(t)
+
+	parent := env.fake.identity
+	child := moveToChildCgroup(t, env)
+
+	env.fake.onSet = func() {
+		err := os.WriteFile(filepath.Join(child, "cgroup.procs"), nil, 0o600)
+		if err != nil {
+			t.Error(err)
+		}
+	}
+
+	err := env.reconcile()
+	if !errors.Is(err, errNotInCgroup) {
+		t.Fatalf("err = %v, want errNotInCgroup", err)
+	}
+
+	if env.fake.calls != 2 || env.fake.identities[1] != parent || len(env.fake.rules[1]) != 0 {
+		t.Fatalf("calls = %d, identities = %+v, rules = %v; want only the revoke on %s",
+			env.fake.calls, env.fake.identities, env.fake.rules, parent.Path)
+	}
+
+	recs := verifiedRecords(env.proc)
+	if len(recs) != 1 || recs[0].Identity != parent {
+		t.Errorf("records = %+v, want the one naming %s kept", recs, parent.Path)
+	}
+}
+
 // TestReconcile_MovedRunRevokeFailureKeepsRecord: when the previous cgroup
 // cannot be revoked, the new one is not granted and the record keeps
 // naming the previous cgroup, so a retry revokes it again.

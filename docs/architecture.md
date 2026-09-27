@@ -72,7 +72,7 @@ directory handle, and re-checks that the process is alive, that Docker still rep
 for a grant, that it is in that cgroup. All mutation goes through the handle, never the path again. A run found in another cgroup than the one
 it was last verified in (systemd inside the container moving its processes into a child cgroup, for one) first has the empty set applied at the
 previous cgroup, since a grant on a parent applies to every descendant; until that succeeds the new cgroup is not granted and the container is
-retried. On cgroup v1 a child cannot hold what its parent denies, so such a container gets no grants there.
+retried. The run is then verified again, cgroup membership included, since it can move once more while the previous cgroup is revoked. On cgroup v1 a child cannot hold what its parent denies, so such a container gets no grants there.
 
 ### Coordinator
 
