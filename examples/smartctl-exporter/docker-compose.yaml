@@ -57,9 +57,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - -v
       - /dev:/dev
-      # Enable reload-after-daemon-reload (optional):
+      # Enable reload-after-daemon-reload (optional). The container-side path
+      # must be under /var/run: dhi.io/static has no /var/run -> /run symlink.
       # - -v
-      # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      # - /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
       - ghcr.io/leinardi/swarm-device-access:latest
       # Daemon flags go after the image name; before it they are docker run flags.
       # Restrict to disk devices only (optional). One glob per flag: flags are
