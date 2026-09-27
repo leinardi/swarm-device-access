@@ -223,8 +223,8 @@ value is set in both places, the CLI flag wins.
 | `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
 | `-dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay, and a reload can turn it off but not on (see [Config File](#config-file)) |
 | `-policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
-| `-device-allow` | `""` | Glob for `/dev/...` paths to allow, repeatable. Empty means allow all. |
-| `-device-deny` | `""` | Glob for `/dev/...` paths to deny, repeatable. Deny takes priority over allow. |
+| `-device-allow` | `""` | Glob for `/dev/...` paths to allow, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Empty means allow all. |
+| `-device-deny` | `""` | Glob for `/dev/...` paths to deny, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Deny takes priority over allow. |
 | `-metrics-addr` | `""` | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. |
 | `-debug-addr` | `""` | `host:port` for pprof `/debug/pprof/*`. Empty disables it. |
 | `-config` | `""` | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |

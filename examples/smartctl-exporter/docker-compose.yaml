@@ -62,8 +62,12 @@ services:
       # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
       - ghcr.io/leinardi/swarm-device-access:latest
       # Daemon flags go after the image name; before it they are docker run flags.
-      # Restrict to disk devices only (optional):
-      # - -device-allow=/dev/sd*,/dev/nvme*,/dev/sg*,/dev/disk/*
+      # Restrict to disk devices only (optional). One glob per flag: flags are
+      # not split on commas (only the labels are).
+      # - -device-allow=/dev/sd*
+      # - -device-allow=/dev/nvme*
+      # - -device-allow=/dev/sg*
+      # - -device-allow=/dev/disk/*
     entrypoint: docker
     deploy:
       mode: global
