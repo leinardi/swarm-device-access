@@ -58,10 +58,11 @@ uses the host Docker socket to launch the real privileged daemon container.
 
 ### Host Requirements
 
-On every host the daemon needs Linux 5.3 or newer: it pins each running
-container's process with `pidfd_open(2)` before changing its cgroup (see
-below). On an older kernel no running container is changed, not even to
-revoke a grant, and each attempt fails with a `pidfd_open` error.
+On every host the daemon needs Linux 5.6 or newer. It resolves every device
+path beneath `/dev` with `openat2(2)` and `RESOLVE_BENEATH` (Linux 5.6), and
+refuses to start with `unsupported kernel` when that is missing. It also pins
+each running container's process with `pidfd_open(2)` (Linux 5.3) before
+changing its cgroup (see below).
 
 On cgroup v2 hosts the daemon adds its grants to the device filter the
 container runtime already attached, replacing that program in place rather
@@ -323,6 +324,18 @@ are **ignored** on every node.
 If you bind-mount a directory (for example `source: /dev/dri`), the
 `device-allow` glob is evaluated **per child node** inside that directory —
 write the glob against the children, e.g. `/dev/dri/*` or `/dev/dri/renderD128`.
+
+A device can be reached under several names: the mounted name (an alias such
+as `/dev/disk/by-id/usb-...`), the node it resolves to, and its kernel name
+(`DEVNAME` in sysfs, e.g. `/dev/sda`). Deny globs are checked against all three,
+and a match on any name of a device, in any of the container's mounts, denies
+it. Allow globs must match the kernel name and the resolved node; an alias
+that no allow glob names does not deny anything. A node planted elsewhere
+under `/dev` is therefore judged as the device it really is. A name that
+leads outside `/dev` is skipped with a warning; a device whose identity cannot
+be established (no or ambiguous `DEVNAME` in sysfs, an unreadable node) leaves
+the container with no grants until a retry succeeds, unless policy already
+excludes it under its other names.
 
 Global `-device-allow` and `-device-deny` define the broadest access the daemon
 may grant. Per-container labels can only narrow that access. Deny rules always

@@ -196,30 +196,31 @@ func (g Global) Enabled(cpol Container) bool {
 }
 
 // DeviceAllowed reports whether path is permitted by the combined global and
-// per-container allow/deny policy.
+// per-container allow/deny policy: not Denied and Authorized.
 //
 // Global is the maximum allowed access; per-container labels can only narrow
 // it further. Deny always wins over allow.
-//
-
 func (g Global) DeviceAllowed(cpol Container, path string) bool {
-	if matchAny(g.DeviceDeny, path) {
-		return false
-	}
+	return !g.Denied(cpol, path) && g.Authorized(cpol, path)
+}
 
-	if matchAny(cpol.DeviceDeny, path) {
-		return false
-	}
+// Denied reports whether path matches a global or a per-container deny glob.
+// A device is checked under every name it was found by, and one match on
+// any of them denies it.
+func (g Global) Denied(cpol Container, path string) bool {
+	return matchAny(g.DeviceDeny, path) || matchAny(cpol.DeviceDeny, path)
+}
 
+// Authorized reports whether path passes the allow lists: the global one and
+// the per-container one, each allowing everything when empty. A device must
+// be authorized under its canonical and its resolved name; missing the allow
+// list under some other alias is not a reason to deny it.
+func (g Global) Authorized(cpol Container, path string) bool {
 	if len(g.DeviceAllow) > 0 && !matchAny(g.DeviceAllow, path) {
 		return false
 	}
 
-	if len(cpol.DeviceAllow) > 0 && !matchAny(cpol.DeviceAllow, path) {
-		return false
-	}
-
-	return true
+	return len(cpol.DeviceAllow) == 0 || matchAny(cpol.DeviceAllow, path)
 }
 
 // ExplicitlyAllowed reports whether path is matched by at least one explicit

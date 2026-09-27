@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -46,14 +47,6 @@ type DockerInspector interface {
 		containerID string,
 		options client.ContainerInspectOptions,
 	) (client.ContainerInspectResult, error)
-}
-
-// deviceRuleKey is the deduplication key for cgroup device rules collected
-// within a single container processing pass.
-type deviceRuleKey struct {
-	typ   string
-	major int64
-	minor int64
 }
 
 // Processor applies cgroup BPF device-allow rules to containers that
@@ -111,6 +104,11 @@ type Processor struct {
 	// newCgroup builds the cgroup API for a version; nil means cgroup.New.
 	// Tests replace it to observe or fail the mutation without a kernel.
 	newCgroup func(version int, ledger *cgroup.Ledger, cache *cgroup.FilterCache) (cgroup.Interface, error)
+
+	// devfs opens the view of /dev and sysfs for one pass; nil means the
+	// real /dev and HostRoot's sysfs. Tests replace it to script device
+	// identities.
+	devfs func() (devFS, error)
 
 	// afterCompute, when set, runs under mu after the desired rules are
 	// computed and before they are applied. Tests use it to hold a worker
@@ -281,7 +279,7 @@ func (p *Processor) computeDesired(
 
 	p.Metrics.RecordContainerScanned()
 
-	collected := collectContainerRules(containerID, info.State.Pid, info.Mounts, cfg.Policy, cpol)
+	collected := p.collectDevices(containerID, info.State.Pid, info.Mounts, cfg.Policy, cpol)
 
 	for _, deviceErr := range collected.deviceErrs {
 		log.Warn("device rule failed", "id", containerID, "err", deviceErr)
@@ -421,25 +419,70 @@ func (p *Processor) classifyApplyError(
 
 // containerRules aggregates the per-mount results for one container.
 type containerRules struct {
-	granted    []cgroup.DeviceRule // deduplicated across mounts
+	granted    []cgroup.DeviceRule // one rule per granted device
 	skipped    int
 	deviceErrs []error
 	devMounts  int
 }
 
-// collectContainerRules walks every /dev mount of a container and merges the
-// results. Per-device errors are collected, not returned, so one bad entry
-// does not prevent the remaining rules from being applied.
-func collectContainerRules(
+// collectDevices opens /dev for this pass and collects the container's
+// rules. Failing to open it leaves every device unresolved.
+func (p *Processor) collectDevices(
 	containerID string,
 	pid int,
 	mounts []container.MountPoint,
 	gpol policy.Global,
 	cpol policy.Container,
 ) containerRules {
-	var result containerRules
+	if !slices.ContainsFunc(mounts, func(mnt container.MountPoint) bool {
+		return IsMountSource(mnt.Source)
+	}) {
+		return containerRules{}
+	}
 
-	seen := make(map[deviceRuleKey]struct{})
+	open := p.devfs
+	if open == nil {
+		open = func() (devFS, error) {
+			return openDevFS(devRoot, sysfsRootFor(p.HostRoot))
+		}
+	}
+
+	dev, err := open()
+	if err != nil {
+		return containerRules{
+			devMounts:  1,
+			deviceErrs: []error{fmt.Errorf("%w: %w", errUnresolved, err)},
+		}
+	}
+
+	defer func() {
+		closeErr := dev.Close()
+		if closeErr != nil {
+			logger.L().Warn("close /dev", "err", closeErr)
+		}
+	}()
+
+	return collectContainerRules(dev, containerID, pid, mounts, gpol, cpol, p.Metrics)
+}
+
+// collectContainerRules evaluates every /dev mount of a container and
+// aggregates the candidates per device across all of them: a device is
+// granted only when it is authorized and no name it was found by is denied.
+// Per-device errors are collected; any error leaves the set unknown (see
+// computeDesired).
+func collectContainerRules(
+	dev devFS,
+	containerID string,
+	pid int,
+	mounts []container.MountPoint,
+	gpol policy.Global,
+	cpol policy.Container,
+	metrics *observability.Recorder,
+) containerRules {
+	var (
+		result  containerRules
+		devices aggregation
+	)
 
 	for _, mnt := range mounts {
 		if !IsMountSource(mnt.Source) {
@@ -455,19 +498,22 @@ func collectContainerRules(
 			"destination", mnt.Destination,
 		)
 
-		mountResult := CollectMountRules(mnt.Source, gpol, cpol)
+		mountResult := CollectMountRules(dev, mnt.Source, gpol, cpol)
 		result.skipped += mountResult.Skipped
 		result.deviceErrs = append(result.deviceErrs, mountResult.Errs...)
 
-		for _, rule := range mountResult.Rules {
-			key := deviceRuleKey{rule.Type, *rule.Major, *rule.Minor}
-			if _, dup := seen[key]; !dup {
-				seen[key] = struct{}{}
+		for reason, count := range mountResult.Outcomes {
+			metrics.AddCandidatesSkipped(reason, count)
+		}
 
-				result.granted = append(result.granted, rule)
-			}
+		for idx := range mountResult.Candidates {
+			devices.add(&mountResult.Candidates[idx])
 		}
 	}
+
+	granted, excluded := devices.emit(containerID)
+	result.granted = granted
+	result.skipped += excluded
 
 	return result
 }

@@ -146,6 +146,40 @@ func TestDeviceAllowed(t *testing.T) {
 	}
 }
 
+// TestDeniedAuthorized checks the two halves DeviceAllowed is made of: a
+// deny glob is a veto on its own, and the allow lists never deny.
+func TestDeniedAuthorized(t *testing.T) {
+	t.Parallel()
+
+	g := policy.Global{
+		DeviceAllow: []string{"/dev/dri/*"},
+		DeviceDeny:  []string{"/dev/disk/by-id/*"},
+	}
+	c := policy.Container{DeviceDeny: []string{"/dev/dri/card1"}}
+
+	for _, tc := range []struct {
+		path               string
+		denied, authorized bool
+	}{
+		{"/dev/dri/card0", false, true},
+		{"/dev/dri/card1", true, true},
+		{"/dev/disk/by-id/usb-x", true, false},
+		{"/dev/sda", false, false},
+	} {
+		if got := g.Denied(c, tc.path); got != tc.denied {
+			t.Errorf("Denied(%q) = %v, want %v", tc.path, got, tc.denied)
+		}
+
+		if got := g.Authorized(c, tc.path); got != tc.authorized {
+			t.Errorf("Authorized(%q) = %v, want %v", tc.path, got, tc.authorized)
+		}
+	}
+
+	if !(policy.Global{}).Authorized(policy.Container{}, "/dev/anything") {
+		t.Error("empty allow lists must authorize everything")
+	}
+}
+
 // TestExplicitlyAllowed checks that only a matching explicit allow glob (with no
 // matching deny glob) counts; the empty-allow "allow everything" default does not.
 func TestExplicitlyAllowed(t *testing.T) {

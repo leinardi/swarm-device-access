@@ -113,25 +113,35 @@ rather than replacing it.
 
 For every bind mount whose source is `/dev` or lives under `/dev/`, the processor collects one device rule per device node:
 
-- **Single-file mount** (e.g. `/dev/nvidia0`): policy is checked against the (resolved) path. A missing, unresolvable or non-device file is an error,
-  because it was mounted explicitly.
-- **Directory mount** (e.g. `/dev`, `/dev/dri`): the tree is walked (depth-capped). Allow/deny globs match the **resolved target** of each entry,
-  never the symlink name, so a link such as `/dev/disk/by-id/...` cannot bypass a deny on `/dev/sda`.
+- **Single-file mount** (e.g. `/dev/nvidia0`): the source is one candidate. A missing or non-device source is an error, because it was mounted
+  explicitly.
+- **Directory mount** (e.g. `/dev`, `/dev/dri`): the tree is walked (depth-capped) only to enumerate names; each entry is one candidate named
+  after the mount source.
 
-Symlinks are resolved in the daemon's own view. Because the daemon bind-mounts the host `/dev`, links that stay inside `/dev` (`disk/by-id/*`,
-`dri/by-path/*`, `char/*`) resolve correctly. Links that leave `/dev` (`/dev/log -> /run/systemd/journal/dev-log`, `/dev/initctl -> /run/initctl`,
-`/dev/stdin -> /proc/self/fd/0`) often dangle inside the daemon container; they never point to device nodes. Such unresolvable symlinks are
-**skipped, not errors**:
+`/dev` is opened once per pass. Each candidate goes through one evaluation on file descriptors, so an entry swapped between enumeration and use
+is judged by what it is when opened, not by its name:
 
-- `Warn` `device symlink matches allow policy but cannot be resolved` — only when an explicit allow glob (global or label) matches the link path, since
-  that likely means an intended device is missing.
-- `Debug` `unresolvable symlink skipped` — every other case, including all mounts without allow globs.
+1. The name must be clean (no `..`, `//` or trailing `/`) and under `/dev`; otherwise `Warn` `device path resolves outside /dev`
+   (`reason=outside_dev`) and it is skipped.
+2. It is opened with `openat2(O_PATH, RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` beneath the `/dev` descriptor: symlinks are followed, but no
+   step may leave `/dev`. The kernel also refuses an absolute symlink back into `/dev` (`EXDEV`); the link itself is then read and, if its
+   target is under `/dev`, followed by hand (at most 40 hops). A link that leaves `/dev` (`/dev/log -> /run/...`, `/dev/stdin ->
+   /proc/self/fd/0`) is skipped as `outside_dev`; a dangling name is skipped as `dangling` (`Warn` `device symlink matches allow policy but
+   cannot be resolved` when an explicit allow glob names it, `Debug` otherwise).
+3. `fstat` on the descriptor gives the type and `major:minor`; a directory or a non-device entry is skipped at `Debug`.
+4. The device's kernel name is read from `<sysfs>/dev/{char,block}/<major>:<minor>/uevent`: exactly one `DEVNAME=` line with a clean relative
+   value. The canonical name is `/dev/` plus that value. sysfs is `/host/sys` when mounted, else `/sys`.
+5. Deny globs are checked on the alias, the resolved node (from `/proc/self/fd`) and the canonical name; allow globs on the canonical and the
+   resolved name.
 
-Entries that pass policy but are not character or block devices (regular files, sockets, pipes) are skipped at `Debug` (`non-device entry skipped`).
-Other failures on entries that pass policy (e.g. a `stat` error on a device node), and errors reading the tree itself during the walk (e.g. an
-unreadable subdirectory, reported before any policy check), are per-device errors: each is logged once as
-`Warn` `device rule failed` and counted in `sda_rule_failures_total`, while the remaining rules are still applied. Only container-level failures
-(inspect, cgroup detection/path resolution, `AddDeviceRules`) make the container fail.
+Candidates are aggregated per device across all of the container's mounts: a device is granted once, only when it is authorized and no candidate
+that resolves to it is denied. A deny on one name that suppresses an otherwise allowed device is logged at `Info` with `denied_by`.
+
+A candidate whose identity cannot be established (another `openat2` error, `fstat` failure, a missing, unreadable or ambiguous `DEVNAME`) and
+that policy would otherwise grant, and errors reading the tree itself during the walk, are per-device errors: each is logged as `Warn` `device
+rule failed` and counted in `sda_rule_failures_total`, and the container's whole desired set becomes empty with a retryable error until every
+device resolves. A device without a `DEVNAME` that its other names already exclude (e.g. `/dev/pts/*` under an allow list that does not name
+it) is simply not granted.
 
 Each container with at least one `/dev` mount produces one summary line with counts only:
 
@@ -139,8 +149,8 @@ Each container with at least one `/dev` mount produces one summary line with cou
 level=INFO msg="container processed" id=abc pid=1234 devices_granted=12 skipped=87 errors=0 dry_run=false
 ```
 
-`devices_granted` is the number of deduplicated rules, `skipped` counts entries excluded by policy, unresolvable symlinks, symlinks to directories
-and non-device entries, and `errors` counts per-device failures.
+`devices_granted` is the number of granted devices, `skipped` counts candidates excluded by policy, names outside `/dev`, dangling names,
+symlinks to directories and non-device entries, and `errors` counts per-device failures.
 
 ## Package layout
 
@@ -227,6 +237,7 @@ Metrics exposed:
 | `sda_containers_scanned_total` | counter | — | Containers that passed policy and were processed |
 | `sda_containers_skipped_total` | counter | `reason` | Containers skipped (`policy`, `invalid_labels`, `no_pid`) |
 | `sda_device_files_discovered_total` | counter | — | Device files found across all processed containers |
+| `sda_device_candidates_skipped_total` | counter | `reason` | Names under a `/dev` mount that name no device: `outside_dev`, `dangling`, `not_device` |
 | `sda_rule_failures_total` | counter | — | Per-device rule failures (including walk errors); the per-device failure signal |
 | `sda_dry_run_skips_total` | counter | — | Rules skipped in dry-run mode |
 | `sda_last_event_timestamp_seconds` | gauge | — | Unix timestamp of last container processed successfully (event, startup or reload) |

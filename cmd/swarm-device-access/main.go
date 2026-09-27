@@ -45,6 +45,34 @@ func main() {
 	os.Exit(run())
 }
 
+// startupSettings loads the config file, merges it with the flags and checks
+// the result and the kernel before anything uses them.
+func startupSettings(flags *settings, cliSet map[string]bool) (settings, error) {
+	// CLI flags override file values.
+	fileCfg, err := config.LoadFile(*configFile)
+	if err != nil {
+		return settings{}, fmt.Errorf("config file error: %w", err)
+	}
+
+	effective := mergeSettings(*flags, cliSet, fileCfg)
+
+	// The file's values were checked when it was loaded; the effective
+	// values (flags included) are checked here, before anything uses them.
+	err = effective.validate()
+	if err != nil {
+		return settings{}, fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Device paths are resolved beneath /dev with openat2; without it no
+	// path can be contained, so refuse to start rather than fall back.
+	err = processor.ProbeOpenat2()
+	if err != nil {
+		return settings{}, fmt.Errorf("unsupported kernel: %w", err)
+	}
+
+	return effective, nil
+}
+
 func run() int {
 	flag.Parse()
 
@@ -63,21 +91,9 @@ func run() int {
 
 	flags, cliSet := flagSettings()
 
-	// Load config file; CLI flags override file values.
-	fileCfg, fileErr := config.LoadFile(*configFile)
-	if fileErr != nil {
-		fmt.Fprintf(os.Stderr, "config file error: %v\n", fileErr)
-
-		return 1
-	}
-
-	effective := mergeSettings(flags, cliSet, fileCfg)
-
-	// The file's values were checked when it was loaded; the effective
-	// values (flags included) are checked here, before anything uses them.
-	startupValidationErr := effective.validate()
-	if startupValidationErr != nil {
-		fmt.Fprintf(os.Stderr, "invalid config: %v\n", startupValidationErr)
+	effective, startupErr := startupSettings(&flags, cliSet)
+	if startupErr != nil {
+		fmt.Fprintln(os.Stderr, startupErr)
 
 		return 1
 	}

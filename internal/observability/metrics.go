@@ -36,6 +36,7 @@ type Recorder struct {
 	containersScanned     prometheus.Counter
 	containersSkipped     *prometheus.CounterVec
 	deviceFilesDiscovered prometheus.Counter
+	candidatesSkipped     *prometheus.CounterVec
 	ruleFailures          prometheus.Counter
 	dryRunSkips           prometheus.Counter
 	lastEventTimestamp    prometheus.Gauge
@@ -88,6 +89,11 @@ func NewRecorder() *Recorder {
 			Name: "sda_device_files_discovered_total",
 			Help: "Device files for which rules were collected.",
 		}),
+
+		candidatesSkipped: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "sda_device_candidates_skipped_total",
+			Help: "Names under a /dev mount that name no device (outside_dev, dangling, not_device).",
+		}, []string{"reason"}),
 
 		ruleFailures: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sda_rule_failures_total",
@@ -191,6 +197,15 @@ func (rec *Recorder) AddDeviceFilesDiscovered(count int) {
 	}
 
 	rec.deviceFilesDiscovered.Add(float64(count))
+}
+
+// AddCandidatesSkipped adds count to the skipped-candidates counter for reason.
+func (rec *Recorder) AddCandidatesSkipped(reason string, count int) {
+	if rec == nil {
+		return
+	}
+
+	rec.candidatesSkipped.WithLabelValues(reason).Add(float64(count))
 }
 
 // AddRuleFailures adds count to the rule-failures counter.
