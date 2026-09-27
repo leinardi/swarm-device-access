@@ -65,12 +65,16 @@ integration-image: ## Build the daemon image the enforcement test runs, as $(INT
 
 .PHONY: sweep-test-leaks
 sweep-test-leaks: ## Remove every container left behind by integration test runs
-	docker ps -aq --filter "label=$(INTEGRATION_ENV_LABEL)" | xargs -r docker rm -f
-	docker ps -a --filter "label=$(LAUNCHER_ROLE_LABEL)=daemon" \
-	  --format '{{.ID}} {{.Label "$(LAUNCHER_OWNER_LABEL)"}}' | \
-	  while read -r id owner; do \
-	    [ -n "$$owner" ] || continue; \
-	    if docker container inspect "$$owner" 2>&1 >/dev/null | grep -q 'No such'; then \
-	      docker rm -f "$$id"; \
-	    fi; \
-	  done
+	@set -eu; \
+	ids=$$(docker ps -aq --filter "label=$(INTEGRATION_ENV_LABEL)"); \
+	if [ -n "$$ids" ]; then docker rm -f $$ids; fi; \
+	daemons=$$(docker ps -a --filter "label=$(LAUNCHER_ROLE_LABEL)=daemon" \
+	  --format '{{.ID}} {{.Label "$(LAUNCHER_OWNER_LABEL)"}}'); \
+	printf '%s\n' "$$daemons" | while read -r id owner; do \
+	  [ -n "$$id" ] && [ -n "$$owner" ] || continue; \
+	  if err=$$(docker container inspect "$$owner" 2>&1 >/dev/null); then continue; fi; \
+	  case "$$err" in \
+	    *"No such"*) docker rm -f "$$id" ;; \
+	    *) echo "inspect launcher $$owner of daemon $$id: $$err" >&2; exit 1 ;; \
+	  esac; \
+	done
