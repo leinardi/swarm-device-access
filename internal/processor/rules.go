@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -211,8 +212,10 @@ func walkMount(
 		logger.L().Warn("mount excluded: no children matched allow/deny policy",
 			"path", source,
 			"children_seen", state.childrenSeen,
-			"allow_globs", append(gpol.DeviceAllow, cpol.DeviceAllow...),
-			"deny_globs", append(gpol.DeviceDeny, cpol.DeviceDeny...),
+			// Concat, not append: append could write the container's
+			// globs into the spare capacity of the stored config slice.
+			"allow_globs", slices.Concat(gpol.DeviceAllow, cpol.DeviceAllow),
+			"deny_globs", slices.Concat(gpol.DeviceDeny, cpol.DeviceDeny),
 		)
 	}
 

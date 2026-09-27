@@ -826,6 +826,44 @@ func TestCollect_DirectoryNoChildrenMatchWarns(t *testing.T) {
 	}
 }
 
+// The WARN that lists the globs must not write the container's globs into
+// the spare capacity of the global policy's slices, which the config store
+// shares with every reconcile.
+func TestCollect_ExclusionWarnDoesNotAliasTheGlobalPolicy(t *testing.T) {
+	dev := newFakeDevFS(t)
+	dev.directory("dri")
+	dev.device("dri/card0", devCard, "dri/card0")
+
+	// Each list has spare capacity: its backing array is longer than it.
+	allowBacking := make([]string, 4)
+	allowBacking[0] = "/dev/dri/nonexistent"
+	allow := allowBacking[:1]
+	denyBacking := make([]string, 4)
+	denyBacking[0] = "/dev/dri/card0"
+	deny := denyBacking[:1]
+
+	gpol := policy.Global{Mode: policy.ModeAll, DeviceAllow: allow, DeviceDeny: deny}
+	cpol := policy.Container{
+		DeviceAllow: []string{"/dev/dri/other"},
+		DeviceDeny:  []string{"/dev/dri/x"},
+	}
+
+	buf := captureLogger(t)
+
+	result := CollectMountRules(dev, "/dev/dri", gpol, cpol)
+	if len(result.Errs) != 0 || !strings.Contains(buf.String(), "mount excluded") {
+		t.Fatalf("setup: want the exclusion WARN, got errs=%v log:\n%s", result.Errs, buf.String())
+	}
+
+	if spare := allowBacking[1]; spare != "" {
+		t.Errorf("global allow backing array was written: %q", spare)
+	}
+
+	if spare := denyBacking[1]; spare != "" {
+		t.Errorf("global deny backing array was written: %q", spare)
+	}
+}
+
 func TestProcessor_DevFSOpenFailureEmptiesTheSet(t *testing.T) {
 	t.Parallel()
 
