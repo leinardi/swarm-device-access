@@ -4,8 +4,8 @@ description: >
   Checklist for code that decides which devices a container may open, or what the
   daemon believes about its own configuration. Apply before editing internal/config/**,
   internal/policy/**, the label handling and rule collection in internal/processor/**,
-  the SIGHUP reload path in cmd/swarm-device-access/config.go, deployments/** (including
-  the Dockerfile) or examples/**. Read it before writing the change, not after review
+  the SIGHUP reload path in cmd/swarm-device-access/config.go, internal/launcher/**,
+  deployments/** (including the Dockerfile) or examples/**. Read it before writing the change, not after review
   finds the hole.
 ---
 
@@ -161,18 +161,28 @@ file are logged and ignored. Covered by `TestReload_*` and `TestMergeSettings_*`
 ## 6. Least privilege in the image and the deployment
 
 The daemon has to be privileged: it attaches BPF programs to other containers' cgroups and stats
-host device nodes. So the rule is not "unprivileged" but "no more than the documented set". The
-README's Docker Compose for Swarm snippet and `deployments/docker/docker-compose.yaml` run it with
-`--privileged`, `--cgroupns=host`, `--pid=host`, `--userns=host` and exactly three bind mounts:
-`/sys:/host/sys`, `/var/run/docker.sock` and `/dev:/dev`. The DBus socket
-(`/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`) stays **optional and commented
-out** — the daemon degrades to a startup warning without it. `deployments/docker/Dockerfile` builds
-a static binary onto `dhi.io/static` with `USER 0` and nothing else in the runtime stage.
+host device nodes. So the rule is not "unprivileged" but "no more than the documented set".
 
-- [ ] No new capability, namespace flag or host bind mount beyond the documented set, in the
-      Dockerfile, `deployments/**`, `examples/**` or the README — and if one is truly needed, the
+The single source of truth for that set is `daemonSpec` (`internal/launcher/spec.go`): the Swarm
+service in the README's Docker Compose for Swarm snippet, `deployments/docker/docker-compose.yaml`
+and `examples/**` runs the image as an unprivileged `launch` task with only the Docker socket, and
+the launcher creates the daemon with `Privileged`, host cgroup, PID and user namespaces, network
+`none`, `AutoRemove`, and exactly three bind `Mounts`: the Docker socket at `/var/run/docker.sock`,
+`/sys:/host/sys` and `/dev:/dev`. `Mounts`, never `Binds`: a missing source must fail the create,
+not make Docker create an empty directory on the host. The optional extras are opt-in launch flags:
+`-dbus` (`/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket` — the daemon degrades to a
+startup warning without it), `-config-dir` (read-only at `/etc/swarm-device-access`) and
+`-host-network`. `TestDaemonSpec` pins the whole host config, so a new mount or flag shows up as a
+test change. The launcher's own inputs are checked too: `-config-dir` and `-host-docker-socket`
+must be absolute, clean paths, and it removes a `swarm-device-access` container only when its
+owning launcher is confirmed gone — never on a transient error, and never a foreign container.
+`deployments/docker/Dockerfile` builds a static binary onto `dhi.io/static` with `USER 0` and
+nothing else in the runtime stage.
+
+- [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
+      `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is truly needed, the
       README and `AGENTS.md` runtime requirements change in the same commit.
-- [ ] The DBus mount is never made mandatory.
+- [ ] The DBus mount is never made mandatory (`-dbus` stays off by default).
 - [ ] A Dockerfile change is checked with `make docker-build`.
 - [ ] Nothing secret is baked into a layer: build args and `COPY` sources are not a secret store.
 

@@ -80,6 +80,14 @@ and aggregates per device), then apply it (`applyPinned`: pidfd pin, `/proc/<pid
 runtime's `BPF_CGROUP_DEVICE` filter in an owned block and swap it in with `BPF_F_ALLOW_MULTI` (or `BPF_F_REPLACE`). **Parts of this code are
 preserved from NVIDIA (Apache 2.0) — touch with care.**
 
+**Launcher (`cmd/swarm-device-access/launch.go`, `internal/launcher/`)**
+
+`run()` dispatches `launch` before `flag.Parse()` to `runLaunch`, which has its own flag set; the arguments after `--` go to the daemon
+verbatim. The Swarm service runs the image unprivileged in this mode. `launcher.Run` finds its own container in `/proc/self/mountinfo`,
+takes its `sha256:` image ID, removes a stale `swarm-device-access` daemon only when its owning launcher is confirmed gone (or it came
+from the old `sh` wrapper), then creates the daemon from `daemonSpec`, attaches, registers `ContainerWait(removed)`, starts it and
+supervises it. Stops go by container ID and share one 20 s shutdown budget.
+
 **Glue (`internal/logger/`, `internal/systemd/`, `internal/observability/`)**
 
 - `logger` — slog wrapper with `text`/`json`/`plain` handlers, `-log-time` strips timestamps via a `ReplaceAttr`. `L()` lazy-inits a default INFO text
@@ -90,8 +98,9 @@ preserved from NVIDIA (Apache 2.0) — touch with care.**
 
 ## Runtime requirements
 
-The daemon **must** run with `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`, and bind mounts for `/var/run/docker.sock` and
-`/sys → /host/sys`. The `hostRootPath = "/host"` constant in `main.go` is the inside-container view of the host root; cgroup paths (and sysfs, when
+The daemon **must** run with `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`, and bind mounts for `/var/run/docker.sock`,
+`/sys → /host/sys` and `/dev`. That privileged set lives in one place, `daemonSpec` (`internal/launcher/spec.go`), which the launcher uses to
+create the daemon; the Swarm service itself (`launch`) needs only the Docker socket. The `hostRootPath = "/host"` constant in `main.go` is the inside-container view of the host root; cgroup paths (and sysfs, when
 mounted there) are joined against it. The DBus socket mount is optional — enables reload handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`; the container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run` symlink.
 
 ## Conventions worth knowing
@@ -109,7 +118,7 @@ Skills live in `.agents/skills/` (symlinked as `.claude/skills`). Load them befo
 
 - `go-style-guide` — before any `.go` edit.
 - `trust-boundary` — before touching `internal/config`, `internal/policy`, label parsing or rule collection in `internal/processor`,
-  `deployments/docker/Dockerfile` or anything else under `deployments/**`.
+  `internal/launcher`, `deployments/docker/Dockerfile` or anything else under `deployments/**`.
 - `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
 
 ## Quality rules not enforced by tooling

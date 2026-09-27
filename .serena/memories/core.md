@@ -11,11 +11,13 @@ cmd/swarm-device-access/   # main binary (//go:build linux)
   main.go                  # run(): flags, settings, openat2 probe, store, processor, daemon.Run
   flags.go                 # CLI flag definitions
   config.go                # settings merge/validate, SIGHUP reloader
+  launch.go                # `launch` subcommand: launcher flags, runLaunch
   version.go               # version/commit/date (filled by ldflags)
 
 internal/
   config/                  # strict YAML loader; runtime Store/Publisher with generations
   policy/                  # mode, label parsing, globs: Enabled, Denied, Authorized (cross-platform)
+  launcher/                # launch mode: daemonSpec (privileged set), self ID, stale cleanup, supervise
   daemon/                  # event loop and coordinator
     daemon.go              # Run: subscribe, coordinator, startup pass, reload watcher, listenEvents
     events.go              # listenEvents/consumeEvents (reconnect backoff), processOne
@@ -38,7 +40,7 @@ internal/
   systemd/                 # DBus Reloading signal watcher
 
 test/integration/          # daemon integration tests (build tag integration)
-deployments/docker/        # Dockerfile, compose file with the sh wrapper, example config
+deployments/docker/        # Dockerfile, compose file running the launcher, example config
 docs/                      # architecture.md, testing.md, release.md
 ```
 

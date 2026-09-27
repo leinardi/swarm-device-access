@@ -52,9 +52,11 @@ at `/host/sys`, and `/dev` mounted into the daemon container.
 It requires Docker Engine 19.03 or newer (API 1.40): the Docker client it uses
 refuses older engines.
 
-Swarm does not allow those runtime options directly on a service. The common
-workaround is to deploy a small wrapper service that runs the Docker CLI and
-uses the host Docker socket to launch the real privileged daemon container.
+Swarm does not allow those runtime options directly on a service. So the image
+has a second mode, `launch`: the Swarm service runs the image unprivileged, with
+only the Docker socket, and the launcher creates the privileged daemon container
+from the very image it runs itself (see
+[Docker Compose for Swarm](#docker-compose-for-swarm)).
 
 ### Host Requirements
 
@@ -163,58 +165,33 @@ is dropped only once its cgroup is verified gone; a periodic sweep checks.
 ```yaml
 services:
   swarm-device-access:
-    image: docker:29
-    # Swarm rejects privileged/cgroup/pid/userns on services. This wrapper
-    # launches the actual daemon with `docker run`, where those flags are valid.
-    entrypoint: ["sh", "-c"]
+    image: ghcr.io/leinardi/swarm-device-access:1
+    # Swarm rejects privileged/cgroup/pid/userns on services. The launcher runs
+    # unprivileged and creates the daemon container from this same image.
     command:
-      - |
-        # docker run options, before the image. Uncomment a line to add it.
-        set -- --rm --name=swarm-device-access \
-          --privileged --cgroupns=host --pid=host --userns=host \
-          -v /sys:/host/sys \
-          -v /var/run/docker.sock:/var/run/docker.sock \
-          -v /dev:/dev
-        # Reapply device rules after systemctl daemon-reload, which wipes cgroup
-        # BPF programs (without it the daemon warns and skips reload handling).
-        # The container-side path must be under /var/run: dhi.io/static has no
-        # /var/run -> /run symlink.
-        # set -- "$$@" -v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
-        # A config file for -config below. Mount the directory, not the file:
-        # an editor that replaces the file would leave a file mount on the old
-        # content, and a reload would silently apply it.
-        # set -- "$$@" -v /etc/swarm-device-access:/etc/swarm-device-access:ro
-        set -- "$$@" ghcr.io/leinardi/swarm-device-access:latest
-        # Daemon flags, after the image; before it they are docker run flags.
-        # Reload the config file with: docker kill -s HUP swarm-device-access
-        # set -- "$$@" -config /etc/swarm-device-access/config.yaml
-
-        # On SIGTERM or SIGINT from Swarm, stop the daemon and exit with its
-        # status. The trap is set before the daemon starts, and the daemon runs
-        # in the background: a shell waiting on a foreground child only runs
-        # its traps after the child exits.
-        pid=
-        stop_daemon() {
-          docker stop -t 10 swarm-device-access >/dev/null 2>&1
-          wait $$pid
-          exit $$?
-        }
-        trap stop_daemon TERM INT
-
-        # Clear a daemon container left behind by a wrapper that was killed.
-        docker rm -f swarm-device-access >/dev/null 2>&1 || true
-        docker run "$$@" &
-        pid=$$!
-        wait "$$pid"
-        exit $$?
-    # Leaves time for docker stop -t 10 before Swarm kills the wrapper.
-    stop_grace_period: 30s
+      - launch
+      # Launcher flags. Reapply device rules after systemctl daemon-reload:
+      # - -dbus
+      # Bind a host directory read-only at /etc/swarm-device-access. Mount the
+      # directory, not the file: an editor that replaces the file would leave a
+      # file mount on the old content, and a reload would silently apply it.
+      # - -config-dir=/etc/swarm-device-access
+      - --
+      # Daemon flags, passed to the daemon verbatim.
+      # Reload the config file with: docker kill -s HUP swarm-device-access
+      # - -config=/etc/swarm-device-access/config.yaml
+      - -log-level=info
+      - -log-format=text
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       mode: global
       restart_policy:
         condition: any
+      update_config:
+        order: stop-first
+    # The launcher's shutdown takes at most 20s; see below.
+    stop_grace_period: 30s
 
   # Example consumer service: a Swarm task that bind-mounts a GPU device.
   cuda-worker:
@@ -237,25 +214,51 @@ services:
 The daemon compose file is also available at
 [`deployments/docker/docker-compose.yaml`](deployments/docker/docker-compose.yaml).
 
-The wrapper is a small `sh` script rather than a bare `docker run`, so that
-there is exactly one daemon container per node, always named
-`swarm-device-access`:
+`swarm-device-access launch [launch flags] -- [daemon flags]` finds its own
+container, reads the ID of the image it runs, and creates one container named
+`swarm-device-access` from that image ID, with the arguments after `--` as the
+daemon's flags. The daemon container gets exactly the documented privileged
+set: `--privileged`, the host cgroup, PID and user namespaces, no network, and
+bind mounts of the host Docker socket at `/var/run/docker.sock`, `/sys` at
+`/host/sys` and `/dev` at `/dev`, plus the optional mounts below. The launcher
+streams the daemon's output as its own, so `docker service logs` shows the
+daemon, and exits with the daemon's status.
 
-- It builds the `docker run` arguments with one `set -- "$$@" ...` line each:
-  options before the image, daemon flags after it. To enable an optional mount
-  or flag, uncomment its line; it cannot end up on the wrong side of the image.
-- It sets a `SIGTERM`/`SIGINT` trap, then removes any `swarm-device-access`
-  container a killed wrapper left behind, so the replacement task does not
-  start a second daemon next to an orphan or, normally, hit a name conflict (if
-  it does, Swarm restarts the task and the next attempt clears it).
-- It starts `docker run` in the background and waits on it, because a shell
-  blocked on a foreground child runs its traps only after the child exits.
-- On `SIGTERM` from Swarm the trap runs `docker stop -t 10
-  swarm-device-access`, waits for the daemon to exit, and exits with its
-  status. `stop_grace_period: 30s` gives it time to do so.
+| Launch flag | Default | Description |
+| --- | --- | --- |
+| `-dbus` | `false` | Bind the host's `/run/dbus/system_bus_socket` at `/var/run/dbus/system_bus_socket` in the daemon, so it reapplies rules after `systemctl daemon-reload`. |
+| `-config-dir` | `""` | Host directory bound read-only at `/etc/swarm-device-access`, for the daemon's `-config`. Must be an absolute, clean path. |
+| `-host-network` | `false` | Run the daemon in the host network instead of none; only `-metrics-addr` and `-debug-addr` need it. |
+| `-host-docker-socket` | `/var/run/docker.sock` | Host path of the Docker socket bound into the daemon. Must be an absolute, clean path. The launcher itself always uses its own `/var/run/docker.sock` mount. |
+| `-log-level` | `info` | The launcher's own log level: `debug`, `info`, `warn`, `error`. |
+| `-log-format` | `text` | The launcher's own log format: `text`, `json`, `plain`. |
+| `-help` |  | Print the launch flags and exit |
 
-Compose interpolates `$` in the file, so the script writes `$$` for a literal
-`$`.
+Running the daemon from the launcher's own image ID, not a tag, means the
+service image is the daemon image:
+
+- An image watcher such as gantry, or `docker service update --image`, updates
+  the service, and the new launcher starts the new daemon. Every node runs the
+  same digest.
+- A Swarm rollback (`docker service rollback`) rolls the daemon back with it.
+- `update_config.order: stop-first` stops the old launcher, which stops and
+  removes its daemon, before the new one starts. The launcher's shutdown (a 10s
+  stop, the wait for the removal and the drain of the last log lines) shares a
+  single 20s budget, inside `stop_grace_period: 30s`.
+
+Each daemon container is labelled with the ID of the launcher that owns it.
+Before it creates a daemon, a launcher removes a `swarm-device-access`
+container only when it is a daemon whose launcher is confirmed gone or
+stopped, or a daemon left by the `sh` wrapper of earlier releases. A daemon
+whose launcher still runs, a launcher whose state cannot be read, or any other
+container with that name makes the launcher exit with an error, and Swarm
+retries it.
+
+Releases before 1.0.0 documented a `docker:29` service that ran an `sh` wrapper
+around `docker run`. It still works, but it is no longer documented: the
+service image never changed, so image watchers and rollbacks did not follow
+daemon releases. To migrate, replace the service with the one above; the first
+launcher removes the daemon container the wrapper left running.
 
 ## ⚙️ Configuration
 

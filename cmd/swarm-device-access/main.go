@@ -104,9 +104,16 @@ func startServers(ctx context.Context, effective *settings) (stop func(), err er
 }
 
 func run() int {
+	if len(os.Args) > 1 && os.Args[1] == launchCommand {
+		return runLaunch(os.Args[2:])
+	}
+
 	flag.Parse()
 
 	if *help {
+		fmt.Fprintln(flag.CommandLine.Output(),
+			"Usage: swarm-device-access [flags]\n"+
+				"       swarm-device-access launch [launch flags] -- [daemon flags]  (see launch -help)")
 		flag.PrintDefaults()
 
 		return 0

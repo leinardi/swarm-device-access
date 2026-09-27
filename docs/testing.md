@@ -121,11 +121,13 @@ or deployment behavior:
 7. If `/run/dbus/system_bus_socket` is mounted and systemd is available, run
    `systemctl daemon-reload` and verify the daemon logs that it re-applied rules.
 
-8. On a Swarm node, `kill -9` the wrapper task's container and confirm that
-   Swarm's replacement task starts without a name conflict and that exactly one
-   `swarm-device-access` daemon container is running afterwards
-   (`docker ps --filter 'name=^swarm-device-access$'`; without the anchors the
-   filter also matches the wrapper task's container).
+8. On a Swarm node, `kill -9` the launcher task's container and confirm that
+   Swarm's replacement task removes the orphaned daemon and that exactly one
+   `swarm-device-access` daemon container is running afterwards, labelled with
+   the new launcher's ID
+   (`docker ps --filter 'name=^swarm-device-access$' --format '{{.ID}} {{.Label "io.github.leinardi.swarm-device-access.launcher"}}'`;
+   without the anchors the filter also matches the launcher task's container).
+   `TestLauncher_RunsDaemonFromItsOwnImage` covers the same case outside Swarm.
 
 9. Verify observability by starting with `-metrics-addr 127.0.0.1:9090` and
    `-debug-addr 127.0.0.1:6060`, then checking `/healthz`, `/readyz`, `/metrics`, and
