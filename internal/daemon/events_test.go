@@ -334,6 +334,36 @@ func TestCoordinator_ProcessedEntriesExpire(t *testing.T) {
 	}
 }
 
+// TestCoordinator_PruneArmedOnlyWithEntries checks that the prune timer is
+// armed only while the processed map has entries, and that an armed timer
+// is kept rather than restarted on every loop iteration.
+func TestCoordinator_PruneArmedOnlyWithEntries(t *testing.T) {
+	inspectedAt := time.Now()
+	coord := testCoordinator(map[string]time.Time{})
+
+	if coord.armPrune(nil) != nil {
+		t.Fatal("prune timer armed for an empty processed map")
+	}
+
+	coord.markProcessed("c1", inspectedAt)
+
+	armed := coord.armPrune(nil)
+	if armed == nil {
+		t.Fatal("prune timer not armed with an entry to expire")
+	}
+
+	if coord.armPrune(armed) != armed {
+		t.Error("an armed prune timer was replaced")
+	}
+
+	coord.now = func() time.Time { return inspectedAt.Add(processedTTL + time.Second) }
+	coord.pruneProcessed()
+
+	if coord.armPrune(nil) != nil {
+		t.Errorf("prune timer re-armed after the prune emptied the map (%v)", coord.processed)
+	}
+}
+
 func TestConsumeEvents_BackoffResetsOnSuccessfulEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

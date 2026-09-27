@@ -214,10 +214,7 @@ func (c *coordinator) awaitFirstPass(ctx context.Context) {
 func (c *coordinator) run(ctx context.Context) {
 	listBackoff := c.minBackoff
 
-	var listRetry <-chan time.Time
-
-	prune := time.NewTicker(processedTTL)
-	defer prune.Stop()
+	var listRetry, prune <-chan time.Time
 
 	sweep := time.NewTicker(sweepInterval)
 	defer sweep.Stop()
@@ -247,6 +244,8 @@ func (c *coordinator) run(ctx context.Context) {
 			retry = time.After(max(due.Sub(c.now()), 0))
 		}
 
+		prune = c.armPrune(prune)
+
 		select {
 		case <-ctx.Done():
 			return
@@ -257,7 +256,9 @@ func (c *coordinator) run(ctx context.Context) {
 			c.redo()
 		case <-retry:
 			c.retryDue(ctx)
-		case <-prune.C:
+		case <-prune:
+			prune = nil
+
 			c.pruneProcessed()
 		case <-sweep.C:
 			c.runSweep()
@@ -711,6 +712,27 @@ func (c *coordinator) skipEvent(containerID string, eventTime time.Time) bool {
 	}
 
 	return !eventTime.After(inspectedAt)
+}
+
+// armPrune returns the prune timer to wait on: armed if one is, a new one
+// when the processed map has entries, or nil, which a select never receives
+// from. Entries only come from a pass and expire processedTTL later, so on
+// a quiet node the timer fires once or twice after a pass and then stays
+// off, instead of waking the daemon every processedTTL for an empty map.
+func (c *coordinator) armPrune(armed <-chan time.Time) <-chan time.Time {
+	if armed != nil {
+		return armed
+	}
+
+	c.mu.Lock()
+	empty := len(c.processed) == 0
+	c.mu.Unlock()
+
+	if empty {
+		return nil
+	}
+
+	return time.After(processedTTL)
 }
 
 func (c *coordinator) pruneProcessed() {
