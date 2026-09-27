@@ -78,6 +78,8 @@ func resubscribeSince(initial time.Time, lastEventNano int64) string {
 }
 
 // listenEvents consumes Docker container events and applies device rules.
+// Every re-subscription after the initial stream requests a coordinator
+// pass (see requestReenumeration).
 // "start" covers fresh starts and restart's second phase; "unpause" covers
 // resume from a paused state if the cgroup state was cleared. stream is the
 // stream already opened by Run before the startup enumeration (zero value when
@@ -130,6 +132,14 @@ func listenEvents(
 
 				continue
 			}
+
+			// Since only replays what dockerd still buffers, and a
+			// restarted dockerd has nothing buffered, so events of the
+			// gap can be lost: re-list and reconcile every running
+			// container. The coordinator's processed map skips replayed
+			// start events the pass already covered.
+			log.Info("docker event stream re-subscribed; reconciling running containers")
+			coord.requestReenumeration()
 		}
 
 		observability.SetReady(true)

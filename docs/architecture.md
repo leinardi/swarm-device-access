@@ -108,7 +108,10 @@ events).
 socket error, channel close), the loop reconnects rather than exiting.
 
 On re-subscription `Since` is set to one nanosecond after the last received event (or the original startup time if no event arrived yet), so
-events emitted during the disconnect are delivered while the last event is not replayed.
+events emitted during the disconnect are delivered while the last event is not replayed. dockerd only replays what it still buffers, and a
+restarted dockerd has nothing buffered, so every successful re-subscription also requests a coordinator pass that re-lists and reconciles every
+running container (`docker event stream re-subscribed; reconciling running containers`). Replayed start events the pass already covered are
+skipped through the `processed` map.
 
 Context cancellation (SIGTERM/SIGINT via `signal.NotifyContext`) exits cleanly at any point; `Run` waits for the coordinator, so shutdown does
 not cut off a reconcile in the middle of its cgroup mutation.

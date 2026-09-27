@@ -190,6 +190,12 @@ func (c *coordinator) request(generation uint64) {
 	}
 }
 
+// requestReenumeration asks for a pass under the newest generation already
+// requested; the event loop calls it after re-subscribing.
+func (c *coordinator) requestReenumeration() {
+	c.request(0)
+}
+
 // requestPass adapts request to processor.PassRequester.
 func (c *coordinator) requestPass(_ context.Context, generation uint64) {
 	c.request(generation)

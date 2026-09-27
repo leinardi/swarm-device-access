@@ -726,3 +726,53 @@ func TestCoordinator_NoCompletionWhileReconcileRunning(t *testing.T) {
 
 	waitFor(t, func() bool { return len(completions(logs.String())) == 1 })
 }
+
+// TestListenEvents_ReconnectReenumerates checks that a re-subscription
+// requests a pass on its own (dockerd's replay buffer is empty after a
+// restart), while events on the new stream are consumed concurrently with
+// that pass; run under -race.
+func TestListenEvents_ReconnectReenumerates(t *testing.T) {
+	closed := make(chan events.Message)
+	close(closed)
+
+	msgs := make(chan events.Message)
+	docker := &fakeDocker{
+		containers: []container.Summary{{ID: "a"}, {ID: "b"}},
+		firstMsgs:  msgs,
+		firstErrs:  make(chan error),
+	}
+	apply := &recordingApply{}
+	coord := startCoordinator(t, docker, apply.apply)
+	opts := Options{
+		Docker: docker,
+		Proc:   &processor.Processor{Inspector: &recordingInspector{}, Cfg: newTestStore()},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		listenEvents(ctx, opts, coord, time.Now(),
+			client.EventsResult{Messages: closed, Err: make(chan error)}, func() {})
+	}()
+
+	// The new stream delivers events while the pass the reconnect
+	// requested runs.
+	for round := range 20 {
+		msgs <- *startEvent([]string{"a", "b"}[round%2], time.Now())
+	}
+
+	waitForWithin(t, 5*minBackoff, func() bool { return docker.listCalls() >= 1 })
+	waitFor(t, coord.settled)
+	cancel()
+	<-done
+
+	seen := apply.seen()
+	if !slices.Contains(seen, "a") || !slices.Contains(seen, "b") {
+		t.Errorf("reconciled %v, want both running containers", seen)
+	}
+}
