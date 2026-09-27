@@ -60,9 +60,10 @@ services:
       # Enable reload-after-daemon-reload (optional):
       # - -v
       # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - ghcr.io/leinardi/swarm-device-access:latest
+      # Daemon flags go after the image name; before it they are docker run flags.
       # Restrict to disk devices only (optional):
       # - -device-allow=/dev/sd*,/dev/nvme*,/dev/sg*,/dev/disk/*
-      - ghcr.io/leinardi/swarm-device-access:latest
     entrypoint: docker
     deploy:
       mode: global

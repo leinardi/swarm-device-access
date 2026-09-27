@@ -49,12 +49,13 @@ services:
       # Enable reload-after-daemon-reload (optional):
       # - -v
       # - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - ghcr.io/leinardi/swarm-device-access:latest
+      # Daemon flags go after the image name; before it they are docker run flags.
       # Policy mode: opt-in (default) processes only labelled containers.
       # Use -policy-mode=all to process every container on the node.
       # - -policy-mode=opt-in
       # Limit scope to NVIDIA devices only (optional):
       # - -device-allow=/dev/nvidia*
-      - ghcr.io/leinardi/swarm-device-access:latest
     entrypoint: docker
     deploy:
       mode: global

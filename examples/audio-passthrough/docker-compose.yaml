@@ -41,9 +41,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - -v
       - /dev:/dev
+      - ghcr.io/leinardi/swarm-device-access:latest
+      # Daemon flags go after the image name; before it they are docker run flags.
       # Restrict to ALSA sound devices only:
       # - -device-allow=/dev/snd/*
-      - ghcr.io/leinardi/swarm-device-access:latest
     entrypoint: docker
     deploy:
       mode: global
