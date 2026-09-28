@@ -124,8 +124,7 @@ repos:
       - id: go-test-repo-mod
   # The release version is derived from the commit types since the last tag, so
   # a message nobody can classify is a release nobody can version. With
-  # --force-scope, unlike monmux: every commit here names a scope, and AGENTS.md
-  # requires one.
+  # --force-scope: every commit here names a scope, and AGENTS.md requires one.
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.4.0
     hooks:
