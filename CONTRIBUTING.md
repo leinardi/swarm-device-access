@@ -75,8 +75,12 @@ feat(policy)!: drop the legacy allow label
 Mark breaking changes with `!` before the colon or a `BREAKING CHANGE: <description>` footer.
 
 The release version is derived from these types: since the last release, any `feat` makes the next release a minor, any `fix` a
-patch, and `!` or a `BREAKING CHANGE:` footer a major; `build`, `chore`, `ci`, `docs`, `refactor`, `test` and the rest bump nothing.
-See [`docs/release.md`](docs/release.md).
+patch, and `!` or a `BREAKING CHANGE:` footer a major; `build`, `chore`, `ci`, `docs`, `perf`, `refactor`, `revert`, `style` and
+`test` bump nothing. See [`docs/release.md`](docs/release.md).
+
+Pick the type by whether the change should ship, not by what kind of change it is. A performance improvement, a refactor or a revert
+that changes the shipped binary or image and that users should receive is a `fix` (or a `feat`). Use `perf`, `refactor`, `style` and
+`revert` only when the commit is deliberately not meant to trigger a release on its own.
 
 Pull requests are merged with merge commits; squash and rebase merging are disabled. Every commit in a pull request therefore lands
 on `master` as it is and counts toward the version, so each commit needs a correct type, not just the pull request as a whole. The

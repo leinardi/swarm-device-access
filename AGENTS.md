@@ -123,7 +123,7 @@ Skills live in `.agents/skills/` (symlinked as `.claude/skills`). Load them befo
 
 ## Quality rules not enforced by tooling
 
-- **Reuse before writing.** Check `go-style-guide` §20 for an existing helper (`logger.L`, `processor.IsMountSource`, `sleepCtx`, the
+- **Reuse before writing.** Check `go-style-guide` §18 for an existing helper (`logger.L`, `processor.IsMountSource`, `sleepCtx`, the
   backoff constants, the nil-safe `observability.Recorder`) before adding one.
 - **Fail closed.** An empty, unknown or malformed mode, config value or label denies or skips — it never falls back to wider device access.
 - **Deletion smell.** Removing a user-visible surface (flag, key, label, metric, documented behavior) and flipping its test to assert
@@ -138,6 +138,22 @@ footers. Enforced by the `conventional-pre-commit` `commit-msg` hook (`--force-s
 `perf`, `build`, `ci`, `chore`, `style`, `revert`. Breaking changes use `!` before `:` or a `BREAKING CHANGE:` footer. Release notes are
 not built from these messages: `gh release create --generate-notes` lists the merged pull requests by title. Examples: `fix(processor): skip unresolvable symlinks`, `ci(dependabot): add dhi registry`.
 
-Release versions are derived from the commit types since the last tag (`feat` minor, `fix` patch, `!`/`BREAKING CHANGE` major;
-anything else bumps nothing), so a wrong type ships a wrong version. PRs land as merge commits, so every commit counts, not just the
+Release versions are derived by `svu` from the commits since the last tag, so a wrong type ships a wrong version:
+
+| Release | Commit | Example |
+| --- | --- | --- |
+| major | any type with `!` before the colon, or a `BREAKING CHANGE:` footer | `feat(config)!: drop the legacy key` |
+| minor | `feat` | `feat(policy): add a device allowlist` |
+| patch | `fix` | `fix(processor): skip dangling links` |
+| none | everything else: `perf`, `refactor`, `build`, `ci`, `chore`, `docs`, `style`, `test`, `revert` | `perf(daemon): ...` |
+
+The highest bump among the commits wins; with only "none" commits since the last tag, a release with no version fails with
+"nothing to bump".
+
+**Pick the type by whether the change should ship, not by what kind of change it is.** Anything that changes the shipped binary or
+image and that users should receive is `fix` (or `feat`), even when it is a performance improvement, a refactor or a revert:
+`fix(daemon): arm the prune timer only while it has entries`, not `perf(daemon): ...`. Use `perf`, `refactor`, `style` and
+`revert` only when the commit is deliberately not meant to trigger a release on its own. A `revert` of a shipped `feat` or `fix` is
+itself a `fix`. `svu` matches `feat`/`fix` anywhere in the subject (e.g. `prefix:` counts as `fix:`), so avoid a word
+ending in `feat` or `fix` directly before a colon in other subjects. PRs land as merge commits, so every commit counts, not just the
 PR title. See [`docs/release.md`](docs/release.md).
