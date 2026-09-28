@@ -69,3 +69,12 @@ mk-common-update: ## Check for remote updates of shared .mk files
 # avoids make's "overriding recipe" warning and a duplicate `make help` entry.
 .PHONY: go-build
 go-build: export GOOS := linux
+
+# -----------------------------------------------------------------------------
+# Adding new targets
+# -----------------------------------------------------------------------------
+# Do NOT add recipes directly to this file. Instead:
+#   - Project-specific targets -> new .mk/<fragment>.mk added to MK_LOCAL_FILES
+#   - Generic targets (useful beyond this repo) -> new or updated .mk/<fragment>.mk
+#     added to MK_COMMON_FILES, then open a PR to port the change upstream at
+#     https://github.com/leinardi/make-common so mk-common-update keeps working.
