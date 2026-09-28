@@ -44,6 +44,14 @@ permissions:
 env:
   # Pinned by hand: dependabot does not track a `go install` argument.
   SVU_VERSION: v3.4.1
+  # The one definition of a release tag: vMAJOR.MINOR.PATCH, strict SemVer core
+  # with no leading zeros, no pre-release and no build metadata. Every lookup
+  # below filters the full tag list through this with grep -E, never through a
+  # glob: `v[0-9]*.[0-9]*.[0-9]*` also matches v1.2.3-rc.1, v1.2.3+meta and
+  # v1foo.2bar.3baz, any of which could otherwise become the current version or
+  # break version resolution, and a leading-zero tag like v01.2.3 would be a
+  # permanent malformed release.
+  RELEASE_TAG_REGEX: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
   APP_NAME: swarm-device-access
   IMAGE_REPO: ghcr.io/leinardi/swarm-device-access
   # The workflow every published artifact must come from. The guard job makes
@@ -206,29 +214,49 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Only vX.Y.Z tags are releases. `latest`, `v0` and friends are not, so
-          # every lookup below, svu's included, matches the release shape rather
-          # than "the nearest tag". svu would otherwise read a `v1` tag as v1.0.0.
-          RELEASE_TAGS='v[0-9]*.[0-9]*.[0-9]*'
+          # Only strict vX.Y.Z tags are releases (RELEASE_TAG_REGEX). `latest`,
+          # `v1`, pre-releases and malformed tags are not, so every lookup below
+          # filters the full tag list through the regex rather than taking "the
+          # nearest tag". Prints the highest release tag in its input, or nothing.
+          highest_release() {
+            { grep -E "$RELEASE_TAG_REGEX" || true; } | sort -V | tail -n1
+          }
+          # Whether the release tag $1 sits on HEAD.
+          on_head() {
+            git tag --points-at HEAD | { grep -E "$RELEASE_TAG_REGEX" || true; } | grep -qxF "$1"
+          }
 
           if [ -n "$RAW" ]; then
             VERSION="v${RAW#v}"
-            if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "Version must look like X.Y.Z or vX.Y.Z (got '$RAW')" >&2
+            if ! [[ "$VERSION" =~ $RELEASE_TAG_REGEX ]]; then
+              echo "Version must be X.Y.Z or vX.Y.Z with no leading zeros, no pre-release and no build metadata (got '$RAW')" >&2
               exit 1
             fi
             EXPLICIT=true
           else
+            # svu is given the exact tag to count from, never a glob. It matches
+            # --tag.pattern with a glob library against every tag, so a pattern
+            # would let a stray tag like v1.9.0-rc.1 become the current version.
+            # A strict tag holds only `v`, digits and dots, so as a glob it
+            # matches that one tag literally, and svu counts the commits since
+            # exactly that tag.
+            CURRENT=$(git tag --merged HEAD | highest_release)
+            if [ -z "$CURRENT" ]; then
+              echo "No vX.Y.Z release tag is reachable from this commit, so there is nothing to derive a version from. Re-run with an explicit version." >&2
+              exit 1
+            fi
+            VERSION=$(svu next --tag.pattern "$CURRENT")
+            if ! [[ "$VERSION" =~ $RELEASE_TAG_REGEX ]]; then
+              echo "svu derived '$VERSION' from $CURRENT, which is not a vX.Y.Z release tag." >&2
+              exit 1
+            fi
             # svu prints the current version unchanged, and exits 0, when no
             # feat/fix/breaking commit exists since the last tag. That is not a
             # release: say so rather than tagging the same tree twice - unless
             # that tag is on HEAD itself. Then this is "Re-run failed jobs" on a
             # run that derived its version and pushed the tag before failing, and
             # it must be able to finish what that run started.
-            CURRENT=$(svu current --tag.pattern "$RELEASE_TAGS")
-            VERSION=$(svu next --tag.pattern "$RELEASE_TAGS")
-            if [ "$VERSION" = "$CURRENT" ] \
-              && ! git tag --points-at HEAD --list "$RELEASE_TAGS" | grep -qxF "$VERSION"; then
+            if [ "$VERSION" = "$CURRENT" ] && ! on_head "$VERSION"; then
               echo "No feat/fix or breaking-change commit since ${CURRENT}, so there is nothing to bump. Re-run with an explicit version to force one." >&2
               exit 1
             fi
@@ -240,28 +268,38 @@ jobs:
           # misread a release cut from a commit that is already tagged with the
           # previous version.
           RECOVERY=false
-          if git tag --points-at HEAD --list "$RELEASE_TAGS" | grep -qxF "$VERSION"; then
+          if on_head "$VERSION"; then
             RECOVERY=true
           fi
 
           # The previous release, for the summary. On a recovery the tag being
-          # released is on HEAD already, so describing from HEAD would answer
-          # with that tag.
+          # released is on HEAD already, so looking from HEAD would answer with
+          # that tag. HEAD^ does not exist on a root commit, hence the fallback.
           if [ "$RECOVERY" = "true" ]; then
-            PREVIOUS=$(git describe --tags --abbrev=0 --match "$RELEASE_TAGS" "HEAD^" 2>/dev/null || true)
+            PREVIOUS=$({ git tag --merged "HEAD^" 2>/dev/null || true; } | highest_release)
           else
-            PREVIOUS=$(git describe --tags --abbrev=0 --match "$RELEASE_TAGS" 2>/dev/null || true)
+            PREVIOUS=$(git tag --merged HEAD | highest_release)
           fi
 
           # A version must be higher than every version already released.
           # Without this, an explicit v0.9.9 typed after v0.10.0 would create a
           # lower immutable tag. The one exception is the recovery re-run, which
           # reuses the version it failed on.
-          LATEST=$(git tag --list "$RELEASE_TAGS" --sort=-v:refname | head -n1)
+          LATEST=$(git tag --list | highest_release)
+          # A derived version counts from the highest release reachable from
+          # this commit. When the highest release overall is tagged on a commit
+          # outside this branch, that base is older: name it, so the failure
+          # explains itself.
+          off_branch_hint() {
+            if [ "$EXPLICIT" != "true" ] && ! git merge-base --is-ancestor "$LATEST" HEAD; then
+              echo "$LATEST is tagged on a commit that is not in this branch's history, so the version was derived from $CURRENT instead. Re-run with an explicit version higher than $LATEST." >&2
+            fi
+          }
           if [ -n "$LATEST" ]; then
             if [ "$VERSION" = "$LATEST" ]; then
               if [ "$RECOVERY" != "true" ]; then
                 echo "$VERSION is already released and does not point at this commit. Release a higher version." >&2
+                off_branch_hint
                 exit 1
               fi
               echo "Re-running the release of $VERSION, which already points at this commit."
@@ -269,6 +307,7 @@ jobs:
               HIGHEST=$(printf '%s\n%s\n' "$VERSION" "$LATEST" | sort -V | tail -n1)
               if [ "$HIGHEST" != "$VERSION" ]; then
                 echo "$VERSION is lower than the latest release $LATEST. Tags here are immutable, so only a higher version may be published." >&2
+                off_branch_hint
                 exit 1
               fi
             else
@@ -453,7 +492,7 @@ jobs:
           # tag is allowed to come back empty.
           REMOTE_TAGS=$(git ls-remote --tags --refs origin 'v*')
           HIGHEST_REMOTE=$(awk -F/ '{print $NF}' <<<"$REMOTE_TAGS" \
-            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | { grep -E "$RELEASE_TAG_REGEX" || true; } \
             | sort -V \
             | tail -n1)
 
@@ -696,7 +735,7 @@ jobs:
           # tag is allowed to come back empty.
           REMOTE_TAGS=$(git ls-remote --tags --refs origin 'v*')
           HIGHEST_REMOTE=$(awk -F/ '{print $NF}' <<<"$REMOTE_TAGS" \
-            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | { grep -E "$RELEASE_TAG_REGEX" || true; } \
             | sort -V \
             | tail -n1)
           if [ "$HIGHEST_REMOTE" != "$VERSION" ]; then
@@ -720,7 +759,7 @@ jobs:
           # tag is allowed to come back empty.
           REMOTE_TAGS=$(git ls-remote --tags --refs origin 'v*')
           HIGHEST_REMOTE=$(awk -F/ '{print $NF}' <<<"$REMOTE_TAGS" \
-            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | { grep -E "$RELEASE_TAG_REGEX" || true; } \
             | sort -V \
             | tail -n1)
           LATEST=false
@@ -747,7 +786,7 @@ jobs:
           # tag is allowed to come back empty.
           REMOTE_TAGS=$(git ls-remote --tags --refs origin 'v*')
           HIGHEST_REMOTE=$(awk -F/ '{print $NF}' <<<"$REMOTE_TAGS" \
-            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | { grep -E "$RELEASE_TAG_REGEX" || true; } \
             | sort -V \
             | tail -n1)
           if [ "$MOVED" = "true" ] && [ "$HIGHEST_REMOTE" != "$VERSION" ]; then

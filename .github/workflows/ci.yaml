@@ -13,6 +13,9 @@ permissions: {}
 
 jobs:
   actionlint:
+    # Reports inline PR review comments over a diff range; a manual dispatch has
+    # neither a pull request to comment on nor a base ref to diff against.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # reviewdog posts findings as pull request review comments
     # (-reporter=github-pr-review), not as checks.
@@ -27,13 +30,16 @@ jobs:
           fetch-depth: 0
 
       - name: Run actionlint via pre-commit + reviewdog
-        uses: leinardi/gha-pre-commit-reviewdog-actions/actionlint@61efb9b3eea9a6e0211fe0cff8dd811d1135b351 # v1.0.1
+        uses: leinardi/gha-pre-commit-reviewdog-actions/actionlint@68bf8e338b79df404181ceef655ae02f1c8edb8a # v1.0.2
         with:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   pre-commit-hooks:
+    # Reports inline PR review comments over a diff range; a manual dispatch has
+    # neither a pull request to comment on nor a base ref to diff against.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # reviewdog posts findings as pull request review comments
     # (-reporter=github-pr-review), not as checks.
@@ -48,7 +54,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run pre-commit hooks + reviewdog diff
-        uses: leinardi/gha-pre-commit-reviewdog-actions/pre-commit-hooks@61efb9b3eea9a6e0211fe0cff8dd811d1135b351 # v1.0.1
+        uses: leinardi/gha-pre-commit-reviewdog-actions/pre-commit-hooks@68bf8e338b79df404181ceef655ae02f1c8edb8a # v1.0.2
         with:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
@@ -113,6 +119,9 @@ jobs:
         run: make go-test
 
   markdownlint:
+    # Reports inline PR review comments over a diff range; a manual dispatch has
+    # neither a pull request to comment on nor a base ref to diff against.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # reviewdog posts findings as pull request review comments
     # (-reporter=github-pr-review), not as checks.
@@ -127,13 +136,16 @@ jobs:
           fetch-depth: 0
 
       - name: Run markdownlint-cli2 via pre-commit + reviewdog
-        uses: leinardi/gha-pre-commit-reviewdog-actions/markdownlint-cli2@61efb9b3eea9a6e0211fe0cff8dd811d1135b351 # v1.0.1
+        uses: leinardi/gha-pre-commit-reviewdog-actions/markdownlint-cli2@68bf8e338b79df404181ceef655ae02f1c8edb8a # v1.0.2
         with:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   shellcheck:
+    # Reports inline PR review comments over a diff range; a manual dispatch has
+    # neither a pull request to comment on nor a base ref to diff against.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # reviewdog posts findings as pull request review comments
     # (-reporter=github-pr-review), not as checks.
@@ -148,13 +160,16 @@ jobs:
           fetch-depth: 0
 
       - name: Run shellcheck via pre-commit + reviewdog
-        uses: leinardi/gha-pre-commit-reviewdog-actions/shellcheck@61efb9b3eea9a6e0211fe0cff8dd811d1135b351 # v1.0.1
+        uses: leinardi/gha-pre-commit-reviewdog-actions/shellcheck@68bf8e338b79df404181ceef655ae02f1c8edb8a # v1.0.2
         with:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   yamllint:
+    # Reports inline PR review comments over a diff range; a manual dispatch has
+    # neither a pull request to comment on nor a base ref to diff against.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # reviewdog posts findings as pull request review comments
     # (-reporter=github-pr-review), not as checks.
@@ -169,7 +184,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run yamllint via pre-commit + reviewdog
-        uses: leinardi/gha-pre-commit-reviewdog-actions/yamllint@61efb9b3eea9a6e0211fe0cff8dd811d1135b351 # v1.0.1
+        uses: leinardi/gha-pre-commit-reviewdog-actions/yamllint@68bf8e338b79df404181ceef655ae02f1c8edb8a # v1.0.2
         with:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
@@ -197,7 +212,7 @@ jobs:
           fetch-depth: 0
 
       - name: Validate the commit messages
-        uses: leinardi/gha-pre-commit-reviewdog-actions/conventional-commits@61efb9b3eea9a6e0211fe0cff8dd811d1135b351 # v1.0.1
+        uses: leinardi/gha-pre-commit-reviewdog-actions/conventional-commits@68bf8e338b79df404181ceef655ae02f1c8edb8a # v1.0.2
         with:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}

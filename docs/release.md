@@ -41,7 +41,9 @@ Semantic versioning, derived from [Conventional Commits](https://www.conventiona
 - `!` before the colon, or a `BREAKING CHANGE:` footer, is a major. While the version is still `0.x`, that means `1.0.0`: `svu`
   runs without `--v0`. Give an explicit `0.x` version to stay below `1.0.0`.
 
-Everything else (`build`, `chore`, `ci`, `docs`, `refactor`, `test` and so on) bumps nothing. When no commit since the last
+Everything else (`build`, `chore`, `ci`, `docs`, `perf`, `refactor`, `revert`, `style`, `test`) bumps nothing, so a
+performance improvement, refactor or revert that users should receive is committed as a `fix` (or `feat`); `perf`, `refactor`,
+`style` and `revert` are for changes deliberately not meant to trigger a release. When no commit since the last
 release is a `feat`, a `fix` or a breaking change, a run with no version **fails** with *"No feat/fix or breaking-change commit
 since `<tag>`, so there is nothing to bump. Re-run with an explicit version to force one."* Dependabot's Go module updates are
 committed as `fix(deps)`, so a dependency bump alone is enough for a patch release; its GitHub Actions, pre-commit and Docker
@@ -50,22 +52,33 @@ to ship.
 
 Whether derived or typed, the version must be **higher than every version already released**. Tags here are immutable, so
 publishing a `v0.9.9` after `v0.10.0` would create a permanent lower tag. The only version a run may reuse is the one it is
-recovering, which is exactly this version already sitting on `HEAD`.
+recovering, which is exactly this version already sitting on `HEAD`. A branch whose history does not contain the highest release — for example one tagged on a merge commit that was later
+rewritten — derives from an older base and so fails that check; the failure names the out-of-history tag, and an explicit version
+higher than it is the way out.
 
-Only tags of the shape `v[0-9]*.[0-9]*.[0-9]*` are releases. Every lookup matches that shape, `svu`'s included through
-`--tag.pattern`, so pointer tags such as `latest` or `v1` are never read as a version. `svu` is pinned in `SVU_VERSION` by hand,
-because Dependabot does not track a `go install` argument.
+Only strict `vMAJOR.MINOR.PATCH` tags are releases: `v`, then three dot-separated numbers, each either `0` or a number with no
+leading zero, and nothing after them. That is `RELEASE_TAG_REGEX` in the workflow,
+`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`. An explicit version must match it too, so `01.2.3`, `1.02.3`,
+`1.2.3-rc.1`, `1.2.3+meta`, `1.2` and `v1.2.3.4` are all refused. Every lookup (the current, the latest and the previous release,
+the recovery check and the remote checks before tagging and before moving the pointers) filters the full tag list through that
+regex, never through a glob. Pointer tags such as `latest` or `v1`, pre-release tags such as `v1.9.0-rc.1`, build-metadata tags
+such as `v1.9.0+meta` and malformed tags such as `v01.9.0` are ignored: they can never become the current version or stop the
+version from resolving.
+
+`svu` is given the exact tag to count from: the highest strict tag reachable from `HEAD`, passed literally as `--tag.pattern`.
+`svu` matches that option as a glob against every tag, and a glob such as `v[0-9]*.[0-9]*.[0-9]*` also matches `v1.2.3-rc.1` or
+`v1foo.2bar.3baz`. A strict tag holds only `v`, digits and dots, so as a glob it matches that one tag and nothing else. When no
+strict tag is reachable from `HEAD`, a run with no version fails and asks for an explicit one rather than letting `svu` guess.
+`svu` is pinned in `SVU_VERSION` by hand, because Dependabot does not track a `go install` argument.
 
 ### Stray local tags
 
-CI fetches only the tags on `origin`, so it is unaffected by anything in a local clone. A local `svu next` or `git describe` is not:
-an old tag that exists only locally is read like any other. Older clones can carry one such tag, `v1.0.0`, from the upstream fork
-(2023); it has the release shape, so `--tag.pattern` does not exclude it, and a local `svu current` then answers `v1.0.0`. Remove
-tags that are not on `origin` before reasoning about versions locally:
+CI fetches only the tags on `origin`, so it is unaffected by anything in a local clone. A local `svu next`, or the version step
+run by hand, is not: a strict tag that exists only locally is read like any other. There are no such tags in this repository's
+history today, but remove tags that are not on `origin` before reasoning about versions locally:
 
 ```bash
 git fetch --prune --prune-tags origin   # drops local tags that origin does not have
-git tag -d v1.0.0                       # or remove a single one
 ```
 
 ## Why the build happens before the tag
