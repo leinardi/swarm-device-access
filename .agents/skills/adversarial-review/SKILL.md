@@ -1,14 +1,14 @@
 ---
 name: adversarial-review
 description: >
-  Adversarial code review of a set of changes to this repo — working tree, staged
-  diff, a branch vs master, a commit range, or a PR. Language-agnostic (Go, bash,
-  YAML, Dockerfile, Makefile, docs). Loads the relevant swarm-device-access domain
-  skills for the paths that changed, hunts for real defects and device-access
-  widening, then reports ranked findings. Use whenever the user asks to review
-  changes/a diff/a PR/a branch, "check my work before committing", "is this ready to
-  merge", or "poke holes in this" — even if they don't name a language or say the
-  word "review".
+  Adversarial code review of changes to swarm-device-access — working tree, staged
+  diff, a branch vs master, a commit range, or a PR — in any language (Go, bash,
+  YAML, Dockerfile, Makefile, docs). Loads go-style-guide for Go and trust-boundary
+  for config, policy, label, launcher and deployment paths, hunts for real defects
+  and device-access widening, then reports ranked findings with a verdict. Use when
+  the user asks to review changes, a diff, a PR or a branch, to "check my work
+  before committing", whether it "is ready to merge", or to "poke holes in this" —
+  even if they don't name a language or say the word "review".
 ---
 
 # Adversarial Review — swarm-device-access
@@ -22,12 +22,25 @@ This skill is the **entry point for reviewing any change in this repo, in any la
 It does not replace the domain skills — it routes to them. The domain skills own the rules;
 this skill owns the mindset, the routing, and the report.
 
+Copy this checklist and tick items as you go:
+
+```text
+Review progress:
+- [ ] 1. Scope chosen; diff, stated intent and every changed file read in full
+- [ ] 2. Domain skills from §2 loaded for every changed path
+- [ ] 3. Repo invariants checked
+- [ ] 4. Adversarial passes run; every candidate confirmed or dropped
+- [ ] 5. Always-on passes (a)–(e) run
+- [ ] 6. Gates run; `git status` checked for hook rewrites; skipped gates marked unverified
+- [ ] 7. Report written: findings, open questions, verdict, gates run and not run
+```
+
 ---
 
 ## 1. Establish the diff (what am I reviewing?)
 
 Never review from memory or from the user's description of the change — read the actual
-diff. Pick the scope from what the user said, defaulting to the most useful:
+diff. Pick the scope from what the user said:
 
 | User intent | Command |
 | --- | --- |
@@ -36,6 +49,9 @@ diff. Pick the scope from what the user said, defaulting to the most useful:
 | a branch / "this PR" / "ready to merge" | `git diff master...HEAD` (merge-base diff; `master` is this repo's default branch) |
 | a specific commit range | `git diff <base>..<head>` |
 | a GitHub PR number | `gh pr view <n>` for intent, then `gh pr diff <n>` |
+
+If the user names no scope, review the uncommitted work (first row); if the tree is
+clean, review the branch against `master` (third row).
 
 Also read `git log --oneline` for the range and any linked issue/PR body — the stated
 **intent** is what you check the code against. A change that works but does something other
@@ -64,8 +80,8 @@ with care. Never reformat or relicense NVIDIA's copyright header block — a dif
 it is a finding, whatever else it does.
 
 No skill matches (bash, Makefile, `.mk/**`, plain YAML, Markdown, workflows)? Fall back to the
-language-agnostic checklist in §4 plus this repo's cross-cutting invariants in §3. **Same
-rigor** — an unmatched language is not a lighter review.
+passes in §4 plus the invariants in §3. **Same rigor** — an unmatched language is not a lighter
+review.
 
 ## 3. Repo invariants — check these on every review, whatever changed
 
@@ -74,19 +90,17 @@ These are the ways this codebase breaks that generic reviewers miss. Read
 
 - **The daemon only ever widens device access for `/dev` bind mounts that policy allows.** Every
   rule it writes must be backed by a container mount whose source resolves under `/dev` *and* by
-  the global and per-container allow/deny policy — `processor.IsMountSource` and
-  `policy.Global.DeviceAllowed`, both consulted by `processor.CollectMountRules`. **Any path
-  that grants a device not backed by a mount or an allow label is a top-severity finding**,
-  however clean the code is — the daemon runs privileged and every container on the node is in
-  its blast radius.
+  the global and per-container allow/deny policy — `processor.IsMountSource` for the bind
+  mount, and `policy.Global.Denied` / `Authorized` for every name the device was found by
+  (`processor.CollectMountRules`, `internal/processor/rules.go`). **Any path that grants a
+  device not backed by a mount or an allow label is a critical finding**, however clean the
+  code is — the daemon runs privileged and every container on the node is in its blast radius.
 - **Linux-only build tag.** Every file under `cmd/` and code under `internal/` that touches
   devices, cgroups or `unix.*` carries `//go:build linux`. A new file in that territory without
   the tag is a finding: `make go-build` still cross-compiles to Linux, but on a macOS/Windows host
   the untagged file is compiled alone against symbols that only the tagged files define, so
   `go vet`, golangci-lint and gopls break for the whole package there.
   Cross-platform helpers such as `internal/logger` do not need it.
-- **`internal/cgroup` provenance.** NVIDIA's Apache 2.0 header stays as it is — no reformatting,
-  no relicensing (see §2).
 - **Cgroup v2 applies swap, never stack.** `internal/cgroup` wraps the runtime's device filter in an
   owned block (`owned.go`) and swaps the wrapper in (`v2plan.go`, `v2ops.go`: atomic `BPF_F_REPLACE`
   where the kernel supports it, attach-then-detach otherwise), so an apply replaces this daemon's
@@ -102,37 +116,18 @@ These are the ways this codebase breaks that generic reviewers miss. Read
 - **The README is the user-facing source of truth.** The flag table, the container-label table
   and the docker-compose snippet in `README.md` must stay in sync with
   `cmd/swarm-device-access/flags.go`, `internal/config/loader.go` and the documented mounts.
-- **Conventional Commits with a scope** (`<type>(<scope>)[!]: <description>`), enforced by the
-  `conventional-pre-commit` hook with `--force-scope`. `svu` derives the release version from
-  them, so a wrong type ships a wrong version.
-- **depguard deny list** in `.golangci.yaml`: `github.com/sirupsen/logrus` outside
-  `internal/logger`, `github.com/pkg/errors`, the `github.com/instana/testify` fork, and
-  `github.com/docker/docker/…` (vulnerable in every version — the Docker SDK is
-  `github.com/moby/moby/client` + `github.com/moby/moby/api`). A new
-  import of any of them — or a `//nolint:depguard` to sneak one in — is a finding.
+- **Release bump.** `svu` derives the release version from the commit types, so check that
+  the type matches whether the change should ship (AGENTS.md, Commit messages).
+- **depguard.** No new import on the deny list in `go-style-guide` (*Forbidden packages*),
+  and no `//nolint:depguard` to sneak one in.
 
 ## 4. Adversarial passes — language-agnostic
 
 Do not skim for style. Run these passes, each with a "how would I make this fail" framing:
 
-- **Correctness / logic**: off-by-one, inverted conditions (`<` vs `<=`), wrong operator
-  precedence, negated guards, early returns that skip cleanup, copy-paste that kept the old
-  variable. Trace one concrete failing input end to end rather than asserting "looks fine".
-- **Boundaries & nil/empty**: empty slice/map/string, zero, negative, missing key, `nil`
-  receiver/pointer, unset optional, first/last element, single-element collection, nil and
-  empty treated as the same thing where they mean different things.
-- **Aliasing**: a returned slice or map that shares its backing store with internal state, so
-  a caller's write changes it; an `append` onto a slice another owner still holds.
-- **Errors**: swallowed errors, `err` checked then ignored, wrapped-but-not-returned, `%v`
-  where `%w` was needed so `errors.Is`/`errors.As` stop matching, wrong sentinel, panics on
-  attacker- or user-controlled input, partial writes left on the error path.
-- **Concurrency**: shared state without a lock, lock held across I/O or a channel op, goroutine
-  leak, context not honored, map written from two goroutines, TOCTOU between check and use.
-- **Resources**: unclosed file/conn/response body, an ignored `Close` error on a write, missing
-  `defer`, context/timer leak, unbounded growth, work inside a loop that belongs outside it.
-- **Security**: input reaching a command/path/query/HTML without validation, authz check
-  missing or after the effect, secret in a log or response, unsafe deserialization, missing
-  rate/size limits.
+- **Generic passes**: correctness and logic, boundaries and nil/empty, aliasing, error
+  handling, concurrency, resources and security. For each, name one concrete failing input and
+  trace it end to end rather than asserting "looks fine".
 - **Contract drift**: does the code do what the commit message / PR / issue claims? A public
   signature, flag, config key, label, metric, output format or error text changed without
   updating every consumer and the docs (§5 (e)).
@@ -141,23 +136,25 @@ Do not skim for style. Run these passes, each with a "how would I make this fail
   instead of the behavior they produced, or that was weakened/deleted to make the change pass —
   all findings. A bug fix with no regression test is a gap worth flagging.
 
-Prefer one confirmed, reproducible defect over ten vague "consider"s. If you cannot name the
-input and the resulting wrong behavior, it is not yet a finding — keep digging or drop it.
+For each candidate defect:
+
+1. Reproduce it with a focused test, or trace one concrete input through the code to the wrong
+   result.
+2. Confirmed: it is a finding. Record the input and the wrong behavior.
+3. Not confirmed: dig once more (callers, tests, config path). Still not confirmed: drop it.
+   A vague "consider" is not a finding.
 
 ## 5. Always-on passes
 
-The passes above are shaped by the diff. These run on **every** review, whatever changed,
-because each names a way a repository like this one loses something without anyone noticing.
+The passes above are shaped by the diff. These run on **every** review, whatever changed.
 
 ### (a) Trust boundary
 
-If the diff touches `internal/config/**`, `internal/policy/**`, the label handling or rule
-collection in `internal/processor/**`, `internal/launcher/**`, `deployments/**` or `examples/**`,
-load the `trust-boundary` skill and walk its items against the diff. Anywhere else, ask the one
-question it is built on: does this change create a new place where something from outside the
-daemon becomes something it believes — a Docker label that becomes a device rule, a config value
-or CLI flag that becomes a mode or a policy, a mount source that becomes a major/minor pair? If
-it does, the checklist applies there too.
+If §2 routed any changed path to `trust-boundary`, walk its items against the diff. Anywhere
+else, ask the one question it is built on: does this change create a new place where something
+from outside the daemon becomes something it believes — a Docker label that becomes a device
+rule, a config value or CLI flag that becomes a mode or a policy, a mount source that becomes a
+major/minor pair? If it does, the checklist applies there too.
 
 ### (b) Deletion smell
 
@@ -187,10 +184,11 @@ in this repo (copied from another project) is a finding too.
 ### (d) Cross-file duplication
 
 Before accepting a new helper, search for the one that already exists — in `internal/**` and
-`cmd/swarm-device-access/`, by *behavior*, not by the name the author chose. `go-style-guide` §18
-lists the helpers that already exist (the logger, the `/dev` mount check, context-aware waits,
-backoff, the nil-safe metrics recorder, test waits). Two implementations of the same rule drift
-apart, and the one the reviewer did not read is the one that keeps the bug.
+`cmd/swarm-device-access/`, by *behavior*, not by the name the author chose. The *Reuse before
+writing* table in `go-style-guide` lists the helpers that already exist (the logger, the `/dev`
+mount check, context-aware waits, backoff, the nil-safe metrics recorder, test waits). Two
+implementations of the same rule drift apart, and the one the reviewer did not read is the one
+that keeps the bug.
 
 ### (e) Docs drift for config and flags
 
