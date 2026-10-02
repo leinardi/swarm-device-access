@@ -1,12 +1,12 @@
 ---
 name: go-style-guide
 description: >
-  Project-specific Go coding rules for swarm-device-access. Apply whenever writing,
-  editing, or reviewing any .go file in this repository — new functions, new files,
-  bug fixes, refactors, test additions. The rules here are enforced by golangci-lint
-  (version 2, default: all linters) and the pre-commit hooks. Violations require
-  manual fixup after the fact, so internalise them up-front instead. Use this skill
-  proactively: consult it before generating Go code, not after lint fails.
+  Go coding rules for swarm-device-access: the golangci-lint v2 (default: all)
+  settings and how to satisfy them, //go:build linux tagging, the internal/cgroup
+  (NVIDIA-derived) lint exemptions, the helpers to reuse, test-wait classes and
+  context handling. Use when writing, editing or reviewing any .go file in
+  swarm-device-access — new code, bug fixes, refactors or tests — before generating
+  Go code, not after lint fails.
 ---
 
 # Go Style Guide — swarm-device-access
@@ -15,9 +15,9 @@ Rules derived from `.golangci.yaml` (golangci-lint v2, `default: all`) and verif
 against the existing codebase in `cmd/` and `internal/`. §1–§17 follow from the linters
 and the build, §18–§21 are review rules the linters cannot check.
 
-golangci-lint is not on `PATH` in every environment; run it through pre-commit
-(`pre-commit run golangci-lint-full --all-files`). Never commit with `--no-verify` —
-fix the underlying issue instead.
+golangci-lint is not on `PATH` in every environment; run it through pre-commit (see
+*Lint and test loop* at the end). Never commit with `--no-verify` — fix the underlying
+issue instead.
 
 Linters that are **disabled** in `.golangci.yaml`, so their rules do not apply:
 
@@ -27,7 +27,7 @@ Linters that are **disabled** in `.golangci.yaml`, so their rules do not apply:
 | `gomodguard` | Replaced by `gomodguard_v2`, which is enabled |
 | `gochecknoglobals` | Package-level lookup tables (`keyShapes`, `knownLabels`) and the logger singleton are intentional |
 | `nonamedreturns` | Named returns are allowed |
-| `wsl` | Whitespace style is enforced by `gofumpt` instead |
+| `wsl` | The deprecated v4 linter; its successor `wsl_v5` stays enabled |
 
 The formatters (`gci`, `gofmt`, `gofumpt`, `goimports`, `golines`) run in the
 `golangci-lint-fmt` hook and in CI.
@@ -36,33 +36,10 @@ The formatters (`gci`, `gofmt`, `gofumpt`, `goimports`, `golines`) run in the
 
 ## 1. Import grouping
 
-Three groups, separated by blank lines — this is enforced by both `gci` (explicit
-`sections: standard, default, prefix(github.com/leinardi/swarm-device-access)`) and
-`goimports` (`local-prefixes: github.com/leinardi/swarm-device-access`)
-simultaneously, and they must agree:
-
-```go
-import (
-    // Group 1: stdlib
-    "context"
-    "errors"
-    "fmt"
-
-    // Group 2: third-party (everything that is NOT this module)
-    "github.com/moby/moby/client"
-    "github.com/prometheus/client_golang/prometheus"
-    "golang.org/x/sys/unix"
-    "gopkg.in/yaml.v3"
-
-    // Group 3: local module (github.com/leinardi/swarm-device-access/...)
-    "github.com/leinardi/swarm-device-access/internal/cgroup"
-    "github.com/leinardi/swarm-device-access/internal/logger"
-)
-```
-
-Within each group imports are sorted alphabetically. A blank line between groups
-is required; no blank lines within a group. Getting this wrong triggers both
-`gci` and `goimports`.
+Three groups separated by blank lines — stdlib, third-party, then local
+`github.com/leinardi/swarm-device-access/...` — alphabetical within each group. `gci` and
+`goimports` both enforce it and the `golangci-lint-fmt` hook rewrites it. The one alias in
+use is `cerrdefs` for `github.com/containerd/errdefs`.
 
 ---
 
@@ -70,46 +47,30 @@ is required; no blank lines within a group. Getting this wrong triggers both
 
 ### 2a. No inline error assignment in `if` (`noinlineerr`)
 
-**Wrong:**
-
 ```go
+// Wrong
 if err := doSomething(); err != nil {
-```
 
-**Right:**
-
-```go
+// Right
 err := doSomething()
 if err != nil {
-```
+    return err
+}
 
-When a variable is already declared in the same scope, use `=` not `:=` for
-the second and later assignments:
-
-```go
-err := firstThing()
-if err != nil { ... }
-err = secondThing() // = not :=
-if err != nil { ... }
+err = secondThing() // = not := for the second and later assignments
 ```
 
 ### 2b. Wrap errors with `%w` (`errorlint`)
-
-Always wrap errors so callers can use `errors.Is`/`errors.As`:
 
 ```go
 return FileSchema{}, fmt.Errorf("read config file %q: %w", path, err)
 ```
 
-The prefix is a short, lowercase phrase naming the operation, not a full
-sentence: no capital letters, no trailing period.
-
-Use `errors.Is`/`errors.As` (or Go 1.26's `errors.AsType[T]`) for comparisons, never
-`==` on error values — `err113` flags that too. Docker API errors are classified with
-`cerrdefs.IsNotFound` (`github.com/containerd/errdefs`).
-
-Prefer flat code with early returns; no `else` after a `return` (`revive`'s
-`indent-error-flow`).
+The prefix is a short, lowercase phrase naming the operation, not a full sentence: no
+capital letters, no trailing period. Compare with `errors.Is`/`errors.As` (or the generic
+`errors.AsType[T]`), never `==` on error values. Docker API errors are classified with
+`cerrdefs.IsNotFound` (`github.com/containerd/errdefs`). Prefer flat code with early
+returns; no `else` after a `return` (`revive`'s `indent-error-flow`).
 
 ### 2c. Errors are sentinels, detail is wrapped (`err113`)
 
@@ -130,18 +91,7 @@ and say why (§3).
 
 ### 2d. Aggregating multiple errors
 
-Use `errors.Join`:
-
-```go
-var errs []error
-for _, item := range items {
-    processErr := process(item)
-    if processErr != nil {
-        errs = append(errs, fmt.Errorf("process %q: %w", item, processErr))
-    }
-}
-return errors.Join(errs...)
-```
+Use `errors.Join` over a slice of wrapped errors.
 
 ### 2e. Ignoring errors explicitly
 
@@ -162,30 +112,16 @@ _, _ = resp.Write([]byte("ok"))
 - **Explanation required**: every directive needs `// reason`
 - **No unused**: remove directives when the code no longer triggers that linter
 
-The explanation says why the fix does not apply here, not which rule fired (§19).
-
-### Inline (same-line) — for a single statement or return
-
-```go
-switch msg.Action { //nolint:exhaustive // the stream is filtered to these four actions
-```
-
-### Preceding-line — for a function or type declaration
+The explanation says why the fix does not apply here, not which rule fired (§19). A
+statement gets an inline directive; a function or type gets it on the preceding line:
 
 ```go
-//nolint:ireturn // processPinner is the seam that lets tests fake pidfds
-func (p *Processor) processPinner() processPinner {
+//nolint:gocritic // hugeParam: settings is passed by value on purpose, the result must not share it
+func mergeSettings(defaults settings, cliSet map[string]bool, file config.FileSchema) settings {
 ```
 
-### Multiple linters — comma-separated, no spaces
-
-```go
-//nolint:gocyclo,cyclop,gocognit // complexity is inherent: handles SIGHUP, reload, and logger update
-```
-
-Always name all linters that fire. If `gocyclo` AND `cyclop` both fire for a
-complex function, suppress both. Same for `gocyclo`/`cyclop`/`gocognit` when
-all three exceed their thresholds.
+Multiple linters are comma-separated with no spaces. Name all that fire: `gocyclo` and
+`cyclop` measure the same thing, and `gocognit` often joins them.
 
 ---
 
@@ -198,11 +134,8 @@ all three exceed their thresholds.
 | `gocognit` | 35 | Cognitive complexity |
 | `funlen` | 50 statements | Lines are disabled (`lines: -1`) |
 
-Prefer extracting helpers over suppressing. When suppression is the right call
-(e.g., a function that branches over many independent config fields), explain
-why in the nolint comment.
-
-Test files are exempt from `funlen`, `gocognit`, `gocyclo`, `maintidx` and the
+Prefer extracting helpers over suppressing; when suppression is the right call, the
+nolint comment says why. Test files are exempt from `funlen`, `gocognit`, `gocyclo`, `maintidx` and the
 `cyclop` "calculated cyclomatic complexity" check; `internal/cgroup/` is exempt
 from most of them too (§17).
 
@@ -222,37 +155,28 @@ const (
 )
 ```
 
-`strings.SplitN` is excluded from mnd checks.
-
-Test files (`_test.go`) are fully exempt from `mnd`.
+`strings.SplitN` is excluded from mnd checks. Test files are fully exempt from `mnd`.
 
 ---
 
 ## 6. Type aliases
 
-Use `any` instead of `interface{}`. `gofmt` rewrites `interface{}` → `any`
-automatically, but write `any` in new code to avoid the formatter changing
-your diff.
+Use `any` instead of `interface{}`; `gofmt`'s rewrite rule changes it anyway.
 
 ---
 
 ## 7. Struct size (`gocritic hugeParam`)
 
-Structs passed by value that are over ~80 bytes trigger `hugeParam`. Pass by
-pointer instead — or add `//nolint:gocritic // <interface constraint reason>`
-when the signature is fixed by an interface (e.g., `slog.Handler`, which takes a
-`slog.Record` by value).
-
-The same applies to `rangeValCopy`: iterate large slices by index and take a
-pointer (`item := &items[idx]`).
+Structs over ~80 bytes passed by value trigger `hugeParam`. Pass by pointer — or suppress
+when an interface fixes the signature (`slog.Handler` takes a `slog.Record` by value) or a
+copy is the point (§3). The same applies to `rangeValCopy`: iterate large slices by index
+and take a pointer (`item := &items[idx]`).
 
 ---
 
 ## 8. Line length (`lll`)
 
-Max 140 characters. `golines` wraps automatically, but try to stay within
-bounds when writing new code — especially long function signatures and struct
-tags. Test files are exempt.
+Max 140 characters. `golines` wraps automatically. Test files are exempt.
 
 ---
 
@@ -290,13 +214,9 @@ This applies to all files under `cmd/`, `internal/cgroup/`, and
 
 ## 11. Comments and `godox`
 
-- `FIXME` is flagged by `godox`. Do not leave `FIXME` comments in committed code.
-- `TODO` is allowed.
-- Comment style: gocritic's `whyNoLint` check is disabled, but all `//nolint`
-  directives still need an explanation per nolintlint's `require-explanation` setting.
-
-Doc comments:
-
+- `FIXME` is flagged by `godox`. `TODO` is allowed.
+- gocritic's `whyNoLint` check is disabled, but every `//nolint` still needs an
+  explanation (`require-explanation`).
 - Every exported function, type, and variable has a doc comment beginning with
   the symbol name (`// IsMountSource reports whether path is /dev or a path under /dev/.`).
 - Unexported symbols get one when their purpose is not obvious from the name.
@@ -308,52 +228,38 @@ Doc comments:
 
 ## 12. Duplication (`dupl`)
 
-Avoid copy-pasting blocks longer than ~100 tokens. Extract shared logic into a
-helper. Test files are exempt from `dupl`.
+Avoid copy-pasting blocks longer than ~100 tokens (`threshold: 100`). Test files are
+exempt.
 
 ---
 
 ## 13. Shadowing (`govet shadow`)
 
-`govet` shadow detection is enabled. Avoid re-declaring variables with `:=`
-when they shadow an outer-scope variable. Prefer distinct names or
-restructuring to avoid shadows — this is why the codebase names errors after
-their source (`subErr`, `streamErr`, `inspectErr`) rather than reusing `err`.
+`govet` shadow detection is enabled. Name errors after their source rather than reusing
+`err` in a nested scope: `subErr`, `streamErr`, `inspectErr`.
 
 ---
 
 ## 14. Variable naming (`varnamelen`)
 
-Short variable names are fine in tight scopes (loop indices `i`, `k`, map
-values `v`). `varnamelen` flags a name shorter than 3 characters whose last use
-is more than 5 lines from its declaration (its defaults: `min-name-length: 3`,
-`max-distance: 5`). Test files and `internal/cgroup/` are exempt.
+`varnamelen` flags a name shorter than 3 characters whose last use is more than 5 lines
+from its declaration (defaults: `min-name-length: 3`, `max-distance: 5`). Test files and
+`internal/cgroup/` are exempt.
 
-**Specific rules that bite most often:**
-
-- **Receivers are exempt**: `(g Global)`, `(c *coordinator)`, `(p *Processor)` — all fine.
-- **Parameters are checked like locals.** A one-letter parameter passes in a
-  three-line function and is flagged as soon as the body grows, so give
-  parameters ≥ 3-char descriptive names from the start:
+- **Receivers are exempt**: `(g Global)`, `(c *coordinator)`, `(p *Processor)` are fine.
+- **Parameters are checked like locals.** A one-letter parameter passes in a three-line
+  function and is flagged as soon as the body grows, so name them from the start:
 
   ```go
-  // Wrong — 's', 'c', 'l' are too short for params
+  // Wrong
   func ParseMode(s string) (Mode, error)
-  func (g Global) Enabled(c Container) bool
-  func parseGlobList(raw, l string) ([]string, error)
 
   // Right
   func ParseMode(modeStr string) (Mode, error)
-  func (g Global) Enabled(cpol Container) bool
-  func parseGlobList(raw, labelName string) ([]string, error)
   ```
 
-- **Local variables** follow the same distance rule: a variable named `c` that
-  is still used more than 5 lines later is flagged; rename it to reflect its type
-  or role (`cont`, `cfg`, `cpol`).
-
-Rule of thumb: if the name alone doesn't tell you what the variable holds,
-make it longer.
+Local variables follow the same distance rule; rename them to reflect their type or role
+(`cont`, `cfg`, `cpol`).
 
 ---
 
@@ -361,8 +267,8 @@ make it longer.
 
 The `modernize` linter (`newexpr` check) flags any function whose sole purpose
 is to return a pointer to its argument — the generic `func ptr[T any](v T) *T`
-included — at the declaration and at every call site. Go 1.26's `new` takes an
-expression, so no helper is needed:
+included — at the declaration and at every call site. The Go version in `go.mod` lets
+`new` take an expression, so no helper is needed:
 
 ```go
 // Wrong — flagged twice
@@ -384,8 +290,8 @@ is fine too, and reads better when the value is computed or used more than once.
 
 ## 16. Constant strings (`goconst`)
 
-String literals appearing 3+ times with length ≥ 2 should be extracted to a
-named constant. Test files are exempt.
+String literals appearing 3+ times with length ≥ 2 become a named constant. Test files
+are exempt.
 
 ---
 
@@ -442,52 +348,14 @@ not that the linter complained.
 
 ## 20. Waiting in tests: classify before you write a sleep
 
-Tests reach for a sleep for five different reasons, and only some of them justify one: decide
-which of these a site is *before* writing or converting it — the class dictates the shape.
+Tests reach for a sleep for five different reasons, and only some of them justify one. A
+positive eventual (something another goroutine will do) never sleeps: inside
+`internal/daemon` it polls with `waitFor` (§18); every other sleep says in a comment which
+class it is.
 
-**Positive eventual — never a sleep.** "Something another goroutine will do has happened": an
-event was consumed, a container was inspected, a rule was applied. Wait on the signal, or poll
-with a deadline: a slow machine then costs milliseconds instead of flaking, and the failure names
-the contract that was broken rather than "unexpected nil". There is no shared `testsync` package
-here. Inside `internal/daemon`, reuse `waitFor(t, cond)` (2-second deadline, fails with
-`condition not met before deadline`). Anywhere else, add a small `waitFor`-style helper only when
-you convert a site that needs it — not speculatively. A hand-rolled `for { … deadline …
-time.Sleep }` in a test body is this class too — convert it.
-
-This class needs something *observable* to poll. Where the only honest observable is unexported,
-prefer a small read-only seam on the production type over poking at internals — or, as the
-daemon tests do, record calls in the fake (`recordingInspector.inspected`) and poll that.
-
-**Negative assertion — a sleep, bounded and commented.** "Nothing happens": no further pass
-starts, a reserved container is not retried. There is no condition to poll for; give the wrong
-behavior a bounded window to appear, then assert it did not, and say so in a comment so the next
-reader does not "fix" it into a `waitFor` that cannot exist.
-
-**Real elapsed window — a sleep, and the duration is the point.** An establishment timeout the
-event stream must outlive, a shared shutdown budget. Shortening it changes what is asserted. Name
-the window as a constant or a multiple of the interval under test (`2 * testCallTimeout`), never
-a bare literal chosen by feel.
-
-**Ordering barrier with no quiescence signal — a sleep, and say why no seam exists.** These are
-the ones worth revisiting when a seam appears; the comment is what makes that possible.
-
-**Poll tick inside an eventual-wait helper — already correct.** The sleep inside
-`waitForWithin`. Leave it.
-
-Two shapes are always wrong: a sleep whose comment says "give X time to Y" where Y is observable,
-and a sleep added to make a flaky test pass without deciding which class it belongs to.
-
-**Known follow-up.** Most surviving sleeps already say their class in a comment (the real elapsed
-windows in `internal/daemon/timeout_test.go` and `internal/launcher/launcher_test.go`, the negative
-assertion in `internal/processor/serialize_test.go`). Not yet converted or commented:
-
-- two hand-rolled deadline loops outside `internal/daemon`: `waitStuckConn` in
-  `internal/launcher/launcher_test.go`, and the inspect wait in
-  `TestReconcile_SerializesConfigLoadThroughApply` (`internal/processor/serialize_test.go`);
-- the negative-assertion sleep in `TestCoordinator_ReservedPendingDoesNotSpin`
-  (`internal/daemon/coordinator_test.go`), which has no comment saying so.
-
-Do not add to that list; a new test uses the shape its class dictates.
+Writing, converting or reviewing a wait or a sleep in a test? Read
+[references/test-waits.md](references/test-waits.md) first: it defines the five classes and
+the shape each one takes.
 
 ---
 
@@ -538,7 +406,17 @@ Do not add to that list; a new test uses the shape its class dictates.
 - [ ] No shadowed variables
 - [ ] Checked §18 for an existing helper before writing a new one
 - [ ] Comments say why, not what changed — history is in the commit body (§19)
-- [ ] Every `time.Sleep` in a test is classified per §20: a positive eventual polls with a
+- [ ] Every `time.Sleep` in a test is classified per §20 and
+      [references/test-waits.md](references/test-waits.md): a positive eventual polls with a
       deadline (`waitFor` in `internal/daemon`), and any surviving sleep says which of the other
       classes it is
 - [ ] I/O takes `ctx` first; shutdown is not logged or counted as a failure (§21)
+
+## Lint and test loop
+
+1. Run `pre-commit run golangci-lint-fmt --files <changed .go files>` and
+   `pre-commit run golangci-lint-full --files <changed .go files>` (or `--all-files`).
+2. Run `make go-vet` and `make go-test` (Linux only; on another host run the tests in a Linux
+   container, as AGENTS.md shows).
+3. Fix each report and re-run from step 1 until all of them are clean.
+4. Check `git status`: the formatter hook rewrites files in place, so review and keep its changes.

@@ -1,12 +1,13 @@
 ---
 name: trust-boundary
 description: >
-  Checklist for code that decides which devices a container may open, or what the
-  daemon believes about its own configuration. Apply before editing internal/config/**,
-  internal/policy/**, the label handling and rule collection in internal/processor/**,
-  the SIGHUP reload path in cmd/swarm-device-access/config.go, internal/launcher/**,
-  deployments/** (including the Dockerfile) or examples/**. Read it before writing the change, not after review
-  finds the hole.
+  Fail-closed checklist for swarm-device-access code that decides which devices a
+  container may open, or what the daemon believes about its own configuration: mode
+  and enum validation, untrusted labels, /dev-only rules, SIGHUP reload safety and
+  image privilege. Use when editing internal/config/**, internal/policy/**, the
+  label handling and rule collection in internal/processor/**, the SIGHUP reload
+  path in cmd/swarm-device-access/config.go, internal/launcher/**, deployments/**
+  (including the Dockerfile) or examples/**, before writing the change.
 ---
 
 # Trust Boundary — swarm-device-access
@@ -22,8 +23,9 @@ namespaces, and every rule it writes widens what a container can open on the hos
 here is not a failed request; it is a container reading a raw disk.
 
 Nothing here is enforced by a linter. The tests named under each item are what enforces it. Where
-an item notes a **known gap**, the code is as described but the test or check is missing — close it
-the next time you touch that file, and do not widen it in the meantime.
+an item notes a **known gap**, the test or check was missing when the item was written: verify it
+is still missing before relying on the note, close it the next time you touch that file, and do
+not widen it in the meantime.
 
 ---
 
@@ -41,7 +43,8 @@ unreachable in practice — which is exactly why it must stay: it is the second 
 new construction path skips validation.
 
 - [ ] Every new mode-like switch denies in its default branch.
-- [ ] A test asserts the empty value and an unknown value both deny. **Known gap:** `TestEnabled`
+- [ ] A test asserts the empty value and an unknown value both deny. **Known gap (verify before
+      relying on it):** `TestEnabled`
       (`internal/policy/policy_test.go`) covers only `ModeOptIn` and `ModeAll`, and
       `TestGlobalValidate` covers `"invalid"` but not `""` — add both cases.
 
@@ -77,8 +80,8 @@ which node runs the daemon or on whether a service inspect happened to succeed. 
 as attacker-controlled.
 
 - `policy.ParseContainer` rejects a non-boolean `enable` and any malformed glob in `device-allow`
-  or `device-deny`, naming the label. `Reconcile` then gives the container the **empty** device
-  set (warns, records `invalid_labels`, revokes any earlier grant) rather than falling back to the
+  or `device-deny`, naming the label. `Reconcile` then gives the container the **empty desired
+  set** (warns, records `invalid_labels`, revokes any earlier grant) rather than falling back to the
   global policy — a typo in a narrowing label must never widen access to "whatever the global
   allows", nor keep what an earlier, valid label granted.
 - Labels can only narrow: `policy.Global.DeviceAllowed` checks the global deny, the container deny,
@@ -91,7 +94,8 @@ Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`,
 `TestReconcile_IgnoresServiceLevelLabels` and
 `TestReconcile_WarnsOnUnknownContainerLabel`.
 
-- [ ] New label parsing returns an error on malformed input, and the caller applies the empty set.
+- [ ] New label parsing returns an error on malformed input, and the caller applies the empty
+      desired set.
 - [ ] A new label can only narrow; a test proves deny still beats allow with it set.
 - [ ] Unknown `swarm-device-access.*` keys on the container keep being reported
       (`policy.UnknownLabels`, warned by `Reconcile`), not silently accepted.
@@ -120,8 +124,8 @@ under `/dev/`. From there every name (the source, each walked entry, each symlin
   deny vote suppresses the device.
 
 A dangling name found while walking is skipped (a warning only when an explicit allow glob names it).
-Everything that leaves the set unknown is an entry in `MountResult.Errs` and makes the container's
-whole desired set empty (reason `incomplete_device_set`) until a retry succeeds: a missing mount
+Everything that leaves the set unknown is an entry in `MountResult.Errs` and gives the container the
+empty desired set (reason `incomplete_device_set`) until a retry succeeds: a missing mount
 source, an identity that cannot be established for a candidate policy would otherwise grant, any
 walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
 Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName`, `TestCollect_*`,
@@ -129,16 +133,11 @@ Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName
 
 - [ ] No new code path turns a non-`/dev` source into a rule.
 - [ ] A new resolution step goes through `evaluateCandidate`; it skips a name that names nothing
-      under `/dev`, and anything it cannot establish is an error that empties the set — never a
-      fallback to path-only policy and never a silent skip.
+      under `/dev`, and anything it cannot establish is an error that yields the empty desired
+      set — never a fallback to path-only policy and never a silent skip.
 - [ ] Policy keeps judging the canonical identity: deny on every name, allow on the canonical and
       resolved names. An alias-level deny is only a reconciliation-time veto (a container can hide
       the alias between passes); the durable boundary is a glob on the canonical name.
-- [x] **Closed gap (containment):** mount sources and symlink targets are contained to `/dev` by
-      the lexical gate and `openat2 RESOLVE_BENEATH`, not by a prefix check on the unresolved path.
-- [x] **Closed gap (planted nodes):** a node planted in a world-writable `/dev` directory
-      (`/dev/shm`, `/dev/mqueue`) is judged by its sysfs `DEVNAME`, so `/dev/shm/x` made as `b 8:0`
-      is denied by a deny on `/dev/sd*` and not authorized by an allow on `/dev/shm/*`.
 
 ## 5. Hot reload never widens access on a parse error
 
@@ -195,15 +194,27 @@ nothing else in the runtime stage.
   shortcut — a "grant everything under the mount", a retry that skips the policy check, a
   dry-run path that writes anyway — is worth a container opening a device nobody allowed. See the
   device-access invariant in the `adversarial-review` skill.
-- **Never log or export a secret value.** The daemon handles none today — labels, mount paths and
-  device numbers are not secrets — so a change that starts reading one (registry credentials, a
-  token in a label) must keep it out of logs, metrics labels and error strings.
+- **Never log or export a secret value.** Labels, mount paths and device numbers are not secrets;
+  a change that starts reading one (registry credentials, a token in a label) must keep it out of
+  logs, metrics labels and error strings.
+
+## Verify
+
+After the change, run the tests named in each section you touched, then the whole suite; fix and
+re-run until green:
+
+1. `go test ./internal/policy ./internal/config ./internal/processor ./internal/launcher
+   ./cmd/swarm-device-access -run '<test names from the sections>' -v` (Linux only; on another
+   host run it in a Linux container, as AGENTS.md shows).
+2. `make go-test`.
+3. For a Dockerfile change, `make docker-build`.
 
 ## Checklist
 
 - [ ] Empty and unknown mode deny; a test covers both
 - [ ] Enum-like config and flags validated at load, by name
 - [ ] Malformed labels skip the container; labels only narrow; deny beats allow
-- [ ] Only device nodes resolved beneath `/dev` become rules; an unknown identity or walk empties the set
+- [ ] Only device nodes resolved beneath `/dev` become rules; an unknown identity or walk yields the
+      empty desired set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional
