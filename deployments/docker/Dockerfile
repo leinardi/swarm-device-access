@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-# Base images, and the Dockerfile frontend above, are pinned as
-# tag@sha256:<index digest>, so a rebuild of the same commit (a release
-# recovery, for one) uses the same bases and the same frontend. Dependabot's
-# docker ecosystem updates the base images' tag and digest together, through
-# reviewed PRs; the frontend pin is updated by hand.
+# The Dockerfile frontend above is pinned as tag@sha256:<index digest>, so a
+# moved 1.7 tag cannot change how this file is built; it is updated by hand.
+#
+# Base images are pinned by tag, not by digest: dhi.io republishes its tags
+# often to ship security fixes, and a rebuild should pick those up.
 
 ########################
 # deps: download modules in a layer keyed on go.mod and go.sum only
 ########################
-FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev@sha256:8cb55f3251ea01b829c84cdf6dff4ceec6d17395f95bf7901b4992d2b25f4fdb AS deps
+FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev AS deps
 WORKDIR /src
 RUN --mount=type=cache,target=/var/cache/apk \
 	apk add --no-cache git
@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
 # runtime: dhi.io hardened static base (distroless-style, no shell).
 # The daemon binary is CGO_ENABLED=0 so no libc is required.
 ########################
-FROM dhi.io/static:20250419@sha256:98ef7a853608577e8d66dad1d25ada75d745d782f28d84e9ecfb85dfeb1f9c98
+FROM dhi.io/static:20250419
 
 # hadolint ignore=DL3050
 LABEL org.opencontainers.image.title="swarm-device-access" \
