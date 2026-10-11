@@ -12,6 +12,9 @@ Any HTML comment will be stripped when the markdown is rendered, so you don't ne
 - [ ] I am targeting the `master` branch
 - [ ] I have **rebased** this branch on top of the destination branch
 - [ ] I have executed `make check` locally *before creating the commit* and it has run successfully
+- [ ] Each commit type matches whether the change ships: `fix`/`feat` for anything users should
+  receive in the binary or the image, a non-release type otherwise (see `AGENTS.md`, Commit
+  messages)
 - [ ] I have performed a self-review of my own code
 - [ ] There are no `WIP` commits in this PR
 
