@@ -79,6 +79,19 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # Every in-file suppression is counted per rule against .suppressions-baseline, and a commit
+      # that adds one must change the baseline too (AGENTS.md). Always runs: the ratchet reads the
+      # whole tree and the staged diff, and a commit that touches no source at all can still
+      # delete the baseline out from under it.
+      - id: check-suppressions
+        name: suppression ratchet
+        entry: scripts/check-suppressions.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        # always_run makes this hook eligible at every installed stage, and commit-msg is one of
+        # them; pinned so the whole-tree scan runs once.
+        stages: [pre-commit]
       # Dependency-change check, and nothing more. It runs the same target as `make audit-deps` --
       # the full source-aware govulncheck scan over every package plus the banned-module check --
       # but only when go.mod or go.sum change, which is what limits it: it catches a bad upgrade
