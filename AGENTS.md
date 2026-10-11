@@ -14,10 +14,14 @@ Build / test / vet — uses Make wrappers around `go`:
 make go-build      # cross-compiles to Linux into ./dist/ (works from macOS/Win)
 make go-test       # CGO_ENABLED=1 go test -race ./...
 make go-vet
+make go-vet-integration  # go vet -tags=integration over test/integration (no Docker needed)
+make go-lint       # golangci-lint v2, all linters, at the pre-commit pin
+make verify-go     # go-build, go-test, go-vet, go-vet-integration, go-lint
 make go-tidy       # go mod tidy + go mod verify
-make audit-deps    # govulncheck + banned-module check (network required); also runs in CI and as a pre-commit hook on go.mod/go.sum changes
-make check         # pre-commit on all files
+make audit-deps    # govulncheck -test + banned-module check (network required); also runs in CI and as a pre-commit hook on go.mod/go.sum changes
+make check         # pre-commit on all files: the authoritative local gate, as CI's pre-commit-all
 make check-stage   # pre-commit on staging area only
+make pre-commit-install  # install the pre-commit and commit-msg hooks
 make docker-build
 make docker-run    # runs image locally with required host bind mounts
 ```
@@ -43,7 +47,24 @@ docker run --rm -v $PWD:/work -w /work golang:1.26 go test ./...
 ```
 
 The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on first run. To
-refresh: `make mk-common-update`.
+refresh: `make mk-common-update`. Repo-local targets go in their own `.mk/<fragment>.mk`, listed in
+the Makefile's `MK_LOCAL_FILES`; never add recipes to the Makefile itself.
+
+The meta-tests under `test/` (all untagged, no Docker) guard the tooling itself: `test/toolchain`
+(the Go line, the hadolint pin, flags that make a gate pass on nothing, Docker kept out of untagged
+tests), `test/dockerfiles`, `test/docs` (relative links), `test/suppressions` and
+`test/licenseheaders` (the two check scripts), with the helpers in
+`test/internal/{gitenv,toolgate}`. `make go-test` runs them;
+`SDA_REQUIRE_TOOLS=1 go test ./test/...` turns a missing hadolint into a failure instead of a skip,
+as CI's `repo-gates` job does.
+
+### Generated or vendored: never hand-edit
+
+- `.mk/{docker,help,go,password,pre-commit}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
+  make-common (under its MIT license) and refreshed with `make mk-common-update`; a change is
+  ported upstream.
+- `internal/cgroup/{api,ebpf,v1,v2}.go` are not vendored, but keep NVIDIA's copyright header
+  (see *Conventions worth knowing*).
 
 ## Architecture
 
@@ -134,6 +155,15 @@ symlink.
   reformat that block.
 - The README is the source of truth for the user-facing story; keep flag tables and the
   docker-compose snippet in sync if you change flags or mounts.
+- Every Go and shell source, Dockerfile, the Makefile and the repo-local `.mk` fragments carry the
+  Apache-2.0 header (the IntelliJ `Apache-2.0` copyright profile), with the year of the file's
+  first commit, after any shebang, build constraint or Dockerfile parser directive.
+  `scripts/check-license-headers.sh` (the `check-license-headers` hook) checks the whole tree;
+  NVIDIA's four files keep NVIDIA's header, and make-common's files are exempt.
+- The image's `dhi.io` bases are pinned by tag, not by digest, on purpose (the Dockerfile says
+  why); the BuildKit frontend is pinned by digest, and the golang tag names go.mod's exact Go
+  version. Dependabot takes only patch releases of golang: a new Go minor moves go.mod and the tag
+  together, by hand.
 
 ## Project skills
 
@@ -159,15 +189,48 @@ after review:
 - **Suppressions show their work.** A new `//nolint`, `# shellcheck disable=` or
   `# hadolint ignore=` explains why the fix does not apply here, not which rule fired.
 
+## Suppressions are ratcheted
+
+Every in-file suppression is counted per rule against `.suppressions-baseline` by the
+`check-suppressions` pre-commit hook (`scripts/check-suppressions.sh`): `//nolint:<linter>`,
+`# shellcheck disable=`, `# hadolint ignore=` and `# hadolint global ignore=`.
+
+Adding one is allowed, but never silently: the hook refuses a commit that adds a suppression line
+without changing the baseline in the same commit, including a swap or a moved file that leaves the
+count unchanged. Prefer fixing the finding. If a suppression really is right, write it with a
+reason, stage it, run `scripts/check-suppressions.sh --update`, and commit the baseline alongside
+it. A count that has fallen below its baseline fails the same way, with the same fix: the file
+describes the repository, not a past one.
+
+## Validation matrix
+
+Run before considering an edit done. `make check` applies to every row.
+
+| You edited | Run |
+| --- | --- |
+| `**/*.go` | `make verify-go`, then `make check-stage` |
+| `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
+| `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
+| `deployments/docker/Dockerfile`, `.hadolint.yaml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/` (hadolint runs in `make check`), `make docker-build` |
+| `.golangci.yaml` | `make go-lint` |
+| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/` |
+| `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/` |
+| `test/**` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `make go-lint` |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, hadolint pin, vacuous flags) |
+| `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `go test ./test/toolchain/`, `make help` |
+| `scripts/hooks/gofmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.go` file in Claude Code |
+| `README.md`, `docs/**/*.md`, other Markdown | `go test -count=1 ./test/docs/`; prose wraps at 100 columns (markdownlint in `make check`) |
+| `.agents/skills/**` | the Markdown row |
+
 ## Commit messages
 
 All commits MUST be Conventional Commits 1.0.0 **with a scope**:
 `<type>(<scope>)[!]: <description>`, optional blank-line body and footers. Enforced by the
-`conventional-pre-commit` `commit-msg` hook (`--force-scope`). Types: `feat`, `fix`, `docs`, `test`,
-`refactor`, `perf`, `build`, `ci`, `chore`, `style`, `revert`. Breaking changes use `!` before `:`
-or a `BREAKING CHANGE:` footer. Release notes are not built from these messages:
-`gh release create --generate-notes` lists the merged pull requests by title. Examples:
-`fix(processor): skip unresolvable symlinks`, `ci(dependabot): add dhi registry`.
+`conventional-pre-commit` `commit-msg` hook (`--force-scope`) and by the `conventional-commits` CI
+job. Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, `style`,
+`revert`. Breaking changes use `!` before `:` or a `BREAKING CHANGE:` footer. Release notes are not
+built from these messages: `gh release create --generate-notes` lists the merged pull requests by
+title. Examples: `fix(processor): skip unresolvable symlinks`, `ci(dependabot): add dhi registry`.
 
 Release versions are derived by `svu` from the commits since the last tag, so a wrong type ships a
 wrong version:
