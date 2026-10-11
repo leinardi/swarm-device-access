@@ -43,9 +43,12 @@ BANNED_GO_MODULES ?= github.com/docker/docker
 .PHONY: audit-deps
 audit-deps: audit-deps-go audit-deps-banned ## Scan Go dependencies for known vulnerabilities and banned modules (network required)
 
+# -test: the test files are scanned too, and -tags=integration takes in the integration suite. They
+# run on developer machines and in CI, the suite against a live Docker daemon, so a vulnerable
+# symbol a test reaches is exposure as well.
 .PHONY: audit-deps-go
-audit-deps-go: ## Run the pinned govulncheck over every Go package
-	$(GO) run $(GOVULNCHECK) ./...
+audit-deps-go: ## Run the pinned govulncheck over every Go package, tests included
+	$(GO) run $(GOVULNCHECK) -test -tags=integration ./...
 
 # go mod why -m prints "(main module does not need module <mod>)" when no package in the build
 # (tests included) imports the module; anything else is the import chain that pulls it in.
