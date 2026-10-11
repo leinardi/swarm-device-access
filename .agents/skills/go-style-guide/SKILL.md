@@ -134,10 +134,9 @@ Multiple linters are comma-separated with no spaces. Name all that fire: `gocycl
 | `gocognit` | 35 | Cognitive complexity |
 | `funlen` | 50 statements | Lines are disabled (`lines: -1`) |
 
-Prefer extracting helpers over suppressing; when suppression is the right call, the
-nolint comment says why. Test files are exempt from `funlen`, `gocognit`, `gocyclo`, `maintidx` and the
-`cyclop` "calculated cyclomatic complexity" check; `internal/cgroup/` is exempt
-from most of them too (§17).
+Prefer extracting helpers over suppressing; when suppression is the right call, the nolint comment
+says why. Test files are exempt from `funlen`, `gocognit`, `gocyclo`, `maintidx` and the `cyclop`
+"calculated cyclomatic complexity" check; `internal/cgroup/` is exempt from most of them too (§17).
 
 ---
 

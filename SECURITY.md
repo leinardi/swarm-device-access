@@ -6,8 +6,10 @@
 
 - Connects to the host Docker socket (`/var/run/docker.sock`) and subscribes to container events.
 - Reads `/proc/<pid>/{cgroup,mountinfo}` for every starting container.
-- Writes eBPF `BPF_CGROUP_DEVICE` programs into the host cgroup v2 hierarchy, or writes to `devices.allow` and `devices.deny` on cgroup v1 hosts.
-- Requires `privileged: true`, `cgroupns: host`, `pid: host`, `userns: host`, and bind mounts of the host `/sys` and `/dev`.
+- Writes eBPF `BPF_CGROUP_DEVICE` programs into the host cgroup v2 hierarchy, or writes to
+  `devices.allow` and `devices.deny` on cgroup v1 hosts.
+- Requires `privileged: true`, `cgroupns: host`, `pid: host`, `userns: host`, and bind mounts of the
+  host `/sys` and `/dev`.
 
 The combination of `privileged: true`, host `/dev` bind mount, and host Docker
 socket is functionally equivalent to host-root access on the node. A compromised
@@ -53,16 +55,26 @@ Older releases are not patched.
 
 Use GitHub's private vulnerability reporting:
 
-1. Go to the [Security Advisories](https://github.com/leinardi/swarm-device-access/security/advisories) page.
+1. Go to the [Security
+   Advisories](https://github.com/leinardi/swarm-device-access/security/advisories) page.
 2. Click **Report a vulnerability**.
 3. Fill in the description, affected versions, and reproduction steps.
 
-Expected response time: acknowledgment within 7 days, patch or mitigation plan within 30 days for confirmed issues.
+Expected response time: acknowledgment within 7 days, patch or mitigation plan within 30 days for
+confirmed issues.
 
 ## Known design constraints
 
-- The daemon must run as root. Dropping to a minimal capability set (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_ADMIN`, `CAP_SYS_RESOURCE`) is theoretically possible but has not been tested across kernel versions and is not supported at this time.
-- The daemon uses `privileged: true` in the reference Swarm deployment, where an unprivileged launcher service (`swarm-device-access launch`) creates it through the Docker socket from the launcher's own image. Swarm services do support `cap_add` (Docker Engine 20.10 and newer), but not the host cgroup, PID and user namespaces the daemon also needs, which is why the launcher exists. The launcher itself holds the Docker socket, so it is host-root equivalent too. The privileged set the daemon gets is fixed in `daemonSpec` (`internal/launcher/spec.go`). Outside Swarm, explicit capabilities could be used instead of `privileged`; that is not tested or supported (see above).
+- The daemon must run as root. Dropping to a minimal capability set (`CAP_BPF`, `CAP_PERFMON`,
+  `CAP_SYS_ADMIN`, `CAP_SYS_RESOURCE`) is theoretically possible but has not been tested across
+  kernel versions and is not supported at this time.
+- The daemon uses `privileged: true` in the reference Swarm deployment, where an unprivileged
+  launcher service (`swarm-device-access launch`) creates it through the Docker socket from the
+  launcher's own image. Swarm services do support `cap_add` (Docker Engine 20.10 and newer), but not
+  the host cgroup, PID and user namespaces the daemon also needs, which is why the launcher exists.
+  The launcher itself holds the Docker socket, so it is host-root equivalent too. The privileged set
+  the daemon gets is fixed in `daemonSpec` (`internal/launcher/spec.go`). Outside Swarm, explicit
+  capabilities could be used instead of `privileged`; that is not tested or supported (see above).
 - **cgroup v1: grants made by a previous daemon instance are not revoked.** On cgroup v1 the daemon
   can only tell its own `devices.allow` exceptions from the runtime's through an in-memory ledger. A
   restarted daemon starts with an empty ledger, so exceptions its predecessor added look like the
@@ -74,4 +86,6 @@ Expected response time: acknowledgment within 7 days, patch or mitigation plan w
   (it runs unprivileged in tests), so grants left by a previous live run stay until a live start
   or a container restart; the daemon warns about this at every dry-run start. Restart live with a
   narrower policy, or restart the affected containers, to take grants back.
-- The cgroup BPF code in `internal/cgroup/` is derived from [NVIDIA's container toolkit](https://github.com/NVIDIA/libnvidia-container) (Apache 2.0). Security issues in that code should also be reported to NVIDIA.
+- The cgroup BPF code in `internal/cgroup/` is derived from [NVIDIA's container
+  toolkit](https://github.com/NVIDIA/libnvidia-container) (Apache 2.0). Security issues in that code
+  should also be reported to NVIDIA.

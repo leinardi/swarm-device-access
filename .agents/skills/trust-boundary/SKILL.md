@@ -55,13 +55,14 @@ fixed set, it must be rejected at load time, naming the key and the bad value.
 
 `policy.ParseMode` rejects an unknown `policy-mode`, and `policy.Global.Validate` wraps glob errors
 as `device-allow: …` / `device-deny: …` via `policy.ValidateGlobs`. `run` in
-`cmd/swarm-device-access/main.go` calls `Validate` and `config.ValidateEnums` (log-format, log-level,
-policy-mode) on the effective values after `applyFileConfig` merges the file into the flags, and exits
-`1` with `invalid config: …` on failure. `config.LoadFile` (`internal/config/loader.go`) is strict: it
-checks every known key's exact YAML shape (following aliases; explicit `null`, a quoted `"yes"` for a
-bool and `[null]` in a list are errors), refuses merge keys, unknown keys and a second document, and
-validates the enums; any failure makes the daemon exit `1` with `config file error: …`. Covered by
-`TestGlobalValidate`, `TestValidateGlobs`, `TestLoadFile_*` and `TestValidateEnums`.
+`cmd/swarm-device-access/main.go` calls `Validate` and `config.ValidateEnums` (log-format,
+log-level, policy-mode) on the effective values after `applyFileConfig` merges the file into the
+flags, and exits `1` with `invalid config: …` on failure. `config.LoadFile`
+(`internal/config/loader.go`) is strict: it checks every known key's exact YAML shape (following
+aliases; explicit `null`, a quoted `"yes"` for a bool and `[null]` in a list are errors), refuses
+merge keys, unknown keys and a second document, and validates the enums; any failure makes the
+daemon exit `1` with `config file error: …`. Covered by `TestGlobalValidate`, `TestValidateGlobs`,
+`TestLoadFile_*` and `TestValidateEnums`.
 
 - [ ] A new enum-like key or flag is checked in `Validate` (or an equivalent load-time check) with
       a table test covering an unknown value.
@@ -115,19 +116,19 @@ under `/dev/`. From there every name (the source, each walked entry, each symlin
 - `openat2` beneath a `/dev` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (the `devFS`
   seam in `devfs.go`): no symlink step can leave `/dev`. An absolute link back into `/dev` is
   followed by hand, bounded to 40 hops; any other escape is skipped (a warning only when an explicit
-  allow glob names it, as for a dangling name; the skip itself never depends on the log level). The daemon
-  refuses to start without `openat2` (`ProbeOpenat2`);
+  allow glob names it, as for a dangling name; the skip itself never depends on the log level). The
+  daemon refuses to start without `openat2` (`ProbeOpenat2`);
 - `fstat` on that descriptor gives the device number, and sysfs `DEVNAME` gives the canonical name,
   so a node planted under `/dev/shm` is judged as the device it is;
 - `Denied` is checked on the alias, the resolved and the canonical name, `Authorized` on the
   canonical and the resolved name; candidates are aggregated per device across all mounts, and one
   deny vote suppresses the device.
 
-A dangling name found while walking is skipped (a warning only when an explicit allow glob names it).
-Everything that leaves the set unknown is an entry in `MountResult.Errs` and gives the container the
-empty desired set (reason `incomplete_device_set`) until a retry succeeds: a missing mount
-source, an identity that cannot be established for a candidate policy would otherwise grant, any
-walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
+A dangling name found while walking is skipped (a warning only when an explicit allow glob names
+it). Everything that leaves the set unknown is an entry in `MountResult.Errs` and gives the
+container the empty desired set (reason `incomplete_device_set`) until a retry succeeds: a missing
+mount source, an identity that cannot be established for a candidate policy would otherwise grant,
+any walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
 Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName`, `TestCollect_*`,
 `TestProcessor_*EmptiesTheSet` and `TestRealDevFS_Openat2Containment`.
 
@@ -180,8 +181,8 @@ owning launcher is confirmed gone — never on a transient error, and never a fo
 nothing else in the runtime stage.
 
 - [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
-      `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is truly needed, the
-      README and `AGENTS.md` runtime requirements change in the same commit.
+      `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is
+      truly needed, the README and `AGENTS.md` runtime requirements change in the same commit.
 - [ ] The DBus mount is never made mandatory (`-dbus` stays off by default).
 - [ ] A Dockerfile change is checked with `make docker-build`.
 - [ ] Nothing secret is baked into a layer: build args and `COPY` sources are not a secret store.
