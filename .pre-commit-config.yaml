@@ -68,6 +68,16 @@ repos:
         additional_dependencies: ["prettier@3.9.9"]
         files: \.(yml|yaml)$
         args: ["--write"]
+      # The offline documentation check: every relative link and its fragment resolve. -count=1
+      # because the file list comes from git ls-files, which the test cache cannot see; always_run
+      # because deleting a linked page passes no file to the hook at all.
+      - id: docs-links
+        name: docs links
+        entry: go test -count=1 ./test/docs/
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # Every source file carries the Apache-2.0 header (scripts/check-license-headers.sh says
       # which files are governed). Reads the whole tree, so it always runs; pinned to one stage
       # because always_run makes a hook eligible at every installed stage, and commit-msg is one of
