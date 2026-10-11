@@ -3,8 +3,8 @@ name: go-style-guide
 description: >
   Go coding rules for swarm-device-access: the golangci-lint v2 (default: all)
   settings and how to satisfy them, //go:build linux tagging, the internal/cgroup
-  (NVIDIA-derived) lint exemptions, the helpers to reuse, test-wait classes and
-  context handling. Use when writing, editing or reviewing any .go file in
+  (NVIDIA-derived) lint exemptions, nolint directives and the suppression ratchet,
+  the helpers to reuse, test-wait classes and context handling. Use when writing, editing or reviewing any .go file in
   swarm-device-access — new code, bug fixes, refactors or tests — before generating
   Go code, not after lint fails.
 ---
@@ -31,6 +31,11 @@ Linters that are **disabled** in `.golangci.yaml`, so their rules do not apply:
 
 The formatters (`gci`, `gofmt`, `gofumpt`, `goimports`, `golines`) run in the
 `golangci-lint-fmt` hook and in CI.
+
+`run.build-tags` is `integration`, so the linter also loads `test/integration`; code behind
+that tag is linted like everything else. `exclusions.generated` is `strict`: only a file with
+the standard `// Code generated ... DO NOT EDIT.` header is skipped, and the repository has
+none. The `fixturecapture` file in `internal/cgroup` is behind a tag the linter does not load.
 
 ---
 
@@ -123,6 +128,15 @@ func mergeSettings(defaults settings, cliSet map[string]bool, file config.FileSc
 Multiple linters are comma-separated with no spaces. Name all that fire: `gocyclo` and
 `cyclop` measure the same thing, and `gocognit` often joins them.
 
+**Suppressions are ratcheted.** [`.suppressions-baseline`](../../../.suppressions-baseline) holds
+one count per rule (`nolint/<linter>`, plus the shellcheck and hadolint families).
+`scripts/check-suppressions.sh` runs as the `check-suppressions` pre-commit hook and refuses a
+count above its baseline, a rule the baseline does not know, a count below its baseline (the file
+must describe the tree), and a staged diff that adds a suppression line without also changing the
+baseline, a swap within one rule included. Every new, moved or removed suppression therefore needs
+`scripts/check-suppressions.sh --update`, committed with the change that earned it. Raising a count
+needs a reviewer's agreement; the baseline file is what they read.
+
 ---
 
 ## 4. Complexity limits
@@ -208,6 +222,12 @@ All Linux-specific files start with `//go:build linux` as the very first line
 
 This applies to all files under `cmd/`, `internal/cgroup/`, and
 `internal/systemd/`. Test files mirror the build tag of the code they test.
+
+Tests that need a live Docker daemon carry `//go:build integration` and live in
+`test/integration`; `make go-test-integration` runs them. An untagged test never constructs a
+Docker client or runs `docker` (`test/toolchain` enforces it): it uses the fakes, with the
+`github.com/moby/moby/client` types only. `go vet` sees only untagged files, so
+`make go-vet-integration` vets the tagged suite.
 
 ---
 
@@ -399,6 +419,8 @@ the shape each one takes.
 - [ ] `any` not `interface{}`; `new(expr)`, not a pointer-boxing helper
 - [ ] Numbers other than 0–3 extracted to named constants (non-test code)
 - [ ] Each `//nolint` names specific linters and explains why the fix does not apply
+- [ ] A suppression added, moved or removed: `scripts/check-suppressions.sh --update`, and the
+      baseline staged with it (§3)
 - [ ] No `FIXME` comments
 - [ ] `//go:build linux` first line in Linux-specific files
 - [ ] Function statement count ≤ 50 (non-test, non-cgroup code)
@@ -414,8 +436,12 @@ the shape each one takes.
 ## Lint and test loop
 
 1. Run `pre-commit run golangci-lint-fmt --files <changed .go files>` and
-   `pre-commit run golangci-lint-full --files <changed .go files>` (or `--all-files`).
-2. Run `make go-vet` and `make go-test` (Linux only; on another host run the tests in a Linux
+   `pre-commit run golangci-lint-full --files <changed .go files>`, or `make go-lint` for the
+   whole module (the same pinned golangci-lint, with the `integration` tag).
+2. Run `make verify-go`: the build, `go test -race`, `go vet` of the untagged and the
+   `integration` packages, and the lint (Linux only; on another host run the tests in a Linux
    container, as AGENTS.md shows).
 3. Fix each report and re-run from step 1 until all of them are clean.
 4. Check `git status`: the formatter hook rewrites files in place, so review and keep its changes.
+   If you added or removed a suppression, run `scripts/check-suppressions.sh --update` and stage
+   `.suppressions-baseline`.

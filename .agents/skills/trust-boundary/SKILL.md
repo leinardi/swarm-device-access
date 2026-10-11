@@ -3,11 +3,12 @@ name: trust-boundary
 description: >
   Fail-closed checklist for swarm-device-access code that decides which devices a
   container may open, or what the daemon believes about its own configuration: mode
-  and enum validation, untrusted labels, /dev-only rules, SIGHUP reload safety and
-  image privilege. Use when editing internal/config/**, internal/policy/**, the
-  label handling and rule collection in internal/processor/**, the SIGHUP reload
-  path in cmd/swarm-device-access/config.go, internal/launcher/**, deployments/**
-  (including the Dockerfile) or examples/**, before writing the change.
+  and enum validation, untrusted labels, /dev-only rules, SIGHUP reload safety,
+  image privilege and pinning, and the opt-in HTTP listeners. Use when editing
+  internal/config/**, internal/policy/**, the label handling and rule collection in
+  internal/processor/**, the SIGHUP reload path in cmd/swarm-device-access/config.go,
+  internal/launcher/**, deployments/** (including the Dockerfile),
+  internal/observability/http.go or examples/**, before writing the change.
 ---
 
 # Trust Boundary — swarm-device-access
@@ -180,12 +181,35 @@ owning launcher is confirmed gone — never on a transient error, and never a fo
 `deployments/docker/Dockerfile` builds a static binary onto `dhi.io/static` with `USER 0` and
 nothing else in the runtime stage.
 
+What goes into the image is pinned too. The BuildKit frontend is pinned by digest; the `dhi.io`
+bases by literal tag, deliberately (dhi.io republishes its tags to ship security fixes, and the
+Dockerfile says so), with the golang tag on go.mod's exact Go version so the image builds with the
+toolchain CI tests and scans. `.dockerignore` keeps the agent tooling, docs and tests out of the
+build context. `test/dockerfiles` pins all of it, and runs hadolint against the seven required OCI
+labels of `.hadolint.yaml`.
+
 - [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
       `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is
       truly needed, the README and `AGENTS.md` runtime requirements change in the same commit.
 - [ ] The DBus mount is never made mandatory (`-dbus` stays off by default).
-- [ ] A Dockerfile change is checked with `make docker-build`.
+- [ ] A Dockerfile change is checked with `make docker-build` and `go test ./test/dockerfiles/
+      ./test/toolchain/`; no base reference holds a variable or `latest`, and the golang tag
+      follows go.mod.
 - [ ] Nothing secret is baked into a layer: build args and `COPY` sources are not a secret store.
+
+## 7. Listeners are opt-in and bounded before the first byte
+
+The daemon serves HTTP only when told to: `-metrics-addr` (metrics, `/healthz`, `/readyz`) and
+`-debug-addr` (pprof) are empty by default, and the launcher's daemon has network `none` unless
+`-host-network` is set. Whatever listens is reachable by anything on that network, so each server
+in `internal/observability/http.go` sets `ReadHeaderTimeout` and `ReadTimeout` before it accepts a
+connection: a client that never finishes its headers cannot hold a connection open. The handlers
+read no request body and take no input that becomes a decision.
+
+- [ ] A new listener is off by default, named by its own address flag, and documented with it.
+- [ ] Every `http.Server` sets `ReadHeaderTimeout` and `ReadTimeout`; a handler that reads a body
+      caps it (`http.MaxBytesReader`) before the first read.
+- [ ] Nothing served changes what the daemon grants: no endpoint takes a mode, a label or a path.
 
 ---
 
@@ -208,7 +232,7 @@ re-run until green:
    ./cmd/swarm-device-access -run '<test names from the sections>' -v` (Linux only; on another
    host run it in a Linux container, as AGENTS.md shows).
 2. `make go-test`.
-3. For a Dockerfile change, `make docker-build`.
+3. For a Dockerfile change, `make docker-build` and `go test ./test/dockerfiles/ ./test/toolchain/`.
 
 ## Checklist
 
@@ -219,3 +243,5 @@ re-run until green:
       empty desired set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional
+- [ ] Image inputs pinned: frontend by digest, bases by literal tag, golang on go.mod's Go
+- [ ] Listeners off by default and bounded by timeouts; no body read without a cap
