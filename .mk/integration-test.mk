@@ -75,6 +75,12 @@ go-test-integration: go-build $(if $(filter 1,$(SDA_IT_ENFORCE)),integration-ima
 	  $(if $(RUN),-run $(RUN),) \
 	  $(INTEGRATION_PKG)
 
+# go-vet sees only untagged files; this vets the integration suite, which needs no Docker to vet,
+# so a change that breaks it fails on any machine and not first where the suite runs.
+.PHONY: go-vet-integration
+go-vet-integration: ## Vet the integration-tagged test packages
+	$(GO) vet -tags=integration $(INTEGRATION_PKG)
+
 .PHONY: integration-image
 integration-image: ## Build the daemon image the enforcement test runs, as $(INTEGRATION_IMAGE)
 	$(MAKE) docker-build IMAGE_REPO=$(INTEGRATION_IMAGE_REPO) IMAGE_TAG=$(INTEGRATION_IMAGE_TAG)
