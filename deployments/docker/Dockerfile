@@ -20,12 +20,19 @@
 # moved 1.7 tag cannot change how this file is built; it is updated by hand.
 #
 # Base images are pinned by tag, not by digest: dhi.io republishes its tags
-# often to ship security fixes, and a rebuild should pick those up.
+# often to ship security fixes, and a rebuild should pick those up. The golang
+# tag names the exact Go version of the go directive in go.mod, so the image
+# builds with the toolchain CI tests and scans; Dependabot takes only its patch
+# releases, and a new Go minor moves go.mod and this tag together, by hand.
 
 ########################
 # deps: download modules in a layer keyed on go.mod and go.sum only
 ########################
-FROM --platform=$BUILDPLATFORM dhi.io/golang:1-alpine3.23-dev AS deps
+# An intermediate stage, never shipped: hadolint requires the labels of every
+# stage that no COPY --from names, and it does not count the build stage's
+# FROM deps as a use.
+# hadolint ignore=DL3049
+FROM --platform=$BUILDPLATFORM dhi.io/golang:1.26.9-alpine3.23-dev AS deps
 WORKDIR /src
 RUN --mount=type=cache,target=/var/cache/apk \
 	apk add --no-cache git
@@ -69,11 +76,17 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomodcache \
 # The daemon binary is CGO_ENABLED=0 so no libc is required.
 ########################
 FROM dhi.io/static:20250419
+ARG VERSION="dev"
+ARG COMMIT="none"
+ARG DATE="unknown"
 
-# hadolint ignore=DL3050
+# The seven OCI labels .hadolint.yaml requires (label-schema, strict-labels).
 LABEL org.opencontainers.image.title="swarm-device-access" \
 	org.opencontainers.image.description="Listens to Docker container-start events and injects cgroup v2 BPF device-allow rules for containers that bind-mount /dev/... paths" \
 	org.opencontainers.image.source="https://github.com/leinardi/swarm-device-access" \
+	org.opencontainers.image.version="${VERSION}" \
+	org.opencontainers.image.revision="${COMMIT}" \
+	org.opencontainers.image.created="${DATE}" \
 	org.opencontainers.image.licenses="Apache-2.0"
 
 # Copy the binary

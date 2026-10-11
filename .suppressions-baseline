@@ -6,9 +6,9 @@
 # changing this file, so raising a count is a visible act rather than a side effect.
 #
 # Regenerate with: scripts/check-suppressions.sh --update
-# reviewed 1, 2026-10-11
+# reviewed 2, 2026-10-11
 hadolint-ignore/DL3002	1
-hadolint-ignore/DL3050	1
+hadolint-ignore/DL3049	1
 nolint/containedctx	1
 nolint/dupword	1
 nolint/err113	14
