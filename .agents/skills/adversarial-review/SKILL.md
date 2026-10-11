@@ -55,7 +55,8 @@ clean, review the branch against `master` (third row).
 
 Also read `git log --oneline` for the range and any linked issue/PR body — the stated
 **intent** is what you check the code against. A change that works but does something other
-than what it claims is a finding.
+than what it claims is a finding, and so is a commit type that ships the wrong version (§3,
+*Release bump*): read every commit subject in the range, not only the PR title.
 
 Read every changed file in full, not just the hunks. A hunk looks correct in isolation and
 wrong against the 40 lines above it that git didn't show you. For non-trivial changes, also
@@ -74,10 +75,21 @@ green. Load only what the diff touches.
 | any `**/*.go` | `go-style-guide` | style/lint rules golangci-lint enforces, the helpers to reuse, test waits, context handling |
 | `internal/config/**`, `internal/policy/**`, `internal/processor/**` (label handling, rule collection), `cmd/swarm-device-access/config.go` (SIGHUP reload), `internal/launcher/**`, `deployments/**` (including `deployments/docker/Dockerfile`), `examples/**` | `trust-boundary` | fail-closed config and mode, label parsing, `/dev`-only rules, reload safety, image privilege |
 | `internal/cgroup/**` | `go-style-guide` + the note below | NVIDIA-derived BPF/cgroup code |
+| `test/**` meta-tests (`test/toolchain`, `test/dockerfiles`, `test/docs`, `test/suppressions`, `test/licenseheaders`, `test/internal/**`) | `go-style-guide`; the comment heading each test | a meta-test that can no longer fail is a finding (see below) |
+| `scripts/check-*.sh` | the script's header comment and its driver under `test/` | the check still fails on what it exists to stop |
+| `.golangci.yaml`, `.pre-commit-config.yaml`, `.hadolint.yaml`, `.suppressions-baseline` | `go-style-guide` (§3, the ratchet); `test/toolchain`, `test/dockerfiles` | no linter disabled or narrowed, no hook dropped; §5 (c) |
 
 **`internal/cgroup/**` is NVIDIA-derived code** (from k8s-device-plugin, Apache 2.0). Touch it
 with care. Never reformat or relicense NVIDIA's copyright header block — a diff that rewrites
 it is a finding, whatever else it does.
+
+A meta-test under `test/` guards a claim nothing else checks: the Go line and the hadolint pin,
+the Dockerfile's stages and labels, the relative links, the suppression and license-header
+checks, Docker staying out of untagged tests. Try to make the guarded thing go wrong and see
+whether the test still notices. A test that passes because its input is empty, its rule never
+ran or its tool was skipped (hadolint without `SDA_REQUIRE_TOOLS=1`) is a false pass, and so is
+one whose scratch repository runs git without `gitenv.Isolated()`, which under the commit hook
+acts on the real index.
 
 No skill matches (bash, Makefile, `.mk/**`, plain YAML, Markdown, workflows)? Fall back to the
 passes in §4 plus the invariants in §3. **Same rigor** — an unmatched language is not a lighter
@@ -117,7 +129,13 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   and the docker-compose snippet in `README.md` must stay in sync with
   `cmd/swarm-device-access/flags.go`, `internal/config/loader.go` and the documented mounts.
 - **Release bump.** `svu` derives the release version from the commit types, so check that
-  the type matches whether the change should ship (AGENTS.md, Commit messages).
+  every commit's type matches whether the change should ship (AGENTS.md, Commit messages).
+  Anything users should receive in the binary or the image is `fix` or `feat`, even a
+  performance change, a refactor or a revert of a shipped `feat`/`fix`; a `perf`, `refactor`,
+  `build`, `chore` or `docs` commit carrying it means it never ships on its own. A stray `!`
+  cuts a major. `svu` matches `feat`/`fix` anywhere before the colon, so a word such as
+  `prefix:` in a subject counts as `fix:`. Pull requests land as merge commits, so every commit
+  in the range counts, not just the PR title.
 - **depguard.** No new import on the deny list in `go-style-guide` (*Forbidden packages*),
   and no `//nolint:depguard` to sneak one in.
 
@@ -173,7 +191,10 @@ intent was. If one exists, is the diff removing exactly what that line retires a
 ### (c) A new suppression has to show its work
 
 Any new `//nolint:`, `# shellcheck disable=` or `# hadolint ignore=` is a standing decision to
-let a linter stay silent, and nothing in this repo ratchets their number. So demand the attempt:
+let a linter stay silent. The `check-suppressions` hook counts them per rule against
+`.suppressions-baseline` and refuses one added without a baseline change, so the count is
+reviewed; the reason is not. A baseline raised in the same diff is the thing to read. So demand
+the attempt:
 for a complexity or length rule, was the obvious extraction tried and what broke? For
 `wrapcheck`, why is wrapping wrong here? For `varnamelen`, why does the name have to be short?
 A suppression whose reason comment restates the rule instead of explaining why the fix does not
@@ -213,7 +234,8 @@ caused as a confirmed finding with the output attached:
 | any `**/*.go` | `make go-build`, `make go-vet`, `make go-test` (race detector on), then `make check` |
 | `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (needs Docker and privileges) — it runs `make go-build` first, then `go test -tags=integration ./test/integration/...`; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload` |
 | `go.mod` / `go.sum` | `make go-tidy` and `make audit-deps` (govulncheck plus the banned-module check; network required) |
-| `deployments/docker/Dockerfile` | hadolint via `make check`, plus `make docker-build` |
+| `deployments/docker/Dockerfile` | hadolint via `make check`, `go test ./test/dockerfiles/ ./test/toolchain/`, plus `make docker-build` |
+| `test/**`, `scripts/check-*.sh`, `.github/**`, `.pre-commit-config.yaml` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `pre-commit run actionlint --all-files` |
 | anything else | `make check` (pre-commit on all files) |
 
 The integration suite drives the binary in `dist/` (or `$SDA_TEST_BINARY`), not the package
