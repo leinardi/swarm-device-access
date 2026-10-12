@@ -265,16 +265,25 @@ the title becomes the commit subject, and a pull-request title check has to be a
 ## Mandatory setup: make the check blocking
 
 A failing CI job does not block a merge on its own: the `master` ruleset ("Protect default branch",
-id `16797240`) has no required status checks. Once the `conventional-commits` job has run at least
-once on a pull request (GitHub can only require a check whose context it has already seen), add it
-to that ruleset as a required status check, keeping every existing rule:
+id `16797240`) has no required status checks. The one check to require is `ci-result` in
+[`.github/workflows/ci.yaml`](../.github/workflows/ci.yaml). It needs `pre-commit-all`,
+`audit-deps`, `test`, `conventional-commits` and `repo-gates`, and fails unless each one succeeded;
+only `conventional-commits`, which runs on pull requests only, may be skipped, and only off a pull
+request. A new job therefore becomes required by joining `ci-result`'s `needs`, not the ruleset.
+The reviewdog jobs (`actionlint`, `pre-commit-hooks`, `markdownlint`, `shellcheck`, `yamllint`)
+are not needed by `ci-result`, so an annotation failure cannot block a merge: they duplicate
+`pre-commit-all` as inline comments. The `integration.yaml` workflow is a separate check.
+
+Once `ci-result` has run at least once on a pull request (GitHub can only require a check whose
+context it has already seen), add it to that ruleset as a required status check, keeping every
+existing rule:
 
 ```json
 {
   "type": "required_status_checks",
   "parameters": {
     "strict_required_status_checks_policy": false,
-    "required_status_checks": [{ "context": "conventional-commits", "integration_id": 15368 }]
+    "required_status_checks": [{ "context": "ci-result", "integration_id": 15368 }]
   }
 }
 ```

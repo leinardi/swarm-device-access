@@ -1,7 +1,7 @@
 name: CI
 
 # The authoritative checks run on every pull request and every push to master; the reviewdog jobs
-# annotate pull requests. ci-result stands for all of them as the one required check.
+# only annotate pull requests. ci-result is the one required check.
 on:
   pull_request:
   push:
@@ -315,19 +315,16 @@ jobs:
 
   # The one required check that stands for the rest: GitHub counts a skipped required job as
   # passing, so this job always runs and decides. On a pull request every needed job must succeed;
-  # on a push or a dispatch the pull-request-only jobs are skipped and the others must succeed. The
-  # integration workflow is a separate check.
+  # on a push or a dispatch conventional-commits, which only runs on pull requests, is skipped and
+  # the others must succeed. The reviewdog jobs (actionlint, pre-commit-hooks, markdownlint,
+  # shellcheck, yamllint) only annotate and are not needed: pre-commit-all runs the same hooks on
+  # every file. The integration workflow is a separate check.
   ci-result:
     if: always()
     needs:
       - pre-commit-all
-      - actionlint
-      - pre-commit-hooks
       - audit-deps
       - test
-      - markdownlint
-      - shellcheck
-      - yamllint
       - conventional-commits
       - repo-gates
     runs-on: ubuntu-latest
@@ -341,14 +338,13 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          pr_only='["actionlint","pre-commit-hooks","markdownlint","shellcheck","yamllint","conventional-commits"]'
-          failed="$(jq -r --arg event "${EVENT}" --argjson pr_only "${pr_only}" '
+          failed="$(jq -r --arg event "${EVENT}" '
             to_entries[]
             | select(.value.result != "success")
             | select(
                 (
                   $event != "pull_request"
-                  and (.key as $job | $pr_only | index($job))
+                  and .key == "conventional-commits"
                   and .value.result == "skipped"
                 ) | not
               )
