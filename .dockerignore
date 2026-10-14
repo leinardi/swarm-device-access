@@ -3,8 +3,11 @@
 .gitignore
 .gitattributes
 
-# CI / docs / misc
+# CI, docs, tests and agent tooling: none of it is an input of the image
 .github
+.claude
+.agents
+.serena
 docs
 examples
 test

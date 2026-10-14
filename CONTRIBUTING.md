@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-- Linux host (all device/cgroup/BPF code carries `//go:build linux`; building for Linux from macOS/Windows works via cross-compilation but tests require a Linux runner)
+- Linux host (all device/cgroup/BPF code carries `//go:build linux`; building for Linux from
+  macOS/Windows works via cross-compilation but tests require a Linux runner)
 - Go 1.26+
 - Docker (for running Linux tests from a non-Linux host and for building the container image)
 - [`pre-commit`](https://pre-commit.com/) — install hooks once with `make pre-commit-install`
@@ -33,13 +34,15 @@ make check           # runs the full pre-commit suite (golangci-lint, hadolint, 
 make check-stage     # same, but only on staged files
 ```
 
-CI runs the same checks on every pull request via `golangci-lint-full` in `.github/workflows/ci.yaml`.
+CI runs the same checks on every pull request via `golangci-lint-full` in
+`.github/workflows/ci.yaml`.
 
 ## Branch and PR conventions
 
 - Branch names: `feat/<short-description>`, `fix/<short-description>`, `chore/<short-description>`.
 - Keep PRs focused; one logical change per PR.
-- PR titles should be short and in the imperative mood: _Add metrics endpoint_, _Fix scanner.Err propagation_.
+- PR titles should be short and in the imperative mood: _Add metrics endpoint_, _Fix scanner.Err
+  propagation_.
 - All CI checks must pass before merge.
 
 ## `internal/cgroup/` — NVIDIA-derived code
@@ -50,21 +53,25 @@ The files in `internal/cgroup/` carry a `Copyright (c) 2021, NVIDIA CORPORATION`
 
 - Do not remove or modify the NVIDIA copyright header.
 - Do not relicense this code.
-- Keep diffs against the upstream (`NVIDIA/libnvidia-container` `src/nvcgo/internal/cgroup/`) minimal.
+- Keep diffs against the upstream (`NVIDIA/libnvidia-container` `src/nvcgo/internal/cgroup/`)
+  minimal.
 - Before proposing a change, check whether the upstream already fixed it.
-- If you fix a bug that also exists upstream, note the upstream file and line in your PR description, and consider sending a patch upstream.
-- If golangci-lint flags something in this directory, check whether the linter exclusion in `.golangci.yaml` covers it before adding a `//nolint` directive.
+- If you fix a bug that also exists upstream, note the upstream file and line in your PR
+  description, and consider sending a patch upstream.
+- If golangci-lint flags something in this directory, check whether the linter exclusion in
+  `.golangci.yaml` covers it before adding a `//nolint` directive.
 
 ## Commit messages
 
-All commits must follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) with a scope:
-`<type>(<scope>)[!]: <description>`. The `conventional-pre-commit` hook enforces this on `commit-msg`, so install the hooks with
-`make pre-commit-install` (it installs both the `pre-commit` and `commit-msg` hooks). Release notes are not generated from these
-messages: the release workflow runs `gh release create --generate-notes`, which lists the merged pull requests by title, so write PR
-titles for readers of the release notes.
+All commits must follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
+with a scope: `<type>(<scope>)[!]: <description>`. The `conventional-pre-commit` hook enforces this
+on `commit-msg`, so install the hooks with `make pre-commit-install` (it installs both the
+`pre-commit` and `commit-msg` hooks). Release notes are not generated from these messages: the
+release workflow runs `gh release create --generate-notes`, which lists the merged pull requests by
+title, so write PR titles for readers of the release notes.
 
-Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, `style`, `revert`. Use a lower-case,
-imperative description:
+Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, `style`,
+`revert`. Use a lower-case, imperative description:
 
 ```
 fix(processor): skip unresolvable symlinks under device mounts
@@ -74,18 +81,21 @@ feat(policy)!: drop the legacy allow label
 
 Mark breaking changes with `!` before the colon or a `BREAKING CHANGE: <description>` footer.
 
-The release version is derived from these types: since the last release, any `feat` makes the next release a minor, any `fix` a
-patch, and `!` or a `BREAKING CHANGE:` footer a major; `build`, `chore`, `ci`, `docs`, `perf`, `refactor`, `revert`, `style` and
-`test` bump nothing. See [`docs/release.md`](docs/release.md).
+The release version is derived from these types: since the last release, any `feat` makes the next
+release a minor, any `fix` a patch, and `!` or a `BREAKING CHANGE:` footer a major; `build`,
+`chore`, `ci`, `docs`, `perf`, `refactor`, `revert`, `style` and `test` bump nothing. See
+[`docs/release.md`](docs/release.md).
 
-Pick the type by whether the change should ship, not by what kind of change it is. A performance improvement, a refactor or a revert
-that changes the shipped binary or image and that users should receive is a `fix` (or a `feat`). Use `perf`, `refactor`, `style` and
-`revert` only when the commit is deliberately not meant to trigger a release on its own.
+Pick the type by whether the change should ship, not by what kind of change it is. A performance
+improvement, a refactor or a revert that changes the shipped binary or image and that users should
+receive is a `fix` (or a `feat`). Use `perf`, `refactor`, `style` and `revert` only when the commit
+is deliberately not meant to trigger a release on its own.
 
-Pull requests are merged with merge commits; squash and rebase merging are disabled. Every commit in a pull request therefore lands
-on `master` as it is and counts toward the version, so each commit needs a correct type, not just the pull request as a whole. The
-`conventional-commits` CI job checks every one of them. Enabling squash merging would make the pull-request title the commit
-subject instead, and would need a CI check on pull-request titles first.
+Pull requests are merged with merge commits; squash and rebase merging are disabled. Every commit in
+a pull request therefore lands on `master` as it is and counts toward the version, so each commit
+needs a correct type, not just the pull request as a whole. The `conventional-commits` CI job checks
+every one of them. Enabling squash merging would make the pull-request title the commit subject
+instead, and would need a CI check on pull-request titles first.
 
 ## Verification
 

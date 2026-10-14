@@ -46,11 +46,13 @@ docs/                      # architecture.md, testing.md, release.md
 
 ## Key invariants
 
-- `//go:build linux` on all files touching devices/cgroups/unix.*; cross-platform helpers (logger, policy) omit it.
+- `//go:build linux` on all files touching devices/cgroups/unix.*; cross-platform helpers (logger,
+  policy) omit it.
 - `internal/cgroup/` retains NVIDIA's Apache 2.0 copyright header — do not relicense or reformat.
 - `hostRootPath = "/host"` is the in-container view of host root; cgroup paths join against it.
 - Version strings live in `version.go`, set via `-ldflags -X main.version=...`.
 - Every trigger runs `Processor.Reconcile`; anything uncertain applies the empty set (fail closed).
-- Container dedup: the coordinator's `processed map[string]time.Time` bridges enumeration and the event stream.
+- Container dedup: the coordinator's `processed map[string]time.Time` bridges enumeration and the
+  event stream.
 
 See `mem:tech_stack`, `mem:conventions`, `mem:suggested_commands`, `mem:task_completion`.

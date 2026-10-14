@@ -15,7 +15,8 @@ original header — do not relicense, reformat, or alter that block.
 
 - One binary: `cmd/swarm-device-access/` (package `main`).
 - Internal packages: `internal/cgroup`, `internal/logger`, `internal/policy`, `internal/systemd`.
-- Shared `.mk/` snippets fetched from `leinardi/make-common@v1` — do not commit generated `.mk/` files directly.
+- Shared `.mk/` snippets fetched from `leinardi/make-common@v1` — do not commit generated `.mk/`
+  files directly.
 
 ## CLI flags
 
@@ -38,10 +39,10 @@ Use `logger.L()` for structured slog logging. Format options: `text`, `json`, `p
 
 ## Error handling
 
-`listenEvents` uses exponential backoff (`minBackoff`/`maxBackoff`) on stream errors, not `log.Fatal`.
-Systemd DBus watcher degrades gracefully when socket is absent.
+`listenEvents` uses exponential backoff (`minBackoff`/`maxBackoff`) on stream errors, not
+`log.Fatal`. Systemd DBus watcher degrades gracefully when socket is absent.
 
 ## golangci-lint
 
-v2, all linters enabled. `//nolint:gochecknoinits` is acceptable only for `flag` `init()` registration.
-Violations block commits via pre-commit.
+v2, all linters enabled. `//nolint:gochecknoinits` is acceptable only for `flag` `init()`
+registration. Violations block commits via pre-commit.

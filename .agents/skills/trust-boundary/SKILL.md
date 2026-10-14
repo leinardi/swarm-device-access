@@ -3,11 +3,12 @@ name: trust-boundary
 description: >
   Fail-closed checklist for swarm-device-access code that decides which devices a
   container may open, or what the daemon believes about its own configuration: mode
-  and enum validation, untrusted labels, /dev-only rules, SIGHUP reload safety and
-  image privilege. Use when editing internal/config/**, internal/policy/**, the
-  label handling and rule collection in internal/processor/**, the SIGHUP reload
-  path in cmd/swarm-device-access/config.go, internal/launcher/**, deployments/**
-  (including the Dockerfile) or examples/**, before writing the change.
+  and enum validation, untrusted labels, /dev-only rules, SIGHUP reload safety,
+  image privilege and pinning, and the opt-in HTTP listeners. Use when editing
+  internal/config/**, internal/policy/**, the label handling and rule collection in
+  internal/processor/**, the SIGHUP reload path in cmd/swarm-device-access/config.go,
+  internal/launcher/**, deployments/** (including the Dockerfile),
+  internal/observability/http.go or examples/**, before writing the change.
 ---
 
 # Trust Boundary — swarm-device-access
@@ -55,13 +56,14 @@ fixed set, it must be rejected at load time, naming the key and the bad value.
 
 `policy.ParseMode` rejects an unknown `policy-mode`, and `policy.Global.Validate` wraps glob errors
 as `device-allow: …` / `device-deny: …` via `policy.ValidateGlobs`. `run` in
-`cmd/swarm-device-access/main.go` calls `Validate` and `config.ValidateEnums` (log-format, log-level,
-policy-mode) on the effective values after `applyFileConfig` merges the file into the flags, and exits
-`1` with `invalid config: …` on failure. `config.LoadFile` (`internal/config/loader.go`) is strict: it
-checks every known key's exact YAML shape (following aliases; explicit `null`, a quoted `"yes"` for a
-bool and `[null]` in a list are errors), refuses merge keys, unknown keys and a second document, and
-validates the enums; any failure makes the daemon exit `1` with `config file error: …`. Covered by
-`TestGlobalValidate`, `TestValidateGlobs`, `TestLoadFile_*` and `TestValidateEnums`.
+`cmd/swarm-device-access/main.go` calls `Validate` and `config.ValidateEnums` (log-format,
+log-level, policy-mode) on the effective values after `applyFileConfig` merges the file into the
+flags, and exits `1` with `invalid config: …` on failure. `config.LoadFile`
+(`internal/config/loader.go`) is strict: it checks every known key's exact YAML shape (following
+aliases; explicit `null`, a quoted `"yes"` for a bool and `[null]` in a list are errors), refuses
+merge keys, unknown keys and a second document, and validates the enums; any failure makes the
+daemon exit `1` with `config file error: …`. Covered by `TestGlobalValidate`, `TestValidateGlobs`,
+`TestLoadFile_*` and `TestValidateEnums`.
 
 - [ ] A new enum-like key or flag is checked in `Validate` (or an equivalent load-time check) with
       a table test covering an unknown value.
@@ -115,19 +117,19 @@ under `/dev/`. From there every name (the source, each walked entry, each symlin
 - `openat2` beneath a `/dev` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (the `devFS`
   seam in `devfs.go`): no symlink step can leave `/dev`. An absolute link back into `/dev` is
   followed by hand, bounded to 40 hops; any other escape is skipped (a warning only when an explicit
-  allow glob names it, as for a dangling name; the skip itself never depends on the log level). The daemon
-  refuses to start without `openat2` (`ProbeOpenat2`);
+  allow glob names it, as for a dangling name; the skip itself never depends on the log level). The
+  daemon refuses to start without `openat2` (`ProbeOpenat2`);
 - `fstat` on that descriptor gives the device number, and sysfs `DEVNAME` gives the canonical name,
   so a node planted under `/dev/shm` is judged as the device it is;
 - `Denied` is checked on the alias, the resolved and the canonical name, `Authorized` on the
   canonical and the resolved name; candidates are aggregated per device across all mounts, and one
   deny vote suppresses the device.
 
-A dangling name found while walking is skipped (a warning only when an explicit allow glob names it).
-Everything that leaves the set unknown is an entry in `MountResult.Errs` and gives the container the
-empty desired set (reason `incomplete_device_set`) until a retry succeeds: a missing mount
-source, an identity that cannot be established for a candidate policy would otherwise grant, any
-walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
+A dangling name found while walking is skipped (a warning only when an explicit allow glob names
+it). Everything that leaves the set unknown is an entry in `MountResult.Errs` and gives the
+container the empty desired set (reason `incomplete_device_set`) until a retry succeeds: a missing
+mount source, an identity that cannot be established for a candidate policy would otherwise grant,
+any walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
 Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName`, `TestCollect_*`,
 `TestProcessor_*EmptiesTheSet` and `TestRealDevFS_Openat2Containment`.
 
@@ -179,12 +181,35 @@ owning launcher is confirmed gone — never on a transient error, and never a fo
 `deployments/docker/Dockerfile` builds a static binary onto `dhi.io/static` with `USER 0` and
 nothing else in the runtime stage.
 
+What goes into the image is pinned too. The BuildKit frontend is pinned by digest; the `dhi.io`
+bases by literal tag, deliberately (dhi.io republishes its tags to ship security fixes, and the
+Dockerfile says so), with the golang tag on go.mod's exact Go version so the image builds with the
+toolchain CI tests and scans. `.dockerignore` keeps the agent tooling, docs and tests out of the
+build context. `test/dockerfiles` pins all of it, and runs hadolint against the seven required OCI
+labels of `.hadolint.yaml`.
+
 - [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
-      `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is truly needed, the
-      README and `AGENTS.md` runtime requirements change in the same commit.
+      `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is
+      truly needed, the README and `AGENTS.md` runtime requirements change in the same commit.
 - [ ] The DBus mount is never made mandatory (`-dbus` stays off by default).
-- [ ] A Dockerfile change is checked with `make docker-build`.
+- [ ] A Dockerfile change is checked with `make docker-build` and `go test ./test/dockerfiles/
+      ./test/toolchain/`; no base reference holds a variable or `latest`, and the golang tag
+      follows go.mod.
 - [ ] Nothing secret is baked into a layer: build args and `COPY` sources are not a secret store.
+
+## 7. Listeners are opt-in and bounded before the first byte
+
+The daemon serves HTTP only when told to: `-metrics-addr` (metrics, `/healthz`, `/readyz`) and
+`-debug-addr` (pprof) are empty by default, and the launcher's daemon has network `none` unless
+`-host-network` is set. Whatever listens is reachable by anything on that network, so each server
+in `internal/observability/http.go` sets `ReadHeaderTimeout` and `ReadTimeout` before it accepts a
+connection: a client that never finishes its headers cannot hold a connection open. The handlers
+read no request body and take no input that becomes a decision.
+
+- [ ] A new listener is off by default, named by its own address flag, and documented with it.
+- [ ] Every `http.Server` sets `ReadHeaderTimeout` and `ReadTimeout`; a handler that reads a body
+      caps it (`http.MaxBytesReader`) before the first read.
+- [ ] Nothing served changes what the daemon grants: no endpoint takes a mode, a label or a path.
 
 ---
 
@@ -207,7 +232,7 @@ re-run until green:
    ./cmd/swarm-device-access -run '<test names from the sections>' -v` (Linux only; on another
    host run it in a Linux container, as AGENTS.md shows).
 2. `make go-test`.
-3. For a Dockerfile change, `make docker-build`.
+3. For a Dockerfile change, `make docker-build` and `go test ./test/dockerfiles/ ./test/toolchain/`.
 
 ## Checklist
 
@@ -218,3 +243,5 @@ re-run until green:
       empty desired set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional
+- [ ] Image inputs pinned: frontend by digest, bases by literal tag, golang on go.mod's Go
+- [ ] Listeners off by default and bounded by timeouts; no body read without a cap

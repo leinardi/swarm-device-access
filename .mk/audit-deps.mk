@@ -1,3 +1,19 @@
+#
+# Copyright 2026 Roberto Leinardi.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 ifndef MK_LOCAL_AUDIT_DEPS_INCLUDED
 MK_LOCAL_AUDIT_DEPS_INCLUDED := 1
 
@@ -27,9 +43,12 @@ BANNED_GO_MODULES ?= github.com/docker/docker
 .PHONY: audit-deps
 audit-deps: audit-deps-go audit-deps-banned ## Scan Go dependencies for known vulnerabilities and banned modules (network required)
 
+# -test: the test files are scanned too, and -tags=integration takes in the integration suite. They
+# run on developer machines and in CI, the suite against a live Docker daemon, so a vulnerable
+# symbol a test reaches is exposure as well.
 .PHONY: audit-deps-go
-audit-deps-go: ## Run the pinned govulncheck over every Go package
-	$(GO) run $(GOVULNCHECK) ./...
+audit-deps-go: ## Run the pinned govulncheck over every Go package, tests included
+	$(GO) run $(GOVULNCHECK) -test -tags=integration ./...
 
 # go mod why -m prints "(main module does not need module <mod>)" when no package in the build
 # (tests included) imports the module; anything else is the import chain that pulls it in.
