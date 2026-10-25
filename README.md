@@ -490,9 +490,12 @@ level=DEBUG setting device rule pid=1234 cgroup=/host/sys/fs/cgroup/... type=c m
 - Linux host. The daemon is Linux-only and uses `//go:build linux` constraints.
 - Go 1.26+
 - Docker
-- `pre-commit`, `golangci-lint`, `hadolint`, `markdownlint-cli2`, `yamllint`,
-  `shellcheck`, `actionlint`, and `checkmake`. The pre-commit hooks install
-  these tools when needed.
+- `pre-commit`, `golangci-lint`, [droast](https://github.com/immanuwell/dockerfile-roast),
+  `markdownlint-cli2`, `yamllint`, `shellcheck`, `actionlint`, and `checkmake`. The pre-commit
+  hooks install these tools when needed; droast is built from source, which needs `cargo`.
+- A local `shellcheck` at the release `.github/actions/setup-shellcheck` pins: droast's required
+  ShellCheck bridge runs the one on PATH. The Dockerfile meta-test also runs a `droast` binary
+  from PATH, at the release `.github/actions/setup-droast` pins.
 
 ### Common Tasks
 

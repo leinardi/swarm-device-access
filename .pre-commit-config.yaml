@@ -134,10 +134,13 @@ repos:
         files: ^(?:.*/)?(?:docker-)?compose\.ya?ml$
         exclude: ^examples/
         args: [--fix]
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.15.1
+  # Dockerfile Roast, built from source at this rev (language: rust), so every machine runs the
+  # same release. Policy in droast.toml; its ShellCheck bridge is required and runs the
+  # `shellcheck` on PATH, which CI pins with .github/actions/setup-shellcheck.
+  - repo: https://github.com/immanuwell/dockerfile-roast
+    rev: 1.7.0
     hooks:
-      - id: hadolint
+      - id: droast
   - repo: https://github.com/golangci/golangci-lint
     rev: v2.14.0
     hooks:

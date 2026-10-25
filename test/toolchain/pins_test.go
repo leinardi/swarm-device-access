@@ -95,22 +95,45 @@ func TestGoStepRules(t *testing.T) {
 	}
 }
 
-// TestHadolintIsOneVersion: the hadolint hook runs the system binary, so the version CI installs
-// is the one that lints; it must follow the hook's rev, which Dependabot moves.
-func TestHadolintIsOneVersion(t *testing.T) {
+// TestShellCheckIsOneVersion: droast's ShellCheck bridge runs the shellcheck on PATH, which CI
+// installs with setup-shellcheck; it must be the release the shellcheck-py hook wraps (its rev adds
+// a fourth component for the wrapper), which Dependabot moves.
+func TestShellCheckIsOneVersion(t *testing.T) {
 	t.Parallel()
 
-	hook := regexp.MustCompile(`repo: https://github\.com/hadolint/hadolint\s+rev:\s*(v[\d.]+)`).
+	expectHookVersion(t, "ShellCheck",
+		`repo: https://github\.com/shellcheck-py/shellcheck-py\s+rev:\s*(v\d+\.\d+\.\d+)`,
+		".github/actions/setup-shellcheck/action.yaml",
+		`SHELLCHECK_VERSION:\s*["']?(v[\d.]+)`)
+}
+
+// TestDroastIsOneVersion: the droast hook builds the release at its rev, which Dependabot moves,
+// and the Dockerfile meta-tests run the binary CI installs with setup-droast; both must be the
+// same release, so the label test checks the droast that lints.
+func TestDroastIsOneVersion(t *testing.T) {
+	t.Parallel()
+
+	expectHookVersion(t, "droast",
+		`repo: https://github\.com/immanuwell/dockerfile-roast\s+rev:\s*["']?([\d.]+)`,
+		".github/actions/setup-droast/action.yaml",
+		`DROAST_VERSION:\s*["']?([\d.]+)`)
+}
+
+// expectHookVersion fails the test unless the version the hook pattern captures in
+// .pre-commit-config.yaml equals the one the action pattern captures in actionFile.
+func expectHookVersion(t *testing.T, tool, hookPattern, actionFile, actionPattern string) {
+	t.Helper()
+
+	hook := regexp.MustCompile(hookPattern).
 		FindStringSubmatch(readRepoFile(t, ".pre-commit-config.yaml"))
-	action := regexp.MustCompile(`HADOLINT_VERSION:\s*["']?(v[\d.]+)`).
-		FindStringSubmatch(readRepoFile(t, ".github/actions/setup-hadolint/action.yaml"))
+	action := regexp.MustCompile(actionPattern).FindStringSubmatch(readRepoFile(t, actionFile))
 
 	if hook == nil || action == nil {
-		t.Fatalf("hadolint version not found: hook %v, action %v", hook, action)
+		t.Fatalf("%s version not found: hook %v, action %v", tool, hook, action)
 	}
 
 	if hook[1] != action[1] {
-		t.Errorf("the hadolint hook is at %s, but setup-hadolint installs %s", hook[1], action[1])
+		t.Errorf("the %s hook is at %s, but %s installs %s", tool, hook[1], actionFile, action[1])
 	}
 }
 

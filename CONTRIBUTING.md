@@ -30,12 +30,19 @@ docker run --rm -v "$PWD:/work" -w /work golang:1.26 go test -race ./...
 ## Linting
 
 ```bash
-make check           # runs the full pre-commit suite (golangci-lint, hadolint, shellcheck, etc.)
+make check           # runs the full pre-commit suite (golangci-lint, droast, shellcheck, etc.)
 make check-stage     # same, but only on staged files
 ```
 
 CI runs the same checks on every pull request via `golangci-lint-full` in
 `.github/workflows/ci.yaml`.
+
+The Dockerfile is linted by [droast](https://github.com/immanuwell/dockerfile-roast) (Dockerfile
+Roast) with the policy in `droast.toml`. pre-commit builds droast from source, so `make check`
+needs a Rust toolchain (`cargo`); its required ShellCheck bridge runs the `shellcheck` on PATH, at
+the release `.github/actions/setup-shellcheck` pins. The Dockerfile meta-test in `test/dockerfiles`
+also needs a `droast` binary on PATH, at the release `.github/actions/setup-droast` pins; without
+one it skips, unless `SDA_REQUIRE_TOOLS=1` is set.
 
 ## Branch and PR conventions
 

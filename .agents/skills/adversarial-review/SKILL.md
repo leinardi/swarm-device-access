@@ -77,17 +77,18 @@ green. Load only what the diff touches.
 | `internal/cgroup/**` | `go-style-guide` + the note below | NVIDIA-derived BPF/cgroup code |
 | `test/**` meta-tests (`test/toolchain`, `test/dockerfiles`, `test/docs`, `test/suppressions`, `test/licenseheaders`, `test/internal/**`) | `go-style-guide`; the comment heading each test | a meta-test that can no longer fail is a finding (see below) |
 | `scripts/check-*.sh` | the script's header comment and its driver under `test/` | the check still fails on what it exists to stop |
-| `.golangci.yaml`, `.pre-commit-config.yaml`, `.hadolint.yaml`, `.suppressions-baseline` | `go-style-guide` (§3, the ratchet); `test/toolchain`, `test/dockerfiles` | no linter disabled or narrowed, no hook dropped; §5 (c) |
+| `.golangci.yaml`, `.pre-commit-config.yaml`, `droast.toml`, `.suppressions-baseline` | `go-style-guide` (§3, the ratchet); `test/toolchain`, `test/dockerfiles` | no linter disabled or narrowed, no hook dropped; §5 (c) |
 
 **`internal/cgroup/**` is NVIDIA-derived code** (from k8s-device-plugin, Apache 2.0). Touch it
 with care. Never reformat or relicense NVIDIA's copyright header block — a diff that rewrites
 it is a finding, whatever else it does.
 
-A meta-test under `test/` guards a claim nothing else checks: the Go line and the hadolint pin,
-the Dockerfile's stages and labels, the relative links, the suppression and license-header
-checks, Docker staying out of untagged tests. Try to make the guarded thing go wrong and see
-whether the test still notices. A test that passes because its input is empty, its rule never
-ran or its tool was skipped (hadolint without `SDA_REQUIRE_TOOLS=1`) is a false pass, and so is
+A meta-test under `test/` guards a claim nothing else checks: the Go line and the droast and
+ShellCheck pins, the Dockerfile's stages and labels, the relative links, the suppression and
+license-header checks, Docker staying out of untagged tests. Try to make the guarded thing go
+wrong and see whether the test still notices. A test that passes because its input is empty, its
+rule never ran or its tool was skipped (droast or shellcheck without `SDA_REQUIRE_TOOLS=1`) is a
+false pass, and so is
 one whose scratch repository runs git without `gitenv.Isolated()`, which under the commit hook
 acts on the real index.
 
@@ -190,7 +191,7 @@ intent was. If one exists, is the diff removing exactly what that line retires a
 
 ### (c) A new suppression has to show its work
 
-Any new `//nolint:`, `# shellcheck disable=` or `# hadolint ignore=` is a standing decision to
+Any new `//nolint:`, `# shellcheck disable=` or `# droast ignore=` is a standing decision to
 let a linter stay silent. The `check-suppressions` hook counts them per rule against
 `.suppressions-baseline` and refuses one added without a baseline change, so the count is
 reviewed; the reason is not. A baseline raised in the same diff is the thing to read. So demand
@@ -234,7 +235,7 @@ caused as a confirmed finding with the output attached:
 | any `**/*.go` | `make go-build`, `make go-vet`, `make go-test` (race detector on), then `make check` |
 | `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (needs Docker and privileges) — it runs `make go-build` first, then `go test -tags=integration ./test/integration/...`; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload` |
 | `go.mod` / `go.sum` | `make go-tidy` and `make audit-deps` (govulncheck plus the banned-module check; network required) |
-| `deployments/docker/Dockerfile` | hadolint via `make check`, `go test ./test/dockerfiles/ ./test/toolchain/`, plus `make docker-build` |
+| `deployments/docker/Dockerfile` | droast via `make check`, `go test ./test/dockerfiles/ ./test/toolchain/`, plus `make docker-build` |
 | `test/**`, `scripts/check-*.sh`, `.github/**`, `.pre-commit-config.yaml` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `pre-commit run actionlint --all-files` |
 | anything else | `make check` (pre-commit on all files) |
 

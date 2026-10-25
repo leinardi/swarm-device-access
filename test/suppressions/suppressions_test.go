@@ -89,12 +89,12 @@ func Run() string {
 }
 `
 
-// dockerfileWithIgnores carries both hadolint forms: the per-line one and the global one, which
+// dockerfileWithIgnores carries both droast forms: the per-line one and the global one, which
 // silences a rule for the whole file and is therefore counted as its own family.
 const dockerfileWithIgnores = `FROM scratch
 
-# hadolint global ignore=DL3008
-# hadolint ignore=DL3018
+# droast global ignore=DF005 reason="scratch fixture"
+# droast ignore=DF052 reason="scratch fixture"
 COPY x /x
 `
 
@@ -385,11 +385,11 @@ func TestCheckSuppressionsCountsEveryFamily(t *testing.T) {
 
 	written := readFile(t, filepath.Join(dir, baselineFile))
 
-	// Each linter of a two-linter nolint list counts separately, the global hadolint form is its
+	// Each linter of a two-linter nolint list counts separately, the global droast form is its
 	// own family, and a bare //nolint is recorded as the everything-suppression it is.
 	want := []string{
-		"hadolint-global-ignore/DL3008\t1",
-		"hadolint-ignore/DL3018\t1",
+		"droast-global-ignore/DF005\t1",
+		"droast-ignore/DF052\t1",
 		"shellcheck-disable/SC2086\t1",
 		"nolint/*\t1",
 		"nolint/gosec\t1",
@@ -532,8 +532,8 @@ func TestCheckSuppressionsAllowsARename(t *testing.T) {
 
 	writeFile(t, dir, "old.go", goWithSpacedList)
 	writeFile(t, dir, "Dockerfile", dockerfileWithIgnores)
-	writeBaseline(t, dir, "hadolint-global-ignore/DL3008\t1\n"+
-		"hadolint-ignore/DL3018\t1\n"+
+	writeBaseline(t, dir, "droast-global-ignore/DF005\t1\n"+
+		"droast-ignore/DF052\t1\n"+
 		"nolint/errcheck\t1\n"+
 		"nolint/gosec\t1")
 	git(t, dir, "add", "-A")

@@ -185,8 +185,8 @@ What goes into the image is pinned too. The BuildKit frontend is pinned by diges
 bases by literal tag, deliberately (dhi.io republishes its tags to ship security fixes, and the
 Dockerfile says so), with the golang tag on go.mod's exact Go version so the image builds with the
 toolchain CI tests and scans. `.dockerignore` keeps the agent tooling, docs and tests out of the
-build context. `test/dockerfiles` pins all of it, and runs hadolint against the seven required OCI
-labels of `.hadolint.yaml`.
+build context. `test/dockerfiles` pins all of it, and runs droast against the seven required OCI
+labels of `droast.toml`.
 
 - [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
       `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is

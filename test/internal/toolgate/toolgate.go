@@ -34,12 +34,15 @@ import (
 // RequireEnv is the variable that turns a missing tool from a skip into a failure.
 const RequireEnv = "SDA_REQUIRE_TOOLS"
 
-// Hadolint is the one tool a meta-test may gate on: the Dockerfile tests run it with the
-// repository's .hadolint.yaml.
-const Hadolint = "hadolint"
+// The tools a meta-test may gate on: the Dockerfile tests run droast with the repository's
+// droast.toml, whose required ShellCheck bridge runs the shellcheck on PATH.
+const (
+	Droast     = "droast"
+	ShellCheck = "shellcheck"
+)
 
 // Tools is the closed list of tools a meta-test may be gated on.
-var Tools = []string{Hadolint}
+var Tools = []string{Droast, ShellCheck}
 
 // Lookup returns the path of tool, or skips the test when it is missing locally and fails it when
 // RequireEnv is set to 1. A tool outside Tools fails the test: widening the list is a decision, not

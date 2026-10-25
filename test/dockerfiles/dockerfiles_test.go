@@ -200,21 +200,23 @@ func TestRuntimeStage(t *testing.T) {
 	}
 }
 
-// TestHadolintRequiresTheLabels runs hadolint with the repository's .hadolint.yaml: the shipped
-// Dockerfile passes, and the same file without one of its labels fails, so the label schema is
-// enforced and not only written down.
-func TestHadolintRequiresTheLabels(t *testing.T) {
+// TestDroastRequiresTheLabels runs droast with the repository's droast.toml: the shipped
+// Dockerfile passes, and the same file without one of its labels fails with DF074, so the required
+// labels are enforced and not only written down. droast.toml makes the ShellCheck bridge required,
+// so droast fails without shellcheck on PATH: both are looked up before droast runs.
+func TestDroastRequiresTheLabels(t *testing.T) {
 	t.Parallel()
 
-	hadolint := toolgate.Lookup(t, toolgate.Hadolint)
-	config := repoPath(t, ".hadolint.yaml")
+	droast := toolgate.Lookup(t, toolgate.Droast)
+	_ = toolgate.Lookup(t, toolgate.ShellCheck)
+	config := repoPath(t, "droast.toml")
 	content := readRepoFile(t, shippedDockerfile)
-	_ = readRepoFile(t, ".hadolint.yaml") // in the test cache key
+	_ = readRepoFile(t, "droast.toml") // in the test cache key
 
-	out, err := exec.CommandContext(t.Context(), hadolint, "--config", config,
+	out, err := exec.CommandContext(t.Context(), droast, "--config", config,
 		repoPath(t, shippedDockerfile)).CombinedOutput()
 	if err != nil {
-		t.Errorf("hadolint rejects %s: %v\n%s", shippedDockerfile, err, out)
+		t.Errorf("droast rejects %s: %v\n%s", shippedDockerfile, err, out)
 	}
 
 	label := regexp.MustCompile(`(?m)^\s*org\.opencontainers\.image\.created=.*$`)
@@ -229,10 +231,10 @@ func TestHadolintRequiresTheLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err = exec.CommandContext(t.Context(), hadolint, "--config", config, stripped).
+	out, err = exec.CommandContext(t.Context(), droast, "--config", config, stripped).
 		CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "DL3049") {
-		t.Errorf("hadolint accepts the Dockerfile without its created label: %v\n%s", err, out)
+	if err == nil || !strings.Contains(string(out), "DF074") {
+		t.Errorf("droast accepts the Dockerfile without its created label: %v\n%s", err, out)
 	}
 }
 

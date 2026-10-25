@@ -28,10 +28,6 @@
 ########################
 # deps: download modules in a layer keyed on go.mod and go.sum only
 ########################
-# An intermediate stage, never shipped: hadolint requires the labels of every
-# stage that no COPY --from names, and it does not count the build stage's
-# FROM deps as a use.
-# hadolint ignore=DL3049
 FROM --platform=$BUILDPLATFORM dhi.io/golang:1.26.9-alpine3.23-dev AS deps
 WORKDIR /src
 RUN --mount=type=cache,target=/var/cache/apk \
@@ -80,7 +76,7 @@ ARG VERSION="dev"
 ARG COMMIT="none"
 ARG DATE="unknown"
 
-# The seven OCI labels .hadolint.yaml requires (label-schema, strict-labels).
+# The seven OCI labels droast.toml requires ([required-labels], strict-labels).
 LABEL org.opencontainers.image.title="swarm-device-access" \
 	org.opencontainers.image.description="Listens to Docker container-start events and injects cgroup v2 BPF device-allow rules for containers that bind-mount /dev/... paths" \
 	org.opencontainers.image.source="https://github.com/leinardi/swarm-device-access" \
@@ -104,6 +100,6 @@ COPY --from=build /out/swarm-device-access /usr/local/bin/swarm-device-access
 # outside PID 1 of its own pid namespace and prevent it from working anyway).
 
 # dhi.io/static defaults to a non-root user; bpf(2) and cgroup writes require root.
-# hadolint ignore=DL3002
+# droast ignore=DF002 reason="bpf(2) and cgroup v2 writes require root"
 USER 0
 ENTRYPOINT ["/usr/local/bin/swarm-device-access"]
