@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-// Package toolchain_test pins the repository's tooling: the Go line and the hadolint version are
-// each one value everywhere they are written, Docker stays out of untagged tests, and no gate
-// carries a flag that makes it pass on nothing.
+// Package toolchain_test pins the repository's tooling: the Go line and the droast and ShellCheck
+// versions are each one value everywhere they are written, Docker stays out of untagged tests, and
+// no gate carries a flag that makes it pass on nothing.
 package toolchain_test
 
 import (

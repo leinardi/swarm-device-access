@@ -129,7 +129,7 @@ Multiple linters are comma-separated with no spaces. Name all that fire: `gocycl
 `cyclop` measure the same thing, and `gocognit` often joins them.
 
 **Suppressions are ratcheted.** [`.suppressions-baseline`](../../../.suppressions-baseline) holds
-one count per rule (`nolint/<linter>`, plus the shellcheck and hadolint families).
+one count per rule (`nolint/<linter>`, plus the shellcheck and droast families).
 `scripts/check-suppressions.sh` runs as the `check-suppressions` pre-commit hook and refuses a
 count above its baseline, a rule the baseline does not know, a count below its baseline (the file
 must describe the tree), and a staged diff that adds a suppression line without also changing the

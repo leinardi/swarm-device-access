@@ -24,7 +24,7 @@
 #
 #   1. No count may exceed its baseline, and no rule may appear that the baseline does not know.
 #      Counts are per rule: one per nolint linter, and one per code for the shellcheck and
-#      hadolint directives. Deleting a suppression of one rule therefore cannot pay for adding a
+#      droast directives. Deleting a suppression of one rule therefore cannot pay for adding a
 #      suppression of another.
 #   2. A staged diff that adds a suppression line is refused unless the same commit also changes
 #      the baseline file. Rule 1 alone is blind to a swap within the same rule (delete one
@@ -37,7 +37,7 @@
 # file -- has to stage: those leave every count where it was, so without the stamp rule 2 would
 # refuse with nothing to change.
 #
-# These four families -- //nolint, the shellcheck disable directive, and hadolint's ignore and
+# These four families -- //nolint, the shellcheck disable directive, and droast's ignore and
 # global ignore -- are the mechanisms this repository's linters read in Go, shell and Dockerfiles.
 # Others exist -- markdownlint-disable (the pull request template holds one), yamllint's
 # disable-line, the shellcheck directives inside workflow run: blocks -- and are not counted;
@@ -197,9 +197,9 @@ FNR == 1 {
 	if (path ~ /Dockerfile$/) {
 		# The global form silences a rule for the whole file, so it is counted as its own family
 		# rather than folded in with the per-line one.
-		if (match(line, /#[ \t]*hadolint[ \t]+(global[ \t]+)?ignore=[A-Za-z0-9,]+/)) {
+		if (match(line, /#[ \t]*droast[ \t]+(global[ \t]+)?ignore=[A-Za-z0-9,]+/)) {
 			directive = substr(line, RSTART, RLENGTH)
-			family = (directive ~ /global/) ? "hadolint-global-ignore/" : "hadolint-ignore/"
+			family = (directive ~ /global/) ? "droast-global-ignore/" : "droast-ignore/"
 			sub(/^.*=/, "", directive)
 			count = split(directive, codes, ",")
 			for (i = 1; i <= count; i++) {

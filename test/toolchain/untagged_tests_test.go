@@ -74,14 +74,15 @@ func TestUntaggedTestsAvoidDocker(t *testing.T) {
 	}
 }
 
-// TestToolGateListIsClosed keeps the tools a meta-test may skip on to hadolint: toolgate's list is
-// exactly that, every gated test names a toolgate constant, and no test looks a tool up on its
-// own, which would be a skip CI cannot turn into a failure.
+// TestToolGateListIsClosed keeps the tools a meta-test may skip on to droast and the shellcheck
+// its required bridge runs: toolgate's list is exactly those, every gated test names a toolgate
+// constant, and no test looks a tool up on its own, which would be a skip CI cannot turn into a
+// failure.
 func TestToolGateListIsClosed(t *testing.T) {
 	t.Parallel()
 
-	if !slices.Equal(toolgate.Tools, []string{toolgate.Hadolint}) {
-		t.Errorf("toolgate.Tools = %v, want exactly hadolint", toolgate.Tools)
+	if !slices.Equal(toolgate.Tools, []string{toolgate.Droast, toolgate.ShellCheck}) {
+		t.Errorf("toolgate.Tools = %v, want exactly droast and shellcheck", toolgate.Tools)
 	}
 
 	for _, file := range parseTestFiles(t) {

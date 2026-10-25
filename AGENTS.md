@@ -50,13 +50,19 @@ The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on
 refresh: `make mk-common-update`. Repo-local targets go in their own `.mk/<fragment>.mk`, listed in
 the Makefile's `MK_LOCAL_FILES`; never add recipes to the Makefile itself.
 
+The Dockerfile hook is droast (Dockerfile Roast), with its policy in `droast.toml`. pre-commit
+builds it from source at its pinned rev, which needs a Rust toolchain (`cargo`) locally. Its
+required ShellCheck bridge runs the `shellcheck` on PATH, so install ShellCheck locally at the
+release `.github/actions/setup-shellcheck` pins (CI installs it with that action).
+
 The meta-tests under `test/` (all untagged, no Docker) guard the tooling itself: `test/toolchain`
-(the Go line, the hadolint pin, flags that make a gate pass on nothing, Docker kept out of untagged
-tests), `test/dockerfiles`, `test/docs` (relative links), `test/suppressions` and
+(the Go line, the droast and ShellCheck pins, flags that make a gate pass on nothing, Docker kept
+out of untagged tests), `test/dockerfiles`, `test/docs` (relative links), `test/suppressions` and
 `test/licenseheaders` (the two check scripts), with the helpers in
-`test/internal/{gitenv,toolgate}`. `make go-test` runs them;
-`SDA_REQUIRE_TOOLS=1 go test ./test/...` turns a missing hadolint into a failure instead of a skip,
-as CI's `repo-gates` job does.
+`test/internal/{gitenv,toolgate}`. `make go-test` runs them; the Dockerfile label test needs a
+`droast` binary on PATH (the release `.github/actions/setup-droast` pins; the hook's own build is
+not on PATH) and `shellcheck`. `SDA_REQUIRE_TOOLS=1 go test ./test/...` turns a missing droast or
+shellcheck into a failure instead of a skip, as CI's `repo-gates` job does.
 
 ### Generated or vendored: never hand-edit
 
@@ -187,13 +193,14 @@ after review:
   behavior) and flipping its test to assert absence needs a line in `README.md` or `docs/**` that
   retires it; a commit message is not enough.
 - **Suppressions show their work.** A new `//nolint`, `# shellcheck disable=` or
-  `# hadolint ignore=` explains why the fix does not apply here, not which rule fired.
+  `# droast ignore=` explains why the fix does not apply here, not which rule fired; droast also
+  requires the reason in the directive (`reason="..."`).
 
 ## Suppressions are ratcheted
 
 Every in-file suppression is counted per rule against `.suppressions-baseline` by the
 `check-suppressions` pre-commit hook (`scripts/check-suppressions.sh`): `//nolint:<linter>`,
-`# shellcheck disable=`, `# hadolint ignore=` and `# hadolint global ignore=`.
+`# shellcheck disable=`, `# droast ignore=` and `# droast global ignore=`.
 
 Adding one is allowed, but never silently: the hook refuses a commit that adds a suppression line
 without changing the baseline in the same commit, including a swap or a moved file that leaves the
@@ -211,12 +218,12 @@ Run before considering an edit done. `make check` applies to every row.
 | `**/*.go` | `make verify-go`, then `make check-stage` |
 | `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
 | `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
-| `deployments/docker/Dockerfile`, `.hadolint.yaml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/` (hadolint runs in `make check`), `make docker-build` |
+| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/` (droast runs in `make check`), `make docker-build` |
 | `.golangci.yaml` | `make go-lint` |
 | `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/` |
 | `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/` |
 | `test/**` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `make go-lint` |
-| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, hadolint pin, vacuous flags) |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, droast and ShellCheck pins, vacuous flags) |
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `go test ./test/toolchain/`, `make help` |
 | `scripts/hooks/gofmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.go` file in Claude Code |
 | `README.md`, `docs/**/*.md`, other Markdown | `go test -count=1 ./test/docs/`; prose wraps at 100 columns (markdownlint in `make check`) |

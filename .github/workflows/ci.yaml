@@ -45,9 +45,9 @@ jobs:
       - name: Install pre-commit
         run: pip install --no-cache-dir pre-commit==4.6.2
 
-      # The hadolint hook runs the system binary.
-      - name: Set up hadolint
-        uses: ./.github/actions/setup-hadolint
+      # droast's ShellCheck bridge runs the shellcheck on PATH: the pinned one, not the runner's.
+      - name: Set up ShellCheck
+        uses: ./.github/actions/setup-shellcheck
 
       # Restore only: pre-commit-warmup.yaml saves the entry on master under the same key.
       - name: Restore the pre-commit cache
@@ -117,9 +117,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # The hadolint hook runs the system binary, which the runner does not have.
-      - name: Set up hadolint
-        uses: ./.github/actions/setup-hadolint
+      # droast's ShellCheck bridge runs the shellcheck on PATH: the pinned one, not the runner's.
+      - name: Set up ShellCheck
+        uses: ./.github/actions/setup-shellcheck
 
       - name: Run pre-commit hooks + reviewdog diff
         uses: leinardi/gha-pre-commit-reviewdog-actions/pre-commit-hooks@007919a45a04b0c52dfbb46732019dc4831fc03c # v1.0.3
@@ -136,7 +136,7 @@ jobs:
             check-toml
             check-added-large-files
             dclint
-            hadolint
+            droast
             golangci-lint-config-verify
             golangci-lint-fmt
             golangci-lint-full
@@ -287,8 +287,8 @@ jobs:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
 
-  # The meta-tests under test/, with the tools they drive: a missing hadolint fails here
-  # (SDA_REQUIRE_TOOLS=1) instead of skipping, as it does in the test job, which has none.
+  # The meta-tests under test/, with the tools they drive: a missing droast or shellcheck fails
+  # here (SDA_REQUIRE_TOOLS=1) instead of skipping, as it does in the test job, which has neither.
   repo-gates:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -305,8 +305,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up hadolint
-        uses: ./.github/actions/setup-hadolint
+      # The Dockerfile tests run droast, whose ShellCheck bridge runs the shellcheck on PATH: the
+      # pinned one, not the runner's.
+      - name: Set up droast
+        uses: ./.github/actions/setup-droast
+
+      - name: Set up ShellCheck
+        uses: ./.github/actions/setup-shellcheck
 
       - name: Run the repository meta-tests
         env:
