@@ -40,6 +40,25 @@ At runtime the daemon:
 - Optionally watches systemd over DBus and reapplies rules after
   `systemctl daemon-reload`, which clears cgroup BPF programs.
 
+## 🧭 Alternatives
+
+Swarm has had no `devices:` option since swarm mode shipped; the request is
+[moby/swarmkit#1244](https://github.com/moby/swarmkit/issues/1244), and every
+upstream patch so far was closed without being merged. These are the usual
+workarounds and how they compare:
+
+| Approach | How it works | Trade-off |
+| --- | --- | --- |
+| `generic_resources` with the NVIDIA runtime | Each node advertises its GPUs in `daemon.json`; the service reserves them under `deploy.resources.reservations.generic_resources` and the NVIDIA runtime injects the devices | The native option, and Swarm schedules on GPU count. NVIDIA GPUs only. |
+| A service that runs `docker run --device ...` through the Docker socket | The service is only a wrapper; the device container is a plain container on the node | Works for any device and any `docker run` option, but the device container is not a Swarm task: no rolling updates, rollbacks, secrets or configs, and it keeps running when the stack is removed. |
+| A script on `docker events` writing `devices.allow` | Adds a cgroup v1 device rule when a container starts | Only works on cgroup v1, which current distributions no longer use by default. |
+| [`allfro/device-mapping-manager`](https://github.com/allfro/device-mapping-manager) | A privileged container that grants every device bind-mounted under `/dev` | The project this one forked. No commits since January 2024, its issues report it failing on Docker Engine 29, and it grants every container that mounts a device, with no opt-in. |
+| This daemon | Grants the devices a task bind-mounts under `/dev`, on cgroup v1 and v2 | Any device and an unchanged Swarm task, gated by opt-in labels and allow and deny globs. It does not schedule: see [Placing Tasks on Nodes With the Device](#placing-tasks-on-nodes-with-the-device). |
+
+For NVIDIA GPUs, prefer `generic_resources` when the NVIDIA runtime is installed
+on the nodes. Use this daemon for every other device, and for GPUs whose
+device nodes you would rather bind-mount yourself.
+
 ## 🚀 Quick Start
 
 Run one daemon instance on every Swarm node that may run services needing host
@@ -50,7 +69,8 @@ host PID namespace, host user namespace, the host Docker socket, `/sys` mounted
 at `/host/sys`, and `/dev` mounted into the daemon container.
 
 It requires Docker Engine 19.03 or newer (API 1.40): the Docker client it uses
-refuses older engines.
+refuses older engines. It negotiates the API version with the engine, so
+current releases, Docker Engine 29 included, work too.
 
 Swarm does not allow those runtime options directly on a service. So the image
 has a second mode, `launch`: the Swarm service runs the image unprivileged, with
@@ -421,6 +441,73 @@ exclude the rest with an allow list.
 Global `-device-allow` and `-device-deny` define the broadest access the daemon
 may grant. Per-container labels can only narrow that access. Deny rules always
 win.
+
+## 🧩 Tips and Limitations
+
+### Placing Tasks on Nodes With the Device
+
+The daemon grants access on whichever node a task lands on; it does not decide
+where tasks run. Label the nodes that have the device and constrain the service
+to them, or Swarm may start the task on a node where the bind mount fails:
+
+```bash
+docker node update --label-add device.zigbee=true node-1
+```
+
+```yaml
+    deploy:
+      placement:
+        constraints:
+          - node.labels.device.zigbee == true
+```
+
+For NVIDIA GPUs, `generic_resources` also lets Swarm schedule by GPU count (see
+[Alternatives](#-alternatives)).
+
+### Stable Names for USB and Serial Devices
+
+A USB adapter can come up as `/dev/ttyUSB0` on one boot and `/dev/ttyUSB1` on
+the next. Mount a stable alias instead: the links udev already creates under
+`/dev/serial/by-id/`, or a name of your own from a udev rule:
+
+```text
+# /etc/udev/rules.d/99-zigbee.rules
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="zigbee"
+```
+
+```yaml
+    volumes:
+      - /dev/zigbee:/dev/zigbee
+    labels:
+      swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/ttyUSB*"
+```
+
+Write `device-allow` against the kernel name the alias points to
+(`/dev/ttyUSB*` here), not the alias: an allow glob that names only the alias
+grants nothing (see [Container Labels](#container-labels)).
+
+### Devices That Appear After the Container Starts
+
+The daemon walks a container's device mounts when it starts and on each later
+pass (a `SIGHUP`, a daemon restart, a `systemctl daemon-reload`); it does not
+watch for devices plugged in between. Tracked in
+[#41](https://github.com/leinardi/swarm-device-access/issues/41). Until then:
+
+- A mount of a single node or alias (`/dev/zigbee`) is fixed when the container
+  starts: Docker resolves it then. If the device is unplugged and plugged back,
+  restart the task.
+- A directory mount (`/dev/bus/usb`) shows new nodes inside the container, but
+  they are not granted until the next pass. Restart the task, or trigger a pass
+  for every container on that node with
+  `docker kill -s HUP swarm-device-access`; it works without a config file.
+
+### FUSE
+
+Granting `/dev/fuse` lets a container open it, but mounting a FUSE filesystem
+also needs `CAP_SYS_ADMIN` (`cap_add`) and an AppArmor profile that allows
+`mount`. Docker's default profile denies it, and `docker stack deploy` ignores
+`security_opt`, so on AppArmor hosts the device grant alone is not enough.
 
 ## 🔒 Security
 
