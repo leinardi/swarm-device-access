@@ -181,6 +181,13 @@ after review:
   collection in `internal/processor`, `internal/launcher`, `deployments/docker/Dockerfile` or
   anything else under `deployments/**`.
 - `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
+- `go-to-rust-port` — before planning, implementing or reviewing any part of the Go-to-Rust port.
+
+`go-to-rust-port` is the project copy of a user skill, kept here for the duration of the port.
+Every new trap the port finds (a spike, a failed build, a Go probe, a review finding) is added to
+it as trap, fix and evidence, versioned where the version matters, in the same commit as the change
+that found it. When the port ends, the skill moves back to the user skills and is deleted from this
+repository, together with this note.
 
 ## Quality rules not enforced by tooling
 
