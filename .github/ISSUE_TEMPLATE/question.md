@@ -43,9 +43,9 @@ assignees: []
 
 <!-- Fill in what makes sense for your question, or remove fields that don't apply. -->
 
-* Project version / commit SHA: `?`
-* Operating system and version: `?`
-* Runtime and version (e.g., Go): `?`
+* swarm-device-access version (image tag or digest): `?`
+* Operating system, kernel version (`uname -r`) and cgroup version (v1 or v2): `?`
+* Docker Engine version (`docker version`), and whether the node runs in Swarm mode: `?`
 * Any relevant tooling / dependencies and versions: `?`
 
 ---

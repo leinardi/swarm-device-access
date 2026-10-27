@@ -18,7 +18,7 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! The swarm-device-access binary: runs the daemon, or the launcher, on a runtime of its own and
-//! returns its exit code. The Go binary still ships until the cutover.
+//! returns its exit code.
 
 use std::io::Write as _;
 use std::process::ExitCode;

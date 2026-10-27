@@ -23,7 +23,7 @@
 //! git command run in a scratch repository with that environment acts on the real one instead -- a
 //! `git add` there writes into the index of the commit being made. [`isolate`] strips those
 //! variables and the user's own configuration, so a scratch repository is only ever itself. The
-//! Rust side of `test/internal/gitenv`, which stays until the cutover.
+//! Rust port of `test/internal/gitenv`, which the cutover removed.
 
 use std::env;
 use std::process::Command;

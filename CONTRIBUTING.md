@@ -59,6 +59,19 @@ the release `.github/actions/setup-shellcheck` pins.
 - If you fix a bug that also exists upstream, note the upstream file and line in your PR
   description, and consider sending a patch upstream.
 
+## Reused code and the 1.x contract
+
+Several Rust modules are adapted from swarm-scheduler-exporter and swarm-rootless-docker. The reuse
+ledger in [`docs/rust-port.md`](docs/rust-port.md) names the source and pinned commit of each one
+and every adaptation: check it before changing a reused component, and update its row in the same
+commit when a reused component changes or an upstream fix is taken.
+
+Log lines, error texts, exit codes, metrics and Docker Engine requests are those of 1.x. A change
+that cannot keep one adds a numbered entry to the README's
+[Migrating from 1.x](README.md#-migrating-from-1x) table in the same commit. `AGENTS.md` lists the
+project skills (`rust-style-guide`, `trust-boundary`, `adversarial-review`) that hold the coding,
+fail-closed and review rules.
+
 ## Commit messages
 
 All commits must follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)

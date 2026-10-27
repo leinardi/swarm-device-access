@@ -18,9 +18,8 @@
 //! containers that bind-mount `/dev` paths, for Docker Swarm, where `devices:` and
 //! `device_cgroup_rules:` are ignored.
 //!
-//! The port lands module by module beside the Go daemon, which keeps shipping until the cutover;
-//! `docs/rust-port.md` records the design, the intended differences from 1.x and where each module
-//! comes from.
+//! It replaced the Go daemon of 1.x in 2.0; `docs/rust-port.md` records the design and where each
+//! module comes from, and the README's Migrating from 1.x lists the intended differences from 1.x.
 
 pub mod cgroup;
 pub mod cli;

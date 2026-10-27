@@ -2,57 +2,62 @@
 
 Linux-only daemon that sets cgroup device-allow rules for Docker Swarm containers
 that bind-mount `/dev/...` paths. Solves the Docker Swarm gap where `devices:` /
-`device_cgroup_rules:` are silently ignored.
+`device_cgroup_rules:` are silently ignored. Rust since 2.0 (the Go 1.x code was
+removed at the cutover); 1.x behaviour is the contract, except the Q entries in the
+README's "Migrating from 1.x".
 
 ## Source map
 
 ```
-cmd/swarm-device-access/   # main binary (//go:build linux)
-  main.go                  # run(): flags, settings, openat2 probe, store, processor, daemon.Run
-  flags.go                 # CLI flag definitions
-  config.go                # settings merge/validate, SIGHUP reloader
-  launch.go                # `launch` subcommand: launcher flags, runLaunch
-  version.go               # version/commit/date (filled by ldflags)
-
-internal/
-  config/                  # strict YAML loader; runtime Store/Publisher with generations
-  policy/                  # mode, label parsing, globs: Enabled, Denied, Authorized (cross-platform)
-  launcher/                # launch mode: daemonSpec (privileged set), self ID, stale cleanup, supervise
-  daemon/                  # event loop and coordinator
-    daemon.go              # Run: subscribe, coordinator, startup pass, reload watcher, listenEvents
-    events.go              # listenEvents/consumeEvents (reconnect backoff), processOne
-    coordinator.go         # passes, retries, reservations, processed dedup (processedTTL), sweep
-  processor/               # one idempotent Reconcile path
-    processor.go           # Reconcile, computeDesired, collectContainerRules
-    rules.go               # CollectMountRules, evaluateCandidate, aggregation per device
-    devfs.go               # devFS seam: openat2 beneath /dev, fstat, sysfs uevent; ProbeOpenat2
-    reconcile.go           # applyPinned, Terminate, Sweep, revokes
-    pin.go                 # pidfd pinning, /proc/<pid>/cgroup
-    lifecycle.go           # per-container run history
-    publish.go             # PublishAndReconcile
-  cgroup/                  # device rules (parts NVIDIA-derived, Apache 2.0)
-    api.go                 # Interface: GetDeviceCGroupMountPath/RootPath, SetDeviceRules(handle, rules); New
-    handle.go              # CgroupHandle (directory fd + identity)
-    v1.go, v1set.go, ledger.go   # cgroup v1: devices.allow/devices.deny, owned-exception ledger
-    v2.go, v2plan.go, v2ops.go, owned.go, ebpf.go  # cgroup v2: owned wrapper around the runtime's BPF filter
-  observability/           # Prometheus Recorder (nil-safe), health/ready, pprof
-  logger/                  # slog wrapper (text/json/plain handlers, L() lazy-init)
-  systemd/                 # DBus Reloading signal watcher
-
-test/integration/          # daemon integration tests (build tag integration)
+Cargo.toml                 # workspace: "." (daemon lib + bin), meta, testenv
+src/
+  main.rs                  # hand-built tokio runtime (2 workers), exit code
+  run.rs                   # wiring: flags, settings, openat2 probe, RLIMIT_MEMLOCK, store,
+                           #   Docker client, metrics server, processor, daemon::run; SIGHUP;
+                           #   launch dispatch; SHUTDOWN_BUDGET; HOST_ROOT_PATH = "/host"
+  cli.rs                   # clap flags, double-dash only (Q1); daemon and launch flag sets
+  cli/settings.rs          # Settings::merge/validate, cold_changes, Reloader, watch_sighup
+  config/                  # strict YAML loader (load_file, KEYS shapes in yaml.rs); Store/Publisher
+  policy/                  # Mode, Global (enabled, denied, authorized), Container::parse, unknown_labels
+  launcher/                # launch mode: self_id, stale, spec (daemon_spec: privileged set), engine
+                           #   (the only Docker writes), supervision
+  daemon/                  # run (subscribe, coordinator, startup pass, reload watcher, events)
+    events.rs              # listen_events/consume_events, reconnect backoff
+    coordinator.rs         # passes, retries, reservations, processed dedup (PROCESSED_TTL), sweep
+  processor/               # one idempotent reconcile path
+    reconcile.rs           # Processor: reconcile, compute_desired, apply_pinned, terminate,
+                           #   sweep, publish_and_reconcile; the blocking transaction
+    rules.rs               # collect_container_rules, collect_mount_rules, evaluate_candidate
+    devfs.rs               # DevFs seam: openat2 beneath /dev, fstat, sysfs uevent; probe_openat2
+    pin.rs                 # pidfd pinning, /proc/<pid>/cgroup
+    lifecycle.rs           # per-container run history
+  cgroup/                  # device rules (api/ebpf/v1/v2 NVIDIA-derived, Apache 2.0)
+    api.rs                 # DeviceRule, Interface::set_device_rules(handle, rules), new, /proc parsing
+    handle.rs              # CgroupHandle (directory fd + identity)
+    v1.rs, v1set.rs, ledger.rs                  # devices.allow/devices.deny, owned-exception ledger
+    v2.rs, v2plan.rs, v2ops.rs, owned.rs, ebpf.rs, asm.rs  # owned wrapper around runtime filter
+    bpf_sys.rs             # raw bpf(2); the only unsafe module
+  docker/                  # read-only Engine client on hyper (GET + HEAD /_ping, unix socket only)
+  metrics/, server.rs      # Recorder (noop form), exposition; /metrics, /healthz, /readyz
+  logger/                  # slog-compatible text/json/plain handlers behind LogHandle
+  systemd.rs               # zbus D-Bus Reloading watcher
+  go_compat/               # Go stdlib formatting/parsing the 1.x text depends on
+  clock.rs                 # the one wall-clock read; Clock trait
+tests/                     # goldens vs frozen 1.x captures (tests/testdata), wire, parity
+meta/                      # repository meta-tests (pins, Dockerfile, CI gates, links, boundaries)
+testenv/                   # integration harness (feature integration), host Docker
 deployments/docker/        # Dockerfile, compose file running the launcher, example config
-docs/                      # architecture.md, testing.md, release.md
+docs/                      # architecture.md, testing.md, release.md, rust-port.md (ledger)
 ```
 
 ## Key invariants
 
-- `//go:build linux` on all files touching devices/cgroups/unix.*; cross-platform helpers (logger,
-  policy) omit it.
-- `internal/cgroup/` retains NVIDIA's Apache 2.0 copyright header — do not relicense or reformat.
-- `hostRootPath = "/host"` is the in-container view of host root; cgroup paths join against it.
-- Version strings live in `version.go`, set via `-ldflags -X main.version=...`.
-- Every trigger runs `Processor.Reconcile`; anything uncertain applies the empty set (fail closed).
-- Container dedup: the coordinator's `processed map[string]time.Time` bridges enumeration and the
-  event stream.
+- `src/cgroup/{api,ebpf,v1,v2}.rs` keep NVIDIA's Apache 2.0 header — do not relicense or reformat.
+- `unsafe` and `libc` only in `src/cgroup/bpf_sys.rs`; Docker writes only in `src/launcher/engine.rs`.
+- Every trigger runs `Processor::reconcile`; anything uncertain applies the empty set (fail closed).
+- Log, error, metric and Engine-request text is the 1.x contract; a difference needs a README Q entry.
+- `docs/rust-port.md` is the reuse ledger: check and update it when a reused component changes or
+  an upstream fix is taken.
+- Container dedup: the coordinator's `processed` map bridges enumeration and the event stream.
 
 See `mem:tech_stack`, `mem:conventions`, `mem:suggested_commands`, `mem:task_completion`.

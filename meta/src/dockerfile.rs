@@ -18,7 +18,7 @@
 
 //! Reads a Dockerfile closely enough to assert the image invariants that the Dockerfile's own
 //! comments and `droast.toml` state: stages, their bases and the instructions inside them. The
-//! Rust side of `test/dockerfiles/dockerfile.go`, which stays until the cutover.
+//! Rust port of `test/dockerfiles/dockerfile.go`, which the cutover removed.
 
 use std::collections::BTreeMap;
 use std::fmt;

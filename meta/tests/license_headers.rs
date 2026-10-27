@@ -17,8 +17,8 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! Drives scripts/check-license-headers.sh: on this repository, and on scratch repositories that
-//! hold each kind of file it must reject or let through. The Rust side of `test/licenseheaders`,
-//! which stays until the cutover; the cases are that test's, since the script is this project's
+//! hold each kind of file it must reject or let through. The Rust port of `test/licenseheaders`,
+//! which the cutover removed; the cases are that test's, since the script is this project's
 //! (the Apache-2.0 notice, NVIDIA's four files and their Rust ports, the provenance comment),
 //! grouped into several tests as SSE's are so they run in parallel.
 //!

@@ -18,7 +18,7 @@
 
 //! The offline documentation check: every relative link and fragment in the tracked Markdown
 //! resolves. The docs-links pre-commit hook runs this file (`cargo test --locked -p meta --test
-//! docs`); `test/docs`, its Go original, stays until the cutover and runs in `make go-test`.
+//! docs`); it ports `test/docs`, its Go original, which the cutover removed.
 
 use std::fs;
 

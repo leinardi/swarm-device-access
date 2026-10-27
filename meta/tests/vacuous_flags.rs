@@ -17,8 +17,8 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! No gate carries a flag that makes it pass on nothing: the Makefile and its fragments, the
-//! pre-commit configuration and every YAML file under .github. The Rust side of
-//! `test/toolchain/vacuous_flags_test.go`, which stays until the cutover: its flags, the Rust ones
+//! pre-commit configuration and every YAML file under .github. The Rust port of
+//! `test/toolchain/vacuous_flags_test.go`, which the cutover removed: its flags, the Rust ones
 //! included (SSE has only the first six), and its reviewed exceptions. The exceptions are SSE's
 //! form: the exact fragment is removed from the line before the flags are matched, so a second
 //! `|| true` on an allowed line is still caught, where the Go test lets the whole line through.

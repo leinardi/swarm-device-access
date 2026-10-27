@@ -14,8 +14,8 @@
 # limitations under the License.
 #
 # Adapted from swarm-scheduler-exporter/Cargo.toml at d57dcc220d29, originally MIT-licensed,
-# Copyright (c) 2026 Roberto Leinardi. The Rust port of swarm-device-access (docs/rust-port.md);
-# the Go code keeps shipping until the cutover.
+# Copyright (c) 2026 Roberto Leinardi. The Rust port of swarm-device-access (docs/rust-port.md),
+# which replaced the Go code in 2.0.
 
 [workspace]
 # Listed explicitly, never as a glob: meta/tests/workspace_lints.rs checks each member's manifest.

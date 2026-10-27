@@ -15,15 +15,14 @@ description: >
 # Rust Style Guide — swarm-device-access
 
 Adapted from the `rust-style-guide` skills of swarm-scheduler-exporter (SSE, at `d57dcc220d29`)
-and swarm-rootless-docker (SRD, at `16913a4d87d8`), the two projects the port reuses code from.
-The rules come from the root `Cargo.toml` (`[workspace.lints]`), `clippy.toml`, `rustfmt.toml`,
-the design record in [`docs/rust-port.md`](../../../docs/rust-port.md) and the Go code, which
-stays the behavioural authority until the cutover. §1–§4 are what the lints enforce, §5–§7 are the
-maintainer's rules, §8–§14 are this daemon's patterns, §15–§17 are review rules.
-
-The Rust workspace lands phase by phase during the port. A rule that names a path, a module or a
-make target applies from the commit that adds it; until then it is the target the new code is
-written against, not a reason to skip the rule.
+and swarm-rootless-docker (SRD, at `16913a4d87d8`), the two projects the Rust code reuses code
+from. The rules come from the root `Cargo.toml` (`[workspace.lints]`), `clippy.toml`,
+`rustfmt.toml` and the design record in [`docs/rust-port.md`](../../../docs/rust-port.md). The
+behavioural authority is 1.x, the Go daemon the Rust code replaced, as its frozen captures under
+`tests/testdata` and the published v1.0.3 image record it: any difference from it that is not a
+numbered Q entry in the README's [Migrating from 1.x](../../../README.md#-migrating-from-1x) is a
+defect. §1–§4 are what the lints enforce, §5–§7 are the maintainer's rules, §8–§14 are this
+daemon's patterns, §15–§17 are review rules.
 
 Every lint and test command runs workspace-wide, so the three members (the daemon package,
 `testenv` and `meta`) are held to the same set:
@@ -95,10 +94,11 @@ rustfmt does not wrap comments: keep them at 100 columns by hand.
   error string byte for byte, including the `%w` chain: a Go `fmt.Errorf("open cgroup %s: %w",
   path, err)` becomes a variant whose `Display` writes `open cgroup <path>`, a colon and a
   space, then the source's own `Display`. A test pins any new text, and a wording difference
-  that cannot be avoided is a Q entry in `docs/rust-port.md`, never a silent change.
+  that cannot be avoided is a Q entry in the README's Migrating from 1.x table, never a silent
+  change.
 - Go's `errors.Join` is ported once (`go_compat`): the messages joined with newlines, nil entries
-  dropped. Use it wherever the Go code joins; never build the joined string by hand.
-- Classify by method, not by string: `is_not_found()`, `errno()` and friends, the way Go uses
+  dropped. Use it wherever 1.x joined errors; never build the joined string by hand.
+- Classify by method, not by string: `is_not_found()`, `errno()` and friends, the way 1.x used
   `errdefs.IsNotFound` and `errors.Is`.
 - No `unwrap`/`expect` outside tests. A `Mutex` is read with
   `.lock().unwrap_or_else(PoisonError::into_inner)` only where the guarded state is still
@@ -107,7 +107,7 @@ rustfmt does not wrap comments: keep them at 100 columns by hand.
 - A failure the daemon carries on from (one inspect, one container's apply) is logged with the
   error as the `err` attribute and the work continues or is retried; a startup failure returns an
   exit code from `run`. `main` is the only place that exits the process: `0` on a clean stop, `1`
-  for a startup or validation error (written to stderr before the logger exists, as Go does), `2`
+  for a startup or validation error (written to stderr before the logger exists, as 1.x did), `2`
   for a usage error (Q1).
 
 ## 4. Documentation, comments and file headers
@@ -115,12 +115,12 @@ rustfmt does not wrap comments: keep them at 100 columns by hand.
 - Every module starts with a `//!` comment saying what it owns; every public item has a `///`
   comment starting with what it is or does.
 - Every `.rs` file starts with this project's Apache-2.0 header (`Copyright <year> Roberto
-  Leinardi.`, the year of the file's first commit), as the Go files do. A file reused from SSE or
+  Leinardi.`, the year of the file's first commit). A file reused from SSE or
   SRD keeps that header and adds, right below it, the provenance comment:
   `// Adapted from <repo>/<path> at <commit>, originally MIT-licensed, Copyright (c) <year>
   Roberto Leinardi`. Never paste the MIT block itself.
 - `src/cgroup/{api,ebpf,v1,v2}.rs` port NVIDIA's files: they keep NVIDIA's Apache-2.0 block
-  verbatim, the crun and runc provenance paragraph where the Go file has one, and a modification
+  verbatim, the crun and runc provenance paragraph where NVIDIA's file has one, and a modification
   notice under it (Apache 2.0 §4b). Never reformat or relicense that block.
 - A comment says **why the code is the way it is**; history and "changed X to Y" belong in the
   commit body.
@@ -135,8 +135,9 @@ rustfmt does not wrap comments: keep them at 100 columns by hand.
   distance: `index`, `container_id`, `rule`, `major`, `program_fd`, never `i`, `c`, `fd`. Closure
   parameters too (`|mount| ...`, not `|m| ...`).
 - Error bindings name their source when several are in scope: `inspect_error`, `attach_error`.
-- Keep the Go names for ported concepts (`Reconcile`, `compute_desired`, `apply_pinned`,
-  `SetDeviceRules` as `set_device_rules`), so a reader can hold the Go and the Rust side by side.
+- Keep the 1.x names for ported concepts (`reconcile`, `compute_desired`, `apply_pinned`,
+  `SetDeviceRules` as `set_device_rules`), so the docs, the ported tests' `Go:` comments and the
+  1.x sources in the git history still map onto the code.
 - Label keys, metric names and their labels are constants beside their owner, never literals at a
   call site.
 
@@ -161,10 +162,11 @@ rustfmt does not wrap comments: keep them at 100 columns by hand.
 ## 7. Reuse before writing
 
 The binding reuse policy and the reuse ledger are in
-[`docs/rust-port.md`](../../../docs/rust-port.md). Before designing a component, read its ledger
-row and the SSE or SRD code and tests it names, at the pinned commit; copy and adapt them, keeping
-their structure, naming, error handling and dependency choices wherever this project's contract
-allows. A reused component's tests come with it in the same commit.
+[`docs/rust-port.md`](../../../docs/rust-port.md): it is the reuse ledger to check and update when
+a reused component changes or an upstream fix is taken. Before designing or changing a component,
+read its ledger row and the SSE or SRD code and tests it names, at the pinned commit; copy and adapt
+them, keeping their structure, naming, error handling and dependency choices wherever this
+project's contract allows. A reused component's tests come with it in the same commit.
 
 - **One implementation per feature.** No feature has two implementations (two Docker request
   paths, two loggers, two `ParseBool`s, two `errors.Join`s, two test-wait helpers) unless
@@ -174,9 +176,9 @@ allows. A reused component's tests come with it in the same commit.
   source path and commit, mode (unchanged, adapted or new), each adaptation, the reason for every
   departure. A later upstream commit is taken only by updating the row.
 - A fix worth sending back to SSE or SRD goes on the upstream-candidates list in
-  `docs/rust-port.md`; no shared crate is extracted during the port.
-- The Go code stays the authority: a reference implementation never overrides this project's
-  log and error text, its Engine request contract or its security boundaries.
+  `docs/rust-port.md`; no shared crate is extracted.
+- 1.x stays the authority: a reference implementation never overrides this project's log and
+  error text, its Engine request contract or its security boundaries.
 
 | Need | Use | Not |
 | --- | --- | --- |
@@ -237,7 +239,7 @@ allows. A reused component's tests come with it in the same commit.
 ## 11. Logging
 
 - The logger (`src/logger`) reproduces slog's text and JSON handlers and this project's plain
-  handler byte for byte, against the Go goldens. There is no `tracing`.
+  handler byte for byte, against the frozen 1.x goldens. There is no `tracing`.
 - Components receive a cloned `LogHandle`, never a process global: a reconfigure (startup, a
   `SIGHUP` that changes the format or level) swaps the handler behind the shared cell, so every
   clone logs through the current one. Call
@@ -253,7 +255,7 @@ allows. A reused component's tests come with it in the same commit.
   has one budget from the first signal, covering every step, and ends with
   `Runtime::shutdown_timeout(remaining)`; each step gets only what remains, never a fresh grace
   period. Signals after the first are swallowed.
-- The release profile sets `panic = "abort"`: Go has no `recover` here, so a panic crashes the
+- The release profile sets `panic = "abort"`: 1.x had no `recover`, so a panic crashes the
   process and Swarm or the launcher restarts it. There is no `catch_unwind` anywhere; a task that
   panics under unwind would leave a silently stuck daemon.
 - Blocking syscalls run in `spawn_blocking`. The cgroup and BPF mutation of one reconcile (pin,
@@ -282,12 +284,14 @@ changing in the same commit.
 - Unit tests sit beside the code (`#[cfg(test)] mod tests`, or a `tests.rs` in the module
   directory); black-box tests and the goldens are in `tests/`; the integration suite is in
   `testenv`, behind the `integration` feature; meta-tests are in `meta/tests`.
-- **Go provenance.** A test ported from Go carries a doc comment naming the Go test it replaces:
-  ``/// Go: `TestReconcile_RevokesOnInspectFailure` ``. A Go test that is not ported is listed in
-  the module's tests with the reason. Integration tests keep their Go names, which the run filter
-  selects.
-- Go baselines (goldens, captures) come from Go programs or capture tests behind the
-  `goldencapture` build tag, never from reasoning about what Go would print.
+- **Go provenance.** A test ported from 1.x carries a doc comment naming the Go test it
+  replaces: ``/// Go: `TestReconcile_RevokesOnInspectFailure` ``; keep it when the test changes.
+  A Go test that was not ported is listed in the module's tests with the reason. Integration tests
+  keep their Go names, which the run filter selects.
+- The Go baselines under `tests/testdata` (goldens, captures, fixtures) are frozen 1.x captures
+  (`docs/rust-port.md`, Go golden captures): never edit or regenerate one by hand. A new baseline
+  comes from running the 1.x code (the git history before the cutover, or the published v1.0.3
+  image), never from reasoning about what Go would print.
 - Deterministic over timed: a race window is built by the test (a barrier in the fake), never hit
   by sleeping and hoping.
 - Time-dependent tests run on a paused runtime (`#[tokio::test(start_paused = true)]`) with a
@@ -311,7 +315,7 @@ changing in the same commit.
   above.
 - `#[allow]`, or an `#[expect]` whose reason restates the lint (§2).
 - A `_ =>` arm on an enum (§6).
-- An error or log text that differs from 1.x without a Q entry (§3, §11).
+- An error or log text that differs from 1.x without a Q entry in the README (§3, §11).
 - A write Docker call, or the launcher engine, reachable from the daemon path (§10).
 - A cgroup or BPF mutation that a dropped future can interrupt, or a reservation released before
   its transaction ended (§12).
@@ -325,17 +329,19 @@ changing in the same commit.
 - [ ] `cargo fmt --all` clean; clippy clean with
       `--workspace --all-targets --all-features -- -D warnings`
 - [ ] No `unwrap`/`expect`/printing outside tests; no `unsafe` outside `bpf_sys.rs`
-- [ ] Errors hand-written, their `Display` the Go text including the `%w` chain
+- [ ] Errors hand-written, their `Display` the 1.x text including the `%w` chain
 - [ ] Each `#[expect]` has a reason saying why the fix does not apply; baseline updated (§2)
 - [ ] Descriptive names; every enum variant matched by name; public items first
 - [ ] `#[must_use]`, `# Errors` and backticked identifiers where pedantic asks
-- [ ] Ledger row added or updated; no second implementation; reused files carry the Apache
-      header with the provenance line (§7, §4)
+- [ ] Ledger row in `docs/rust-port.md` checked, and added or updated when a reused component
+      changed or an upstream fix was taken; no second implementation; reused files carry the
+      Apache header with the provenance line (§7, §4)
 - [ ] Time from the `Clock`; logs through a `LogHandle` with the 1.x message and level
 - [ ] Daemon path on the read-only Docker trait; writes only in the launcher engine
 - [ ] Ported tests carry their `Go:` comment; no unbounded wait under a paused clock; every new
       meta-test has a negative control and never skips
-- [ ] Any unavoidable difference from 1.x recorded as a Q entry in `docs/rust-port.md`
+- [ ] Any unavoidable difference from 1.x recorded as a Q entry in the README's Migrating from
+      1.x table
 
 ## 17. Lint and test loop
 

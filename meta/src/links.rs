@@ -18,7 +18,7 @@
 
 //! Checks the Markdown documentation offline: every relative link and fragment resolves. It needs
 //! no network and no tool beyond cargo and git, so it runs as the docs-links pre-commit hook. The
-//! Rust side of `test/docs/links.go`, which stays until the cutover.
+//! Rust port of `test/docs/links.go`, which the cutover removed.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;

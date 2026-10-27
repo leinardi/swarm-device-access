@@ -7,9 +7,14 @@ that way.
 
 ## What a release produces
 
-- Two static binaries, `swarm-device-access-linux-amd64` and `swarm-device-access-linux-arm64`,
-  built with `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false` and the version, commit and commit date
-  compiled in, plus `checksums.txt` over both. All three are attached to the GitHub release.
+- Two static musl binaries, `swarm-device-access-linux-amd64` and
+  `swarm-device-access-linux-arm64`, built by `make rust-release-binaries` with the exact Rust
+  release of `rust-toolchain.toml`, cargo-zigbuild and zig at the versions
+  [`.mk/rust-release.mk`](../.mk/rust-release.mk) pins, the checkout, the cargo home and the
+  toolchain's sources remapped so no build-host path is compiled in, and the version, commit and
+  commit date stamped through `SWARM_DEVICE_ACCESS_VERSION`, `SWARM_DEVICE_ACCESS_COMMIT` and
+  `SWARM_DEVICE_ACCESS_DATE`, plus `checksums.txt` over both. All three are attached to the GitHub
+  release.
 - A multi-arch (`linux/amd64`, `linux/arm64`) image at
   `ghcr.io/leinardi/swarm-device-access:<version>`, with an SBOM and `mode=max` BuildKit provenance,
   a [build provenance

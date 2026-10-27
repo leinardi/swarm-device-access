@@ -20,55 +20,56 @@ Docker daemon
     | container start / unpause / die / destroy events (Unix socket)
     v
 +---------------------------------------------------------------+
-| cmd/swarm-device-access/main.go                                |
-|   flags + config file → config.Store; SIGHUP → reloader        |
-|   processor.Processor; daemon.Run                              |
+| src/main.rs, src/run.rs                                        |
+|   flags + config file → config::Store; SIGHUP → Reloader       |
+|   processor::Processor; daemon::run                            |
 +---------------------------------------------------------------+
     |
     v
 +---------------------------------------------------------------+
-| internal/daemon                                                |
-|   Run                                                          |
-|    ├─ subscribe (Events, Since=now)       ← before the listing |
-|    ├─ coordinator.run                     ← one goroutine      |
+| src/daemon                                                     |
+|   run                                                          |
+|    ├─ subscribe (events, since=now)       ← before the listing |
+|    ├─ Coordinator::run                    ← one task           |
 |    │    passes: list running containers, reconcile each        |
-|    │    (startup, SIGHUP via PublishAndReconcile, systemd      |
+|    │    (startup, SIGHUP via publish_and_reconcile, systemd    |
 |    │    reload), retries with backoff, lifecycle sweep         |
-|    ├─ startReloadWatcher (systemd DBus)   ← own goroutine,     |
+|    ├─ systemd::supervise (D-Bus)          ← own task,          |
 |    │    requests a pass per subscription and per reload        |
-|    └─ listenEvents → consumeEvents        ← reconnect loop     |
-|         └─ coordinator.handleEvent                             |
-|              start/unpause → reconcileContainer → processOne   |
-|              die/destroy   → terminateContainer                |
+|    └─ listen_events → consume_events      ← reconnect loop     |
+|         └─ Coordinator::handle_event                           |
+|              start/unpause → reconcile_container → process_one |
+|              die/destroy   → terminate_container               |
 +---------------------------------------------------------------+
     |
     v
 +---------------------------------------------------------------+
-| internal/processor: Processor.Reconcile(id)                    |
-|   ContainerInspect → labels, State, Mounts                     |
-|   computeDesired: policy.Enabled, CollectMountRules per /dev   |
-|     mount (openat2 beneath /dev → fstat → sysfs DEVNAME →      |
+| src/processor: Processor::reconcile(id)                        |
+|   container_inspect → labels, State, Mounts                    |
+|   compute_desired: Global::enabled, collect_mount_rules per    |
+|     /dev mount (openat2 beneath /dev → fstat → sysfs DEVNAME → |
 |     deny/allow on every name), aggregate per device            |
-|   applyPinned: pidfd → /proc/<pid>/cgroup → OpenCgroup →       |
-|     re-verify → cgroup.Interface.SetDeviceRules(handle, rules) |
+|   apply_pinned: pidfd → /proc/<pid>/cgroup → CgroupHandle →    |
+|     re-verify → cgroup::Interface::set_device_rules            |
 +---------------------------------------------------------------+
     |                          |
     | cgroup v1                | cgroup v2
     v                          v
 devices.allow / devices.deny   owned wrapper around the runtime's
-(v1.go, v1set.go, ledger.go)   BPF_CGROUP_DEVICE filter
-                               (v2.go, v2plan.go, v2ops.go, owned.go, ebpf.go)
+(v1.rs, v1set.rs, ledger.rs)   BPF_CGROUP_DEVICE filter (v2.rs,
+                               v2plan.rs, v2ops.rs, owned.rs,
+                               ebpf.rs, asm.rs, bpf_sys.rs)
 ```
 
 ### Reconciliation
 
-`Processor.Reconcile` is the one idempotent path every trigger runs: a start or unpause event, the
+`Processor::reconcile` is the one idempotent path every trigger runs: a start or unpause event, the
 startup pass, a systemd reload and a config reload. It computes the complete desired set for the
 container under the current config and sets exactly that set, including none at all: a container
 that policy disables or does not opt in, one with invalid labels, and one whose device set cannot be
 established all get the empty set, so an earlier grant is revoked rather than kept. A container that
 is not running, or that Docker cannot report on, has its grants revoked in the cgroup its lifecycle
-was last verified in (`Processor.Terminate` for `die` and `destroy`, a periodic `Processor.Sweep`
+was last verified in (`Processor::terminate` for `die` and `destroy`, a periodic `Processor::sweep`
 for records whose cgroup is gone).
 
 Before changing a cgroup the processor pins the container's process with a pidfd, resolves the
@@ -84,17 +85,17 @@ what its parent denies, so such a container gets no grants there.
 
 ### Coordinator
 
-The coordinator (`internal/daemon/coordinator.go`) is the single owner of reconciliation passes.
-Startup, `SIGHUP` (through `Processor.PublishAndReconcile`, which publishes the new config
-generation) and systemd reloads only request a pass; one goroutine runs them. A request arriving
+The coordinator (`src/daemon/coordinator.rs`) is the single owner of reconciliation passes.
+Startup, `SIGHUP` (through `Processor::publish_and_reconcile`, which publishes the new config
+generation) and systemd reloads only request a pass; one task runs them. A request arriving
 while a pass runs makes that pass stop after its current container and start again under the newest
 request. Containers whose reconcile failed are retried with backoff
 (`sda_reconcile_pending_containers`); `sda_reload_incomplete` is 1 until a pass for the latest
 request has visited every running container, and `config reload complete` is logged when it has.
 
-Events go through the coordinator too (`handleEvent`). Every reconcile or cleanup of a container
-first reserves it, so work requested for a container that is already being handled coalesces into
-one follow-up instead of running twice.
+Events go through the coordinator too (`Coordinator::handle_event`). Every reconcile or cleanup of a
+container first reserves it, so work requested for a container that is already being handled
+coalesces into one follow-up instead of running twice.
 
 ### Startup back-fill
 
@@ -105,27 +106,27 @@ grants a previous instance left behind would stay.
 The Docker event stream is opened **before** the listing, with `Since` set to the time captured just
 before subscribing. A container that starts while the list is being processed is therefore still
 delivered as a `start` event instead of falling into the gap between the list and the subscription
-(the typical node-boot case). The client delivers events on an unbuffered channel, so events that
-arrive during the listing wait until the event loop starts consuming them; nothing is dropped. `Run`
-starts consuming events once the first pass has ended.
+(the typical node-boot case). The stream is not read until the event loop consumes it, so events
+that arrive during the listing wait in the open stream, with backpressure on the socket; nothing is
+dropped. `daemon::run` starts consuming events once the first pass has ended.
 
-The coordinator's `processed map[string]time.Time` records, for every container a pass reconciled
+The coordinator's `processed` map records, for every container a pass reconciled
 successfully, the time captured just before it was inspected. A `start` or `unpause` event for a
 container in the map is skipped only if its timestamp is not newer than that time: Docker emits
 `start` after the container is running, so an older event was already visible to the inspect. A
 newer event (for example `docker restart` shortly after the daemon started) belongs to a new run
 with a new cgroup and is applied. The entry is removed by the first event for that ID either way,
-and entries older than `processedTTL` (2 × the 30 s maximum backoff) are ignored and pruned; the
+and entries older than `PROCESSED_TTL` (2 × the 30 s maximum backoff) are ignored and pruned; the
 prune timer is armed only while the map has entries, so an idle daemon does not wake for it. Event
 time and daemon time come from the same host clock.
 
-Passes, retries and events share the same per-container code path (`processOne`), so all of them
+Passes, retries and events share the same per-container code path (`process_one`), so all of them
 record the same metrics and log a `Warn` on failure (`could not process running container` in a
 pass, `could not reconcile pending container` on retry, `could not process container` for events).
 
 ### Event loop reconnect
 
-`listenEvents` wraps `consumeEvents` in a reconnect loop with exponential backoff (`1s`→`30s`). If
+`listen_events` wraps `consume_events` in a reconnect loop with exponential backoff (`1s`→`30s`). If
 the Docker event stream drops (daemon restart, socket error, channel close), the loop reconnects
 rather than exiting.
 
@@ -137,21 +138,21 @@ re-lists and reconciles every running container
 (`docker event stream re-subscribed; reconciling running containers`). Replayed start events the
 pass already covered are skipped through the `processed` map.
 
-Context cancellation (SIGTERM/SIGINT via `signal.NotifyContext`) exits cleanly at any point; `Run`
-waits for the coordinator, so shutdown does not cut off a reconcile in the middle of its cgroup
-mutation.
+Cancellation (the first SIGTERM or SIGINT cancels the run's `CancellationToken`) exits cleanly at
+any point; `daemon::run` waits for the coordinator and every blocking transaction, so shutdown does
+not cut off a reconcile in the middle of its cgroup mutation.
 
 ### systemd daemon-reload handling
 
 `systemctl daemon-reload` can detach cgroup BPF programs. The optional DBus watcher
-(`internal/systemd/`) subscribes to `org.freedesktop.systemd1.Manager.Reloading` and requests a pass
+(`src/systemd.rs`) subscribes to `org.freedesktop.systemd1.Manager.Reloading` and requests a pass
 when it receives the completion edge (`active=false`). Any client on the system bus can emit a
 signal with that name, so the watcher only counts one sent from `/org/freedesktop/systemd1` by the
 unique bus name that owns `org.freedesktop.systemd1` (resolved with `GetNameOwner` at startup and
 followed through the bus daemon's `NameOwnerChanged`). Re-applies are coalesced: reloads that
 complete while one runs lead to a single trailing run.
 
-The watcher runs in its own goroutine, started before the startup pass, so connecting to the bus
+The watcher runs on its own task, started before the startup pass, so connecting to the bus
 never delays the pass or the event loop. Each connection attempt is bounded (10 s): the connection
 is bound to the attempt, so one that times out is closed, which fails whatever it was waiting on,
 and the next attempt starts only after it has returned. An attempt that fails, and a subscription
@@ -165,7 +166,7 @@ nobody received.
 
 Swarm rejects `privileged`, `cgroup: host`, `pid: host` and `userns_mode: host` on services, so the
 Swarm service runs the image as `swarm-device-access launch [launch flags] -- [daemon flags]`,
-unprivileged and with only the Docker socket (`internal/launcher`):
+unprivileged and with only the Docker socket (`src/launcher`):
 
 1. **Self-identification.** The launcher finds its container ID in `/proc/self/mountinfo`: the root
    of the `/etc/hostname`, `/etc/hosts` and `/etc/resolv.conf` mounts is
@@ -178,29 +179,31 @@ unprivileged and with only the Docker socket (`internal/launcher`):
    or is this very container restarted; one left by the old `sh` wrapper (image title
    `swarm-device-access`, no role label) is removed too. A live owner, any other inspect error or a
    foreign container aborts the launcher.
-3. **Create, attach, wait, start**, in the order the `docker run` CLI uses. `daemonSpec` is the one
-   source of the daemon's privileged set: the image ID, `Privileged`, host cgroup, PID and user
-   namespaces, network `none` (or `host` with `--host-network`), `AutoRemove`, a 10s stop timeout,
-   and bind `Mounts` (never `Binds`, so a missing source fails the create) for the Docker socket,
-   `/sys` at `/host/sys`, `/dev`, and optionally the DBus socket and a read-only config directory.
-   The attach copy goroutine starts before `ContainerStart`, and `ContainerWait(removed)` is
-   registered before it, so no output and no exit is missed. Any failure after the create removes
-   the created container.
-4. **Supervision.** The attach and wait streams each run on their own context, detached from the
-   signal context; only their establishment is bounded (`DockerCallTimeout`), and a call that
-   ignores its canceled context (the hijacked attach reads the upgrade response on a raw connection)
-   is abandoned at the deadline, its late result released in the background. The launcher returns
+3. **Create, attach, wait, start**, in the order the `docker run` CLI uses. `daemon_spec`
+   (`src/launcher/spec.rs`) is the one source of the daemon's privileged set: the image ID,
+   `Privileged`, host cgroup, PID and user namespaces, network `none` (or `host` with
+   `--host-network`), `AutoRemove`, a 10s stop timeout, and bind `Mounts` (never `Binds`, so a
+   missing source fails the create) for the Docker socket, `/sys` at `/host/sys`, `/dev`, and
+   optionally the DBus socket and a read-only config directory. The attach copy task starts before
+   the start call, and the wait for `removed` is registered before it, so no output and no exit is
+   missed. Any failure after the create removes the created container.
+4. **Supervision.** The attach and wait streams run detached from the signal's cancellation; only
+   their establishment is bounded (`DOCKER_CALL_TIMEOUT`), raced against the cancellation, and a
+   call that loses the race is dropped, which closes its connection. The launcher returns
    the daemon's status after it is removed and its output drained. `SIGTERM`, a broken wait stream
    or a lost log stream stop the daemon **by ID**, and every shutdown shares one 20s budget (a 10s
-   stop plus `DockerCallTimeout`) for the stop, the wait for the removal and the drain, inside the
+   stop plus `DOCKER_CALL_TIMEOUT`) for the stop, the wait for the removal and the drain, inside the
    compose files' `stop_grace_period: 30s`. With the wait stream broken, the removal is confirmed by
    polling inspect until the daemon is gone.
 
 ## BPF program structure
 
 For cgroup v2 hosts, device control is implemented via `BPF_CGROUP_DEVICE` programs. The code in
-`internal/cgroup/ebpf.go` (ported from runc/opencontainers-cgroups, originally from crun) builds the
-BPF instruction list using `cilium/ebpf/asm`.
+`src/cgroup/ebpf.rs` (ported from runc/opencontainers-cgroups, originally from crun) builds the
+BPF instruction list with the instruction model of `src/cgroup/asm.rs`, whose encoding is
+byte-identical to the `cilium/ebpf/asm` encoding 1.x used, so the daemon recognises the wrappers 1.x
+attached. `src/cgroup/bpf_sys.rs`, the only module allowed `unsafe`, issues the raw `bpf(2)`
+commands that load, attach, query and dump the programs.
 
 Each device rule produces a block of instructions that match on four fields loaded at program entry:
 
@@ -225,7 +228,7 @@ RETURN
 ```
 
 The rule blocks sit inside an owned wrapper around the runtime's original filter
-(`internal/cgroup/owned.go`):
+(`src/cgroup/owned.rs`):
 
 ```
 HEADER, init, rule blocks, TRAILER, original
@@ -298,20 +301,24 @@ level=INFO msg="container processed" id=abc pid=1234 devices_granted=12 skipped=
 names outside `/dev`, dangling names, symlinks to directories and non-device entries, and `errors`
 counts per-device failures.
 
-## Package layout
+## Module layout
 
-| Package | Responsibility |
+| Module | Responsibility |
 | --- | --- |
-| `cmd/swarm-device-access` | Entrypoint: flags, settings merge and validation, config file reload on `SIGHUP` (`config.go`), wiring; `launch` subcommand (`launch.go`) |
-| `internal/launcher` | Launcher mode: self-identification, the daemon container spec (`daemonSpec`, the privileged set), stale-daemon cleanup, attach/wait/start and supervision |
-| `internal/config` | Strict YAML loader, runtime config `Store` with generations and its `Publisher` |
-| `internal/policy` | Cross-platform policy evaluation: mode (opt-in/all), label parsing, glob allow/deny (`Denied`, `Authorized`) |
-| `internal/daemon` | Event loop (`Run`, `listenEvents`, `consumeEvents`, `processOne`) and the coordinator that owns passes, retries, the `processed` dedup and container reservations |
-| `internal/processor` | `Reconcile`, `Terminate`, `Sweep`, `PublishAndReconcile`; desired-set computation (`CollectMountRules`, `devfs.go`), process pinning (`pin.go`), lifecycle history (`lifecycle.go`) |
-| `internal/cgroup` | Device-rule application behind `Interface.SetDeviceRules(handle, rules)`: cgroup v1 (`v1.go`, `v1set.go`, `ledger.go`) and v2 (`v2.go`, `v2plan.go`, `v2ops.go`, `owned.go`, `ebpf.go`); cgroup handles (`handle.go`); `/proc` cgroup parsing. NVIDIA-derived code. |
-| `internal/observability` | Prometheus metrics (`Recorder`, nil-safe), `/healthz`, `/readyz`, pprof servers |
-| `internal/logger` | `slog`-based singleton with `text`, `json`, `plain` handlers |
-| `internal/systemd` | DBus watcher for systemd `Reloading` signal |
+| `src/main.rs`, `src/run.rs` | Entrypoint: the runtime, startup checks (`openat2` probe, `RLIMIT_MEMLOCK`), logger, store, Docker client, metrics server, processor and `daemon::run`; the shutdown budget; the `SIGHUP` reload task; `launch` dispatch |
+| `src/cli.rs`, `src/cli/settings.rs` | The daemon's and `launch`'s flags (double-dash only, Q1); settings merge (command line over file over default), validation, restart-only changes and the `SIGHUP` `Reloader` |
+| `src/launcher` | Launcher mode: self-identification (`self_id.rs`), the daemon container spec (`spec.rs`, `daemon_spec`, the privileged set), stale-daemon cleanup (`stale.rs`), the write-capable Engine client (`engine.rs`), attach/wait/start and supervision |
+| `src/config` | Strict YAML loader (`load_file`, shape checks), runtime config `Store` with generations and its single `Publisher` |
+| `src/policy` | Policy evaluation: mode (opt-in/all), label parsing, glob allow/deny (`Global::denied`, `Global::authorized`) |
+| `src/daemon` | Event loop (`run`, `events.rs`: `listen_events`, `consume_events`) and the coordinator (`coordinator.rs`) that owns passes, retries, the `processed` dedup, container reservations and `process_one` |
+| `src/processor` | `reconcile`, `terminate`, `sweep`, `publish_and_reconcile` (`reconcile.rs`); desired-set computation (`rules.rs`: `collect_mount_rules`; `devfs.rs`), process pinning (`pin.rs`), lifecycle history (`lifecycle.rs`) |
+| `src/cgroup` | Device-rule application behind `Interface::set_device_rules(handle, rules)`: cgroup v1 (`v1.rs`, `v1set.rs`, `ledger.rs`) and v2 (`v2.rs`, `v2plan.rs`, `v2ops.rs`, `owned.rs`, `ebpf.rs`, `asm.rs`, `bpf_sys.rs`); cgroup handles (`handle.rs`); `/proc` cgroup parsing (`api.rs`). NVIDIA-derived code. |
+| `src/docker` | The daemon's read-only Docker Engine client: `GET` plus the `HEAD /_ping` of API version negotiation, over the configured unix socket only; the decoded types and the event stream |
+| `src/metrics`, `src/server.rs`, `src/server` | Prometheus metrics (`Recorder`, with a no-op form) and their text exposition; the `/metrics`, `/healthz` and `/readyz` server with Go's `http.Server` deadlines |
+| `src/logger` | slog-compatible logger with `text`, `json` and `plain` handlers, shared through a `LogHandle` |
+| `src/systemd.rs` | D-Bus watcher for systemd's `Reloading` signal (zbus) |
+| `src/go_compat` | Ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts) |
+| `src/clock.rs`, `src/task.rs`, `src/version.rs` | The one wall-clock read behind the injected `Clock`; awaiting spawned work to completion; the build's version stamps |
 
 ## Policy model
 
@@ -403,16 +410,14 @@ Metrics exposed:
 | `sda_reconcile_pending_containers` | gauge | — | Containers whose last reconcile failed and are retried with backoff |
 | `sda_reload_incomplete` | gauge | — | 1 until a pass for the latest config and trigger has reached every running container, else 0 |
 
-### pprof debug server (`--debug-addr`)
+### No debug server (`--debug-addr`)
 
-When `--debug-addr=127.0.0.1:6060` is set, the standard Go pprof endpoints are available at
-`/debug/pprof/*`. The server has a 10 s read timeout and a 60 s idle timeout but no write timeout,
-because a CPU profile or trace streams for as long as the caller asks; keep it on a loopback
-address.
+There is no pprof server since 2.0 (Q2 in the README's Migrating from 1.x): `--debug-addr` and the
+`debug-addr` key must be empty, and any other value is refused at startup and on reload.
 
-Both servers bind their address before the daemon goes on, and a busy or invalid address makes the
-daemon exit with an error (the metrics server is stopped again if the debug server then fails). The
-metrics server has a 10 s read, 30 s write and 60 s idle timeout.
+The metrics server binds its address before the daemon goes on, and a busy or invalid address
+makes the daemon exit with an error. It has a 5 s read-header, 10 s read, 30 s write and 60 s idle
+timeout.
 
 ## Dry-run mode
 
@@ -463,6 +468,6 @@ cannot subscribe: the first failure is logged at `Warn`
 Check the socket path with `--docker-socket`. Default: `/var/run/docker.sock`. On some hosts Docker
 Desktop uses a different path.
 
-The daemon requires Docker Engine 19.03+ (API 1.40). The `github.com/moby/moby/client` SDK refuses
-older engines with
+The daemon requires Docker Engine 19.03+ (API 1.40). Its Docker client (`src/docker`), which
+negotiates the API version as the 1.x moby client did, refuses older engines with
 `API version … is not supported by this client: the minimum supported API version is 1.40`.
