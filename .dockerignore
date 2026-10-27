@@ -16,6 +16,7 @@ tests
 
 # Local artifacts
 dist
+target
 coverage.out
 coverage.html
 

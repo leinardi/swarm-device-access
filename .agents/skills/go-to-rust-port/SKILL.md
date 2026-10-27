@@ -220,6 +220,11 @@ Prometheus exporter).
   tests as the control that the Go side did not move. (ShellCheck 0.11, swarm-device-access)
 - cargo-deny 0.20: webpki-roots is `CDLA-Permissive-2.0` (allow with a comment); `{ crate = … }`
   ignores only yanked versions → ignore advisories by ID with a reason. (cargo-deny warnings)
+- cargo-deny 0.20.2 leaves workspace members' dev-dependencies out of its graph: with only a meta
+  crate's dev-dependencies, `cargo deny --workspace list` names the members alone, and
+  `exclude-dev = false` changes nothing. Their licences and advisories are never checked → decide
+  the dev graph's licences in `deny.toml` by hand, with a comment, and expect a
+  `license-not-encountered` warning for them. (`cargo deny list`, swarm-device-access)
 - **Static builds:** cargo-zigbuild builds static musl for amd64 and arm64 from one platform; it
   publishes no aarch64 musl asset (an arm64 build host takes `aarch64-unknown-linux-gnu` in a
   glibc stage). Alpine's rust links dynamically; `+crt-static` needs `--target`. (failed builds)

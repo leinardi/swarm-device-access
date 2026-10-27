@@ -341,8 +341,8 @@ changing in the same commit.
 
 1. `make rust-fmt` (or let the edit hook do it).
 2. `make verify`: the Go and the Rust verification while Go exists (`verify-rust` runs
-   `rust-build`, `rust-fmt-check`, `rust-clippy`, `rust-test` and `rust-deny` over the
-   workspace, the meta-tests included).
+   `rust-build`, `rust-fmt-check`, `rust-clippy` and `rust-test` over the workspace, the
+   meta-tests included). After a dependency change, also `make rust-deny` (network required).
 3. Fix each report and re-run until clean. For a single test:
    `cargo test --locked --lib <module>::tests::<name>`.
 4. After a change the integration suite exercises (daemon, processor, cgroup, launcher): the

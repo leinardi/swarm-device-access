@@ -6,9 +6,13 @@ A small **Linux-only** daemon (`//go:build linux` on every Go file under `cmd/` 
 `internal/`) that injects cgroup BPF device-allow rules into containers that bind-mount `/dev/...`
 paths. Solves the Docker-Swarm gap where `devices:` / `device_cgroup_rules:` are silently ignored.
 
+A Rust port is in progress beside the Go code, which keeps shipping until the cutover: a Cargo
+workspace with the root package, `meta` (repository meta-tests) and `testenv` (the integration
+harness). [`docs/rust-port.md`](docs/rust-port.md) records its design and provenance.
+
 ## Common commands
 
-Build / test / vet — uses Make wrappers around `go`:
+Build / test / vet — uses Make wrappers around `go` and `cargo`:
 
 ```bash
 make go-build      # cross-compiles to Linux into ./dist/ (works from macOS/Win)
@@ -17,6 +21,10 @@ make go-vet
 make go-vet-integration  # go vet -tags=integration over test/integration (no Docker needed)
 make go-lint       # golangci-lint v2, all linters, at the pre-commit pin
 make verify-go     # go-build, go-test, go-vet, go-vet-integration, go-lint
+make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test (meta-tests included)
+make verify        # verify-go, then verify-rust: both while the Go and Rust code live side by side
+make rust-fmt      # cargo fmt --all
+make rust-deny     # cargo deny --workspace check (network required)
 make go-tidy       # go mod tidy + go mod verify
 make audit-deps    # govulncheck -test + banned-module check (network required); also runs in CI and as a pre-commit hook on go.mod/go.sum changes
 make check         # pre-commit on all files: the authoritative local gate, as CI's pre-commit-all
@@ -234,6 +242,8 @@ Run before considering an edit done. `make check` applies to every row.
 | `**/*.go` | `make verify-go`, then `make check-stage` |
 | `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
 | `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
+| `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify-rust` (load `rust-style-guide` first), then `make check-stage` |
+| a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify-rust`, `make rust-deny` (network) |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/` (droast runs in `make check`), `make docker-build` |
 | `.golangci.yaml` | `make go-lint` |
 | `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/` |

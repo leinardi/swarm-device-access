@@ -43,3 +43,6 @@ vendor/
 .claude/*
 !.claude/settings.json
 !.claude/skills
+
+# --- Rust build outputs ---
+/target/

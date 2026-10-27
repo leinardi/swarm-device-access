@@ -1,0 +1,60 @@
+#
+# Copyright 2026 Roberto Leinardi.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Adapted from swarm-scheduler-exporter/deny.toml at d57dcc220d29, originally MIT-licensed,
+# Copyright (c) 2026 Roberto Leinardi.
+#
+# cargo-deny: the dependency gate for the Rust workspace. `cargo deny --workspace check` runs every
+# section; the advisories section needs the network to be current.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every vulnerability and unsound advisory fails; "unmaintained" fails for direct and transitive
+# crates alike unless ignored here by advisory ID, with a reason. An ignore written as
+# `{ crate = "name" }` would only ignore yanked versions, so none is.
+version = 2
+unmaintained = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+# Only the licences the Cargo.lock graph needs, each added by the change that brings in the crate
+# needing it. Apache-2.0 is this project's own (every workspace member is Apache-2.0), and the
+# dual-licensed dependencies (MIT OR Apache-2.0) are taken under it.
+#
+# cargo-deny 0.20.2 leaves the workspace members' dev-dependencies out of its graph (`cargo deny
+# --workspace list` names only the members while every external crate is a dev-dependency of the
+# meta crate), so it checks none of their licences and reports an allowance only they need as not
+# encountered. Those licences are still decided here, by hand, rather than by omission.
+allow = [
+    "Apache-2.0",
+    # winnow (MIT only), under the meta crate's toml dev-dependency; memchr and aho-corasick
+    # (Unlicense OR MIT), under its regex dev-dependency. Dev-only: see above.
+    "MIT",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

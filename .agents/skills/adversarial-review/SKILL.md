@@ -286,7 +286,7 @@ caused as a confirmed finding with the output attached:
 | Diff touched | Run |
 | --- | --- |
 | any `**/*.go` | `make go-build`, `make go-vet`, `make go-test` (race detector on), then `make check` |
-| any `**/*.rs`, a Cargo manifest or lock, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `make verify` (the Go and the Rust verification while Go exists; `verify-rust` is build, fmt check, clippy with `-D warnings`, tests and `cargo deny`), then `make check` |
+| any `**/*.rs`, a Cargo manifest or lock, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `make verify` (the Go and the Rust verification while Go exists; `verify-rust` is build, fmt check, clippy with `-D warnings` and tests), `make rust-deny` when a manifest or `Cargo.lock` changed (network required), then `make check` |
 | `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**`, and their Rust ports under `src/` | also `make go-test-integration` (needs Docker and privileges) — it runs `make go-build` first, then `go test -tags=integration ./test/integration/...`; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload`. Once the Rust `testenv` suite exists, run it too, and check that it proved the image under test is Rust before any test ran |
 | `go.mod` / `go.sum` | `make go-tidy` and `make audit-deps` (govulncheck plus the banned-module check; network required) |
 | `deployments/docker/Dockerfile` | droast via `make check`, `go test ./test/dockerfiles/ ./test/toolchain/`, plus `make docker-build` |
