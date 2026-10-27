@@ -98,6 +98,14 @@ Prometheus exporter).
   ignore by ID with a reason). yaml.v3 also accepts `yes`/`on`/`y` bools, floats into ints, `010`
   octal, `1_000` and `null` anywhere → `deserialize_with` visitors mirroring yaml.v3. (probe)
 
+- yaml.v3 is YAML 1.1 on libyaml: it refuses any `%YAML` but 1.1 and a `...` before the first
+  document, which YAML 1.2 parsers (saphyr) accept; its parser errors report a 0-based line
+  (none on the first), scanner errors a 1-based one; a block scalar's line is its indicator's,
+  where saphyr's span starts at the content. An alias used as a key is looked up by its anchor
+  name in a shape check but decodes as the key it names, so a strict pre-pass can be bypassed
+  → port the node tree and both passes, and grow the Go corpus with every such case. (golden
+  diff)
+
 ### Logging
 
 - `slog` prints before anything is configured; `tracing` drops every event until a subscriber

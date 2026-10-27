@@ -210,6 +210,66 @@ func goldenInputs() [][2]string {
 		{"scalar root", "hello\n"},
 		{"integer root", "42\n"},
 		{"empty flow mapping root", "{}\n"},
+		// An alias as a key: its anchor name is what the shape pass looks up, and the decode
+		// reads the key it names.
+		{"alias key named as a key", "a: &dry-run x\n*dry-run : \"yes\"\n"},
+		{"alias key quoted bool", "a: &k dry-run\n*k : \"yes\"\n"},
+		{"alias key null", "a: &k dry-run\n*k : null\n"},
+		{"alias key int", "a: &k dry-run\n*k : 2\n"},
+		{"alias key list", "a: &k dry-run\n*k : [x]\n"},
+		{"alias key scalar list", "a: &k device-allow\n*k : x\n"},
+		{"alias key null element", "a: &k device-allow\n*k : [~, x]\n"},
+		{"alias key null list", "a: &k device-allow\n*k : ~\n"},
+		{"alias key bad int tag", "a: &k log-level\n*k : !!int abc\n"},
+		{"alias key mapping", "a: &k log-level\n*k : {b: c}\n"},
+		{"alias key bool tag on yes", "a: &k dry-run\n*k : !!bool yes\n"},
+		{"alias key float tag", "a: &k dry-run\n*k : !!float 1\n"},
+		{"alias key null tag", "a: &k dry-run\n*k : !!null ''\n"},
+		{"alias key long string", "a: &k dry-run\n*k : !!str abcdefghijkl\n"},
+		{"binary key", "!!binary aGk=: x\n"},
+		{"bad binary key", "!!binary aGk: x\n"},
+		{"two sequence keys", "[a]: x\n[b]: y\n"},
+		{"quoted duplicate key", "x: 1\n\"x\": 2\n"},
+		{"block scalar key", "? |\n  log-level\n: debug\n"},
+		{"unknown anchor after the document", "dry-run: true\n---\nb: *nope\n"},
+		{"directive 1.1", "%YAML 1.1\n---\ndry-run: true\n"},
+		{"comment then document end", "# c\n...\n"},
+		{"repeated document end", "dry-run: true # c\n...\n...\n"},
+		{
+			"excessive aliasing",
+			"b: &b [" + strings.Repeat("/dev/x, ", 1100) + "/dev/x]\ndevice-allow: *b\n",
+		},
+		{
+			"aliases within the limit",
+			"a: &x /dev/a\ndevice-allow: [" + strings.Repeat("*x, ", 1200) + "*x]\n",
+		},
+		// resolve's number and timestamp edges, against a string key.
+		{"float out of range", "metrics-addr: 1e999\n"},
+		{"no such day", "metrics-addr: 2026-02-29\n"},
+		{"leap day", "metrics-addr: 2024-02-29\n"},
+		{"hex float", "metrics-addr: 0x1p-2\n"},
+		{"dot float with underscore", "debug-addr: .5_5\n"},
+		{"uint64 max", "debug-addr: 18446744073709551615\n"},
+		{"leading zero not octal", "debug-addr: 09\n"},
+		{"timestamp without zone", "debug-addr: 2026-01-02T03:04:05\n"},
+		{"timestamp with space", "debug-addr: 2026-01-02 3:4:5.5\n"},
+		// libyaml's depth limit, and nesting just within it.
+		{"deep block nesting", "device-allow:\n" + strings.Repeat("- ", 20000) + "x\n"},
+		{"block nesting within the limit", "device-allow:\n" + strings.Repeat("- ", 9990) + "x\n"},
+		{"deep flow nesting", "device-allow: " + strings.Repeat("[", 20000) + "\n"},
+		{
+			"flow nesting within the limit",
+			"device-allow: " + strings.Repeat("[", 9990) + strings.Repeat("]", 9990) + "\n",
+		},
+		// Directives sit between documents only.
+		{"directive text in a quoted value", "debug-addr: \"a\n%YAML 1.2 b\"\n"},
+		{"directive text in a root scalar", "\"a\n%YAML 1.2 b\"\n"},
+		{"unindented quoted continuation", "debug-addr: \"a\nb\"\n"},
+		{"directive after a document end", "dry-run: true\n...\n%YAML 1.2\n---\nb: 1\n"},
+		{"directive after an implicit end", "dry-run: true\n%YAML 1.2\n---\nb: 1\n"},
+		{"directive after a comment", "# c\n%YAML 1.2\n---\ndry-run: true\n"},
+		// yaml.v3 keeps anchors across documents.
+		{"alias to an earlier document", "docker-socket: &a /x\n---\nb: *a\n"},
 	}
 }
 

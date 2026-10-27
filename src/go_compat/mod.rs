@@ -30,12 +30,14 @@
 //! - [`strings`] ports `strings.EqualFold`, `strings.ToLower` and `strings.TrimSpace`, with Go's
 //!   Unicode 15 case tables;
 //! - [`parse_bool`] ports `strconv.ParseBool` (new here);
+//! - [`errno`] gives an `io::Error` Go's `syscall.Errno` text;
 //! - [`filepath`] ports `filepath.Match` and `filepath.Clean` (new here).
 //!
 //! Only the modules the ported code uses are here; swarm-scheduler-exporter's others join when a
 //! phase needs them (`docs/rust-port.md`, the reuse ledger).
 
 pub mod duration;
+pub mod errno;
 pub mod filepath;
 pub mod float;
 pub mod local_zone;

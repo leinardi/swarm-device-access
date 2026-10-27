@@ -73,6 +73,9 @@ publish = false
 # Zone data (TZif parsing) and civil time only: the zone is resolved and the times are formatted
 # in-tree, the way Go does (src/go_compat), so none of jiff's tzdb or system features is on.
 jiff = { version = "0.2.38", default-features = false, features = ["std"] }
+# The config file's YAML events; tag resolution, the shape checks and the strict decode are
+# ported from yaml.v3 in-tree (src/config/yaml), so no YAML value model or serde is used.
+saphyr-parser = { version = "0.3.2", default-features = false }
 # The timer TokioClock follows. Later phases add the runtime, the sockets and the signals.
 tokio = { version = "1.54.1", default-features = false, features = ["time"] }
 

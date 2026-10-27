@@ -23,6 +23,7 @@
 //! comes from.
 
 pub mod clock;
+pub mod config;
 pub mod go_compat;
 pub mod logger;
 pub mod policy;
