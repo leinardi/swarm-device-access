@@ -20,7 +20,9 @@ make go-test       # CGO_ENABLED=1 go test -race ./...
 make go-vet
 make go-vet-integration  # go vet -tags=integration over test/integration (no Docker needed)
 make go-lint       # golangci-lint v2, all linters, at the pre-commit pin
-make verify-go     # go-build, go-test, go-vet, go-vet-integration, go-lint
+make verify-go     # go-build, go-test, go-vet, go-vet-integration, go-lint, golden-check
+make golden-check  # the Go golden captures under tests/testdata still match the Go code (goldencapture tag)
+make golden-update # rewrite them after a reviewed Go change (docs/rust-port.md, Go golden captures)
 make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test (meta-tests included)
 make verify        # verify-go, then verify-rust: both while the Go and Rust code live side by side
 make rust-fmt      # cargo fmt --all
@@ -240,6 +242,7 @@ Run before considering an edit done. `make check` applies to every row.
 | You edited | Run |
 | --- | --- |
 | `**/*.go` | `make verify-go`, then `make check-stage` |
+| `internal/{logger,policy,config,observability}/**`, a `golden_capture_test.go` | `make golden-check` (in `verify-go`); a deliberate change is recaptured with `make golden-update` and its diff reviewed |
 | `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
 | `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify-rust` (load `rust-style-guide` first), then `make check-stage` |

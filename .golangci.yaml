@@ -1,9 +1,11 @@
 version: "2"
 
 run:
-  # test/integration is behind this tag; without it the linter skips those files.
+  # test/integration and the Go golden captures are behind these tags; without them the linter
+  # skips those files.
   build-tags:
     - integration
+    - goldencapture
 
 linters:
   default: all

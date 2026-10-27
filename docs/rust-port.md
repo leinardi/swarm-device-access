@@ -21,6 +21,7 @@ permanent design and provenance record.
 - [Intended differences from 1.x (draft)](#intended-differences-from-1x-draft)
 - [Reuse policy](#reuse-policy)
 - [Reuse ledger](#reuse-ledger)
+- [Go golden captures](#go-golden-captures)
 - [Upstream candidates](#upstream-candidates)
 
 ## Design decisions
@@ -142,6 +143,26 @@ actual adaptation, in the commit that lands the component.
 | Launcher: `self_id`, supervise `select!`, `Timing` budget, stop requests, attach pump to output, wait-before-start ordering, call timeouts, `DockerApi` trait shape, recording fake | SRD `src/launcher/mod.rs`, `src/docker/{mod,fake}.rs` | SRD `src/launcher/tests.rs`, `src/docker/tests.rs` | adapted | The bollard implementation is replaced by the in-tree engine on SSE's transport (this project's wire contract); `tracing` becomes the `LogHandle` and `thiserror` hand-written errors; wait condition `removed`; this project's `daemonSpec`, stale-owner rules, content-addressed image check, a 20 s budget and its log and error text. Not reused: the node lock, `src/launcher/probe.rs`, the subuid upload, the status socket |
 | Events reconnect loop | SSE `src/collector/reconciler/listener.rs` (patterns only) | SSE `src/collector/reconciler/tests/listener.rs` (patterns only) | adapted | This project's backoff 1–30 s, `since` plus 1 ns, re-enumeration and ping-before-subscribe semantics |
 | Policy, YAML loader, config store, cgroup v1 and v2, BPF assembly and syscalls, systemd watcher, processor, coordinator, `Recorder` | none | this project's Go tests, ported with provenance | new | Ported from this project's Go code |
+
+## Go golden captures
+
+The Rust ports are checked against files the Go code wrote, never against what someone reasoned
+Go would write. The capture tests are Go tests behind the `goldencapture` build tag, so a plain
+`go test ./...` (`make go-test`, the `go-test-repo-mod` hook) never runs them; golangci-lint builds
+them with that tag, so they are linted like the rest. They share `internal/goldencapture`, which
+exists only under the tag.
+
+- `make golden-check` runs every `TestGolden*` and compares what the Go code produces now with the
+  committed file; any difference fails. It is part of `make verify-go` and of CI's `test` job, so a
+  Go change that would move a golden cannot land without the golden moving with it.
+- `make golden-update` (`SDA_GOLDEN_UPDATE=1`) rewrites the files, for a reviewed change.
+
+| Capture test | Files under `tests/testdata/` | What they hold |
+| --- | --- | --- |
+| `internal/logger`, `TestGoldenLogger` | `logger/{text,json,plain}_{time,notime}.log`, `logger/corpus.json` | Every corpus record logged through the handlers `Configure` installs (one constructor, `newHandler`), at 2026-10-25T14:03:04.567891234+01:00, with and without the time. `corpus.json` holds the records as data (level, message, `With` steps, typed attributes: strings needing quoting, nil and empty string lists, joined multi-line errors, durations, integers, floats, booleans, times, nil, groups) and how `parseLevel` reads each `--log-level` spelling, so the Rust harness builds the same records from it. A record whose value holds a raw newline spans two lines in the plain format, so the files are compared whole |
+| `internal/policy`, `TestGoldenPolicy` | `policy/policy.json` | `strconv.ParseBool` spellings, `ParseMode`, `ParseContainer` with `UnknownLabels` (a nil list kept apart from an empty one), `ValidateGlobs`, `Global.Validate`, every predicate (`Enabled`, `Denied`, `Authorized`, `DeviceAllowed`, `ExplicitlyAllowed`) over globals, containers and paths, and `filepath.Match` and `filepath.Clean` cases. An error is its text; an empty string is no error |
+| `internal/config`, `TestGoldenConfig` | `config/loader.json` | `LoadFile` on the loader test corpus and yaml.v3 edge cases (YAML 1.1 booleans, null and tilde, empty documents and markers, anchors and aliases, merge keys, duplicate and unknown keys, explicit tags, several documents, syntax errors, CRLF, a byte order mark), each written to a `config.yaml` whose path reads `{path}` in the error; an empty path (the zero config, no read) and a path naming no file (the read error); the decoded schema of an accepted file; the shipped `deployments/docker/config.yaml`; and `ValidateEnums` for both sources |
+| `internal/observability`, `TestGoldenRecorderExposition` | `metrics/recorder.prom`, `metrics/recorder.headers` | What `GET /metrics` on the daemon's metrics server serves for the `sda_` families after a scripted sequence of every `Recorder` method, and the `Content-Type` of a request without `Accept`. The `go_`, `process_` and `promhttp_` families vary with the run and are left out |
 
 ## Upstream candidates
 

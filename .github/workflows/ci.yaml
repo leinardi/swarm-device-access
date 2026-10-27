@@ -202,6 +202,10 @@ jobs:
       - name: Run the test suite
         run: make go-test
 
+      # The goldens the Rust port is checked against must still be what the Go code produces.
+      - name: Check the Go golden captures
+        run: make golden-check
+
   markdownlint:
     # Reports inline PR review comments over a diff range; a manual dispatch has
     # neither a pull request to comment on nor a base ref to diff against.

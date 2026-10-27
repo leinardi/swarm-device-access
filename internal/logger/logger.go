@@ -17,6 +17,7 @@
 package logger
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -56,26 +57,25 @@ func Set(newLogger *slog.Logger) {
 // level:  "debug", "info", "warn", "error", "fatal", "panic" (fatal/panic -> error)
 // includeTime: if false, the time attribute is removed from log records.
 func Configure(format, level string, includeTime bool) {
-	logLevel := parseLevel(level)
+	Set(slog.New(newHandler(os.Stdout, format, parseLevel(level), includeTime)))
+}
 
-	var handler slog.Handler
-
+// newHandler builds the handler Configure installs, writing to output.
+func newHandler(output io.Writer, format string, level slog.Level, includeTime bool) slog.Handler {
 	switch strings.ToLower(format) {
 	case "json":
-		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level:       logLevel,
+		return slog.NewJSONHandler(output, &slog.HandlerOptions{
+			Level:       level,
 			ReplaceAttr: timeStripper(includeTime),
 		})
 	case "plain":
-		handler = newPlainTextHandler(os.Stdout, logLevel, includeTime)
+		return newPlainTextHandler(output, level, includeTime)
 	default: // "text"
-		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level:       logLevel,
+		return slog.NewTextHandler(output, &slog.HandlerOptions{
+			Level:       level,
 			ReplaceAttr: timeStripper(includeTime),
 		})
 	}
-
-	Set(slog.New(handler))
 }
 
 // timeStripper returns a ReplaceAttr function that removes the time attribute

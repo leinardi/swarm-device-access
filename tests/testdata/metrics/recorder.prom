@@ -1,0 +1,62 @@
+# HELP sda_apply_duration_seconds Time spent applying device rules per container.
+# TYPE sda_apply_duration_seconds histogram
+sda_apply_duration_seconds_bucket{le="0.005"} 4
+sda_apply_duration_seconds_bucket{le="0.01"} 5
+sda_apply_duration_seconds_bucket{le="0.025"} 5
+sda_apply_duration_seconds_bucket{le="0.05"} 5
+sda_apply_duration_seconds_bucket{le="0.1"} 5
+sda_apply_duration_seconds_bucket{le="0.25"} 6
+sda_apply_duration_seconds_bucket{le="0.5"} 6
+sda_apply_duration_seconds_bucket{le="1"} 7
+sda_apply_duration_seconds_bucket{le="2.5"} 7
+sda_apply_duration_seconds_bucket{le="5"} 8
+sda_apply_duration_seconds_bucket{le="10"} 8
+sda_apply_duration_seconds_bucket{le="+Inf"} 9
+sda_apply_duration_seconds_sum 16.264499999999998
+sda_apply_duration_seconds_count 9
+# HELP sda_containers_scanned_total Containers that passed policy and entered the device-rule pipeline.
+# TYPE sda_containers_scanned_total counter
+sda_containers_scanned_total 2
+# HELP sda_containers_skipped_total Containers skipped before rule collection.
+# TYPE sda_containers_skipped_total counter
+sda_containers_skipped_total{reason="invalid_labels"} 1
+sda_containers_skipped_total{reason="policy"} 2
+# HELP sda_device_candidates_skipped_total Names under a /dev mount that name no device (outside_dev, dangling, not_device).
+# TYPE sda_device_candidates_skipped_total counter
+sda_device_candidates_skipped_total{reason="dangling"} 2
+sda_device_candidates_skipped_total{reason="not_device"} 0
+sda_device_candidates_skipped_total{reason="outside_dev"} 1
+# HELP sda_device_files_discovered_total Device files for which rules were collected.
+# TYPE sda_device_files_discovered_total counter
+sda_device_files_discovered_total 5
+# HELP sda_docker_reconnects_total Times the Docker event stream reconnected after an error.
+# TYPE sda_docker_reconnects_total counter
+sda_docker_reconnects_total 2
+# HELP sda_dry_run_skips_total Rules logged but not written due to dry-run mode.
+# TYPE sda_dry_run_skips_total counter
+sda_dry_run_skips_total 3
+# HELP sda_events_total Total Docker container events received.
+# TYPE sda_events_total counter
+sda_events_total{event="destroy"} 2
+sda_events_total{event="die"} 1
+sda_events_total{event="start"} 2
+sda_events_total{event="unpause"} 1
+# HELP sda_last_event_timestamp_seconds Unix timestamp of the last container processed successfully (event, startup or reload).
+# TYPE sda_last_event_timestamp_seconds gauge
+sda_last_event_timestamp_seconds 1.792933384e+09
+# HELP sda_reconcile_pending_containers Containers whose last reconciliation failed and that are being retried with backoff.
+# TYPE sda_reconcile_pending_containers gauge
+sda_reconcile_pending_containers 2
+# HELP sda_reload_incomplete 1 until a reconciliation pass for the latest config and trigger has visited every running container, else 0.
+# TYPE sda_reload_incomplete gauge
+sda_reload_incomplete 0
+# HELP sda_reload_reapplies_total Times device rules were re-applied after a systemd daemon-reload.
+# TYPE sda_reload_reapplies_total counter
+sda_reload_reapplies_total 1
+# HELP sda_rule_failures_total Per-device rule failures (entries that passed policy but could not be turned into a rule, and walk errors).
+# TYPE sda_rule_failures_total counter
+sda_rule_failures_total 1
+# HELP sda_rules_applied_total Containers handled, by result: ok = no container-level failure (includes policy, label and no-pid skips and partial per-device failures), error = container-level failure.
+# TYPE sda_rules_applied_total counter
+sda_rules_applied_total{result="error"} 1
+sda_rules_applied_total{result="ok"} 3

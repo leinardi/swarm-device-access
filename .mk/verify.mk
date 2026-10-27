@@ -23,7 +23,7 @@ MK_LOCAL_VERIFY_INCLUDED := 1
 # go-vet sees only untagged files, so the integration suite is vetted on its own; go-lint is
 # make-common's, running the pinned golangci-lint-full hook over the whole module.
 .PHONY: verify-go
-verify-go: go-build go-test go-vet go-vet-integration go-lint ## Verify the Go code (build, race tests, vet untagged and tagged, lint)
+verify-go: go-build go-test go-vet go-vet-integration go-lint golden-check ## Verify the Go code (build, race tests, vet untagged and tagged, lint, golden captures)
 
 # While the Go and the Rust code live side by side (docs/rust-port.md), one target runs both;
 # verify-rust is in rust.mk.

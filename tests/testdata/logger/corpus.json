@@ -1,0 +1,866 @@
+{
+  "time": "2026-10-25T14:03:04.567891234+01:00",
+  "levels": [
+    {
+      "input": "debug",
+      "level": -4
+    },
+    {
+      "input": "info",
+      "level": 0
+    },
+    {
+      "input": "warn",
+      "level": 4
+    },
+    {
+      "input": "warning",
+      "level": 4
+    },
+    {
+      "input": "error",
+      "level": 8
+    },
+    {
+      "input": "fatal",
+      "level": 8
+    },
+    {
+      "input": "panic",
+      "level": 8
+    },
+    {
+      "input": "DEBUG",
+      "level": -4
+    },
+    {
+      "input": "Warn",
+      "level": 4
+    },
+    {
+      "input": "",
+      "level": 0
+    },
+    {
+      "input": "bogus",
+      "level": 0
+    }
+  ],
+  "records": [
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "plain"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "with space"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "say \"hi\""
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "k=v"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "C:\\path\\x"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "line1\nline2"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "a\tb"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "a\rb"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "a\u0001b"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "ok 🚀"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "日本語"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "html <a>&amp;"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "trailing "
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": " leading"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "-dash"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "{brace}"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "[bracket]"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "/dev/dri/card0"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "/dev/dri/by-path/pci-0000:00:02.0-card"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "c 226:0 rwm"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "b 8:*"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "a=b c"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "nbsp x"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string value",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "value",
+          "value": "ls\u2028x"
+        }
+      ]
+    },
+    {
+      "level": -4,
+      "message": "debug message"
+    },
+    {
+      "level": 0,
+      "message": "info message"
+    },
+    {
+      "level": 4,
+      "message": "warn message"
+    },
+    {
+      "level": 8,
+      "message": "error message"
+    },
+    {
+      "level": -3,
+      "message": "between debug and info"
+    },
+    {
+      "level": 2,
+      "message": "between info and warn"
+    },
+    {
+      "level": 5,
+      "message": "between warn and error"
+    },
+    {
+      "level": 12,
+      "message": "above error"
+    },
+    {
+      "level": 0,
+      "message": ""
+    },
+    {
+      "level": 0,
+      "message": "message with \"quotes\" and = sign"
+    },
+    {
+      "level": 0,
+      "message": "message\nwith a newline"
+    },
+    {
+      "level": 0,
+      "message": "container processed",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "id",
+          "value": "abc"
+        },
+        {
+          "kind": "int",
+          "key": "pid",
+          "value": "4242"
+        },
+        {
+          "kind": "int",
+          "key": "devices_granted",
+          "value": "1"
+        },
+        {
+          "kind": "int",
+          "key": "skipped",
+          "value": "0"
+        },
+        {
+          "kind": "int",
+          "key": "errors",
+          "value": "0"
+        },
+        {
+          "kind": "bool",
+          "key": "dry_run",
+          "value": false
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "integers",
+      "attrs": [
+        {
+          "kind": "int",
+          "key": "zero",
+          "value": "0"
+        },
+        {
+          "kind": "int",
+          "key": "negative",
+          "value": "-1"
+        },
+        {
+          "kind": "int",
+          "key": "min",
+          "value": "-9223372036854775808"
+        },
+        {
+          "kind": "int",
+          "key": "max",
+          "value": "9223372036854775807"
+        },
+        {
+          "kind": "uint",
+          "key": "major",
+          "value": "226"
+        },
+        {
+          "kind": "uint",
+          "key": "umax",
+          "value": "18446744073709551615"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "floats",
+      "attrs": [
+        {
+          "kind": "float",
+          "key": "zero",
+          "value": "0"
+        },
+        {
+          "kind": "float",
+          "key": "half",
+          "value": "0.5"
+        },
+        {
+          "kind": "float",
+          "key": "big",
+          "value": "1e+21"
+        },
+        {
+          "kind": "float",
+          "key": "small",
+          "value": "1e-07"
+        },
+        {
+          "kind": "float",
+          "key": "third",
+          "value": "0.3333333333333333"
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "message": "booleans",
+      "attrs": [
+        {
+          "kind": "bool",
+          "key": "yes",
+          "value": true
+        },
+        {
+          "kind": "bool",
+          "key": "no",
+          "value": false
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "message": "durations",
+      "attrs": [
+        {
+          "kind": "duration",
+          "key": "zero",
+          "value": "0"
+        },
+        {
+          "kind": "duration",
+          "key": "nanos",
+          "value": "999"
+        },
+        {
+          "kind": "duration",
+          "key": "micros",
+          "value": "1500"
+        },
+        {
+          "kind": "duration",
+          "key": "millis",
+          "value": "1234000"
+        },
+        {
+          "kind": "duration",
+          "key": "second",
+          "value": "1000000000"
+        },
+        {
+          "kind": "duration",
+          "key": "backoff",
+          "value": "30000000000"
+        },
+        {
+          "kind": "duration",
+          "key": "retry_in",
+          "value": "300000000000"
+        },
+        {
+          "kind": "duration",
+          "key": "hour",
+          "value": "3630000000000"
+        },
+        {
+          "kind": "duration",
+          "key": "negative",
+          "value": "-2000000000"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "times",
+      "attrs": [
+        {
+          "kind": "time",
+          "key": "at",
+          "value": "2026-10-25T14:03:04.567891234+01:00"
+        },
+        {
+          "kind": "time",
+          "key": "utc",
+          "value": "2026-01-02T03:04:05Z"
+        },
+        {
+          "kind": "time",
+          "key": "millis",
+          "value": "2026-01-02T03:04:05.12-05:00"
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "message": "device rule failed",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "id",
+          "value": "abc"
+        },
+        {
+          "kind": "error",
+          "key": "err",
+          "value": "device identity could not be established: function not implemented"
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "message": "wrapped error",
+      "attrs": [
+        {
+          "kind": "error",
+          "key": "err",
+          "value": "open cgroup \"/sys/fs/cgroup/x\": no such file or directory"
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "message": "joined error",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "id",
+          "value": "abc"
+        },
+        {
+          "kind": "error",
+          "key": "err",
+          "value": "device identity could not be established: /dev/dri: openat2 dri: permission denied\ndevice mount enumeration incomplete: /dev/dri/by-path: permission denied"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "nil value",
+      "attrs": [
+        {
+          "kind": "nil",
+          "key": "err"
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "message": "mount excluded: no children matched allow/deny policy",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "path",
+          "value": "/dev/dri"
+        },
+        {
+          "kind": "strings",
+          "key": "children_seen",
+          "value": [
+            "card0",
+            "renderD128"
+          ]
+        },
+        {
+          "kind": "strings",
+          "key": "allow_globs",
+          "value": [
+            "/dev/dri/*"
+          ]
+        },
+        {
+          "kind": "strings",
+          "key": "deny_globs",
+          "value": []
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "string lists",
+      "attrs": [
+        {
+          "kind": "strings",
+          "key": "nil",
+          "value": null
+        },
+        {
+          "kind": "strings",
+          "key": "empty",
+          "value": []
+        },
+        {
+          "kind": "strings",
+          "key": "one",
+          "value": [
+            "a"
+          ]
+        },
+        {
+          "kind": "strings",
+          "key": "spaced",
+          "value": [
+            "a b",
+            "c"
+          ]
+        },
+        {
+          "kind": "strings",
+          "key": "quoted",
+          "value": [
+            "\"q\""
+          ]
+        },
+        {
+          "kind": "strings",
+          "key": "empty_item",
+          "value": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "device denied by policy under one of its names",
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "id",
+          "value": "abc"
+        },
+        {
+          "kind": "stringer",
+          "key": "device",
+          "value": "b 8:0"
+        },
+        {
+          "kind": "string",
+          "key": "denied_by",
+          "value": "/dev/evil/link"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "groups",
+      "attrs": [
+        {
+          "kind": "group",
+          "key": "rule",
+          "attrs": [
+            {
+              "kind": "string",
+              "key": "type",
+              "value": "c"
+            },
+            {
+              "kind": "uint",
+              "key": "major",
+              "value": "1"
+            },
+            {
+              "kind": "uint",
+              "key": "minor",
+              "value": "3"
+            },
+            {
+              "kind": "string",
+              "key": "access",
+              "value": "rwm"
+            }
+          ]
+        },
+        {
+          "kind": "group",
+          "key": "empty"
+        },
+        {
+          "kind": "group",
+          "key": "outer",
+          "attrs": [
+            {
+              "kind": "group",
+              "key": "inner",
+              "attrs": [
+                {
+                  "kind": "string",
+                  "key": "deep",
+                  "value": "value with space"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "group",
+          "key": "",
+          "attrs": [
+            {
+              "kind": "string",
+              "key": "inlined",
+              "value": "x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "with attributes",
+      "with": [
+        {
+          "attrs": [
+            {
+              "kind": "string",
+              "key": "component",
+              "value": "systemd"
+            },
+            {
+              "kind": "int",
+              "key": "attempt",
+              "value": "2"
+            }
+          ]
+        }
+      ],
+      "attrs": [
+        {
+          "kind": "duration",
+          "key": "retry_in",
+          "value": "30000000000"
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "message": "with a group",
+      "with": [
+        {
+          "group": "watcher"
+        },
+        {
+          "attrs": [
+            {
+              "kind": "string",
+              "key": "owner",
+              "value": ":1.42"
+            }
+          ]
+        }
+      ],
+      "attrs": [
+        {
+          "kind": "error",
+          "key": "err",
+          "value": "connection reset"
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "nested groups",
+      "with": [
+        {
+          "group": "a"
+        },
+        {
+          "group": "b"
+        }
+      ],
+      "attrs": [
+        {
+          "kind": "string",
+          "key": "key",
+          "value": "value"
+        },
+        {
+          "kind": "group",
+          "key": "g",
+          "attrs": [
+            {
+              "kind": "int",
+              "key": "n",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "level": 0,
+      "message": "group without attributes",
+      "with": [
+        {
+          "group": "unused"
+        }
+      ]
+    }
+  ]
+}
