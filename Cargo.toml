@@ -79,16 +79,26 @@ jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 # ported from yaml.v3 in-tree (src/config/yaml), so no YAML value model or serde is used.
 saphyr-parser = { version = "0.3.2", default-features = false }
 # The Docker client (src/docker): HTTP/1 only, on unix-socket connections it dials and pools
-# itself.
-hyper = { version = "1.12.0", default-features = false, features = ["client", "http1"] }
-hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+# itself. The metrics and health endpoints (src/server): hyper's HTTP/1 server with hyper-util's
+# graceful drain.
+hyper = { version = "1.12.0", default-features = false, features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1.21", default-features = false, features = [
+    "tokio",
+    "http1",
+    "server",
+    "server-graceful",
+] }
+# The metrics listener, bound as Go's net.Listen binds it (SO_REUSEADDR, the dual-stack wildcard,
+# the kernel's backlog).
+socket2 = { version = "0.6.5", features = ["all"] }
 http-body-util = "0.1.5"
 bytes = "1.12.1"
 # The Engine API's JSON: the typed answers the daemon reads and the error bodies.
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # The cgroup directory descriptor and the openat, fstat and open calls on it, getrandom for the
-# wrapper nonce, openat2 beneath /dev, and the pidfd and its poll, without unsafe.
+# wrapper nonce, openat2 beneath /dev, the pidfd and its poll, and an interface's index for a
+# zoned metrics address, without unsafe.
 rustix = { version = "1.1.6", default-features = false, features = [
     "std",
     "fs",
@@ -96,6 +106,7 @@ rustix = { version = "1.1.6", default-features = false, features = [
     "system",
     "process",
     "event",
+    "net",
 ] }
 # The raw bpf(2) syscall, in src/cgroup/bpf_sys.rs only.
 libc = "0.2.191"

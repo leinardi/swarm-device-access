@@ -23,7 +23,9 @@
 //! - the hooks stay `pub(crate)`, declared in `src/docker/client.rs`, and only
 //!   `src/launcher/engine.rs` calls them;
 //! - outside `src/docker` (whose own methods `docker_boundary.rs` pins), only
-//!   `src/launcher/engine.rs` names an HTTP method or sets one;
+//!   `src/launcher/engine.rs` sets a request's method or names a write method (`POST`, `PUT`,
+//!   `DELETE`, `PATCH`, or one parsed from text); the metrics server compares a request's
+//!   method with `HEAD`, `OPTIONS` and `CONNECT`, which write nothing;
 //! - outside `src/launcher`, nothing names the engine: its module, `Engine`, `EngineApi`, or a
 //!   launcher path to them;
 //! - outside `src/launcher` and the CLI entry modules that run the `launch` subcommand
@@ -131,9 +133,9 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
         problems.push(format!("{site}: only {ENGINE} calls the write hooks"));
     }
 
-    // HTTP methods: outside the client, only the engine names or sets one.
+    // HTTP methods: outside the client, only the engine sets one or names a write method.
     let methods = pattern(
-        r"\bMethod\s*::\s*\w+|\bmethod_mut\s*\(|\.method\s*\(\s*[^)\s]|\x22(?:POST|PUT|DELETE|PATCH)\x22",
+        r"\bMethod\s*::\s*(?:POST|PUT|DELETE|PATCH|from_\w+)\b|\bRequest\s*::\s*(?:post|put|delete|patch)\b|\bmethod_mut\s*\(|\.method\s*\(\s*[^)\s]|\x22(?:POST|PUT|DELETE|PATCH)\x22",
     );
     for site in found_in(&files, &methods, |path| {
         path == ENGINE || path.starts_with("src/docker/")
@@ -230,6 +232,18 @@ fn a_write_call_outside_the_launcher_is_refused() {
         with(
             "src/server.rs",
             "\nfn verb() -> &'static str {\n    \"DELETE\"\n}\n",
+        ),
+        with(
+            "src/server.rs",
+            "\nfn verb() -> Method {\n    Method::DELETE\n}\n",
+        ),
+        with(
+            "src/server.rs",
+            "\nfn verb() -> Method {\n    Method::from_bytes(b\"KILL\").unwrap()\n}\n",
+        ),
+        with(
+            "src/daemon/mod.rs",
+            "\nfn remove() -> Builder {\n    Request::delete(\"/containers/x\")\n}\n",
         ),
         with("src/daemon/mod.rs", "\nuse crate::launcher::Engine;\n"),
         with(

@@ -33,6 +33,7 @@ pub mod logger;
 pub mod metrics;
 pub mod policy;
 pub mod processor;
+pub mod server;
 pub mod systemd;
 mod task;
 #[cfg(test)]

@@ -253,22 +253,31 @@ Prometheus exporter).
 - **TLS:** rustls PEM via `rustls_pki_types::pem::PemObject`, which skips unknown sections (an
   encrypted key is invisible) → mirror go-connections' checks on the text; Go trusts the system
   pool **plus** `ca.pem` → `rustls-native-certs` plus the file. (rustls-pki-types 1.15)
-- **HTTP server (net/http):** hyper 1.12 + hyper-util reproduce Go's wire, axum 0.8 does not.
-  Go's `ServeMux` answers unclean paths with **307** re-escaping the escaped path, writes sorted
-  headers then `Date`, `Content-Length`, `Connection` → `title_case_headers(true)`,
+- **HTTP server (net/http):** hyper 1.12 + hyper-util reproduce Go's wire, axum 0.8 does not. Go's
+  `ServeMux` answers unclean paths with **307** re-escaping the escaped path, writes sorted headers
+  then `Date`, `Content-Length`, `Connection` → `title_case_headers(true)`,
   `auto_date_header(false)`, all three by hand, `is_end_stream() == false`. Go frames bodies up to
-  2048 bytes with `Content-Length`, larger ones chunked. hyper's `header_read_timeout` also
-  closes idle keep-alives (and panics without a timer) → enforce Go's four deadlines in an I/O
-  wrapper that keeps and wakes `cx.waker()`. hyper reads ahead, so a pipelined request's first
-  bytes sit in its buffer and the wrapper would arm the 60s idle deadline where Go (`bufr.Peek`)
-  arms the 5s header one → track the request framing (head, `Content-Length`, chunked) in the
-  wrapper and count started against answered requests, with hyper's own rules (leading empty
-  lines skipped, `Content-Length` items trimmed and equal, `Transfer-Encoding` winning, chunk
-  sizes in hex) and byte by byte: a line cap that truncates a padded `Content-Length` loses the
-  body and lets the next request slip past the header deadline. `TcpListener::bind(":8888")` is a
-  DNS error and its backlog 128 → socket2, `[::]` dual stack, `listen(65535)`, `SO_REUSEADDR`. A
+  2048 bytes with `Content-Length`, larger ones chunked. hyper's `header_read_timeout` also closes
+  idle keep-alives (and panics without a timer) → enforce Go's four deadlines in an I/O wrapper that
+  keeps and wakes `cx.waker()`. hyper reads ahead, so a pipelined request's first bytes sit in its
+  buffer and the wrapper would arm the 60s idle deadline where Go (`bufr.Peek`) arms the 5s header
+  one → track the request framing (head, `Content-Length`, chunked) in the wrapper and count started
+  against answered requests, with hyper's own rules (leading empty lines skipped, `Content-Length`
+  items trimmed and equal, `Transfer-Encoding` winning, chunk sizes in hex) and byte by byte: a line
+  cap that truncates a padded `Content-Length` loses the body and lets the next request slip past
+  the header deadline. `TcpListener::bind(":8888")` is a DNS error and its backlog 128 → socket2,
+  `[::]` dual stack, `listen(65535)`, `SO_REUSEADDR`. Go makes any wildcard dual-stack, not only the
+  empty host: `0.0.0.0`, `[::]` and `[::ffff:0.0.0.0]` all listen on `[::]` (errors show
+  `0.0.0.0:<port>`), a mapped address listens as IPv4, a zone is an interface name or `dtoi` of it,
+  and its own resolver never reads inet_aton's `0` or `127.1` as addresses where getaddrinfo does. A
   boxed-error body in a spawned `serve_connection` fails "not general enough" → a concrete error
-  type. (37 Go captures; paused-clock tests; a pipelining probe against Go 1.26)
+  type. A handler that sets no `Content-Type` gets a sniffed one written after `Content-Length`, not
+  in the sorted block (`/healthz` writing `ok`) → add it last by hand. A port name in the address
+  (`:http`) goes through `LookupPort`, and a static image has no `/etc/services`: Go then falls back
+  to its own TCP table (14 names, case-insensitive; `domain` is UDP-only) → port that table, not
+  getservbyname. Reused captures belong to the server they came from (its routes, its deadlines) →
+  recapture against the Go server being replaced. (37 Go captures, then 41 of this daemon's;
+  paused-clock tests; a pipelining probe against Go 1.26; a static Go binary in busybox)
 - **Prometheus (client_golang, expfmt):** no crate writes Go's text (float formats, `charset`,
   `escaping=`, HELP escaping, sort order) → an in-tree registry and encoder porting `writeFloat`
   and `Gather`'s normalisation. promhttp negotiates `escaping=` over all four formats, protobuf

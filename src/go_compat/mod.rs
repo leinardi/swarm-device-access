@@ -49,6 +49,7 @@ pub mod errno;
 pub mod errors;
 pub mod filepath;
 pub mod float;
+pub mod host_port;
 pub mod http_status;
 pub mod local_zone;
 pub mod parse_bool;
