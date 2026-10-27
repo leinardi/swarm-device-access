@@ -43,7 +43,26 @@ var vacuousFlags = []struct {
 		"if: false",
 		regexp.MustCompile(`\bif:\s*(["']?false["']?\s*$|["']?\$\{\{\s*false\s*\}\}["']?)`),
 	},
+	// The Rust gates: a test run that only compiles, lints capped or allowed wholesale, tests
+	// skipped by name, or a workspace member left out of a workspace-wide command. A cargo call is
+	// cargo itself or make's $(CARGO).
+	{"cargo test --no-run", regexp.MustCompile(`(?i)\bcargo\)?\s.*\btest\b.*\s--no-run\b`)},
+	{"--cap-lints", regexp.MustCompile(`--cap-lints\b`)},
+	{"warnings allowed", regexp.MustCompile(`(\s-A\s*|--allow[ =])warnings\b`)},
+	{"cargo --skip", regexp.MustCompile(`(?i)\bcargo\)?\s.*\s--skip\b`)},
+	{"cargo --exclude", regexp.MustCompile(`(?i)\bcargo\)?\s.*\s--exclude\b`)},
 }
+
+// clippyCall is a clippy run in a gate (cargo itself or make's $(CARGO)), which must turn warnings
+// into errors.
+var clippyCall = regexp.MustCompile(`(?i)\bcargo\)?\s+(\+\S+\s+)?clippy\b`)
+
+// yamlName is a YAML name: line, a hook's or a step's label rather than a command it runs.
+var yamlName = regexp.MustCompile(`^\s*(-\s+)?name:\s`)
+
+// clippyDeniesWarnings is the -D warnings a clippy gate needs: without it every finding is a
+// warning, and the gate passes whatever clippy reports.
+var clippyDeniesWarnings = regexp.MustCompile(`\s(-D\s*|--deny[ =])warnings\b`)
 
 // vacuousAllowed are the reviewed uses, by file and the exact text the line carries. Each one
 // tolerates a command whose failure is an answer, not an error; none of them is a gate.
@@ -120,9 +139,32 @@ func TestVacuousFlagsAreRecognized(t *testing.T) {
 		"    if: ${{ false }}",
 		"    if: 'false'",
 		"    if: \"${{ false }}\"",
+		"\tcargo test --workspace --locked --no-run",
+		"        run: cargo clippy --workspace -- --cap-lints warn",
+		"\tcargo clippy --workspace -- -A warnings",
+		"\tcargo clippy --workspace -- --allow=warnings",
+		"        entry: cargo test --workspace --locked -- --skip slow",
+		"\tcargo test --workspace --exclude meta --locked",
+		"\t$(CARGO) test --workspace --locked --no-run",
+		"        run: cargo clippy --workspace --all-targets --locked",
+		"\t$(CARGO) clippy --workspace --all-targets --all-features --locked",
+		"        entry: cargo clippy --workspace --all-targets --locked",
 	} {
 		if len(vacuousHits(sample)) == 0 {
 			t.Errorf("no vacuous flag found in %q", sample)
+		}
+	}
+
+	// A clippy gate that denies warnings, in either spelling, is not vacuous, and neither is the
+	// label of a hook or a step.
+	for _, sample := range []string{
+		"\t$(CARGO) clippy --workspace --all-targets --all-features --locked -- -D warnings",
+		"        entry: cargo clippy --workspace --all-targets --locked -- --deny=warnings",
+		"        name: cargo clippy",
+		"      - name: Lint with clippy",
+	} {
+		if hits := vacuousHits(sample); len(hits) != 0 {
+			t.Errorf("a clippy gate that denies warnings was flagged: %q", sample)
 		}
 	}
 
@@ -146,6 +188,13 @@ func vacuousHits(content string) []vacuousHit {
 	var hits []vacuousHit
 
 	for index, line := range strings.Split(content, "\n") {
+		if clippyCall.MatchString(line) && !clippyDeniesWarnings.MatchString(line) &&
+			!yamlName.MatchString(line) {
+			hits = append(hits, vacuousHit{
+				number: index + 1, flag: "cargo clippy without -D warnings", line: line,
+			})
+		}
+
 		for _, flag := range vacuousFlags {
 			if flag.pattern.MatchString(line) {
 				hits = append(hits, vacuousHit{number: index + 1, flag: flag.name, line: line})

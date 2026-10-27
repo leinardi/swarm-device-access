@@ -249,9 +249,10 @@ Run before considering an edit done. `make check` applies to every row.
 | `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/` |
 | `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/` |
 | `test/**` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `make go-lint` |
-| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, droast and ShellCheck pins, vacuous flags) |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, Rust release, droast and ShellCheck pins, vacuous flags, required gates and skipped hooks) |
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `go test ./test/toolchain/`, `make help` |
 | `scripts/hooks/gofmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.go` file in Claude Code |
+| `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
 | `README.md`, `docs/**/*.md`, other Markdown | `go test -count=1 ./test/docs/`; prose wraps at 100 columns (markdownlint in `make check`) |
 | `.agents/skills/**` | the Markdown row |
 

@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-// Package toolchain_test pins the repository's tooling: the Go line and the droast and ShellCheck
-// versions are each one value everywhere they are written, Docker stays out of untagged tests, and
-// no gate carries a flag that makes it pass on nothing.
+// Package toolchain_test pins the repository's tooling: the Go line, the Rust release and the
+// droast and ShellCheck versions are each one value everywhere they are written, Docker stays out
+// of untagged tests, no gate carries a flag that makes it pass on nothing, and every CI gate is
+// required, with pre-commit-all skipping only the hooks a required job runs instead.
 package toolchain_test
 
 import (

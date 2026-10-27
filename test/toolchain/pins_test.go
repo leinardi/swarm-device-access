@@ -22,9 +22,20 @@ import (
 	"testing"
 )
 
-const setupGo = "actions/setup-go"
+const (
+	setupGo = "actions/setup-go"
+	// rustToolchainAction installs the Rust toolchain in CI.
+	rustToolchainAction = "dtolnay/rust-toolchain"
+)
 
 var (
+	// rustChannel is rust-toolchain.toml's channel, which must name one exact release.
+	rustChannel = regexp.MustCompile(`(?m)^channel = "([^"]*)"$`)
+	// rustVersion is the workspace's rust-version in the root Cargo.toml.
+	rustVersion = regexp.MustCompile(`(?m)^rust-version = "([^"]*)"$`)
+	// exactRust is a Rust release with its patch: 1.98.1, never 1.98 or stable.
+	exactRust = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
 	// goDirective is go.mod's go line, with its patch version.
 	goDirective = regexp.MustCompile(`(?m)^go (\d+\.\d+\.\d+)$`)
 	// golangImage is the version part of a dhi.io/golang tag: 1.26.9 in 1.26.9-alpine3.23-dev.
@@ -93,6 +104,123 @@ func TestGoStepRules(t *testing.T) {
 	if problems := goStepProblems(steps); len(problems) != 5 {
 		t.Errorf("want 5 problems, got %d: %q", len(problems), problems)
 	}
+}
+
+// TestRustLineIsOneRelease: one exact Rust release, patch included, is shared by
+// rust-toolchain.toml's channel, the workspace's rust-version and every CI toolchain step, so the
+// toolchain a developer, a hook and CI build with is one compiler.
+func TestRustLineIsOneRelease(t *testing.T) {
+	t.Parallel()
+
+	channel := rustChannel.FindStringSubmatch(readRepoFile(t, "rust-toolchain.toml"))
+	if len(channel) != 2 || !exactRust.MatchString(channel[1]) {
+		t.Fatalf("rust-toolchain.toml names no exact release (channel = \"X.Y.Z\"): %v", channel)
+	}
+
+	want := channel[1]
+
+	version := rustVersion.FindStringSubmatch(readRepoFile(t, "Cargo.toml"))
+	if version == nil {
+		t.Error("the root Cargo.toml sets no rust-version")
+	} else if version[1] != want {
+		t.Errorf(
+			"Cargo.toml's rust-version is %q, but rust-toolchain.toml says %s",
+			version[1],
+			want,
+		)
+	}
+
+	steps := githubActionSteps(t)
+
+	toolchainSteps := 0
+
+	for _, step := range steps {
+		if step.action == rustToolchainAction {
+			toolchainSteps++
+		}
+	}
+
+	if toolchainSteps == 0 {
+		t.Errorf("no %s step under .github; the check would see nothing", rustToolchainAction)
+	}
+
+	for _, problem := range rustStepProblems(steps, want) {
+		t.Error(problem)
+	}
+}
+
+// TestRustStepRules is the negative control of the Rust toolchain step rules.
+func TestRustStepRules(t *testing.T) {
+	t.Parallel()
+
+	steps, err := parseActionSteps("sample.yaml", []byte(`jobs:
+  ok:
+    steps:
+      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567 # master
+        with:
+          toolchain: 1.98.1
+  bad:
+    steps:
+      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
+        with:
+          toolchain: 1.98.0
+      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
+        with:
+          toolchain: stable
+      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
+        with:
+          toolchain: "1.98"
+      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Another release, a channel, a release without its patch, and no toolchain at all.
+	if problems := rustStepProblems(steps, "1.98.1"); len(problems) != 4 {
+		t.Errorf("want 4 problems, got %d: %q", len(problems), problems)
+	}
+}
+
+// TestRustLineReading pins the readings the Rust line rests on: a channel or a release without
+// its patch is not an exact release.
+func TestRustLineReading(t *testing.T) {
+	t.Parallel()
+
+	channel := rustChannel.FindStringSubmatch("[toolchain]\nchannel = \"1.98.1\"\n")
+	if len(channel) != 2 || channel[1] != "1.98.1" {
+		t.Errorf("channel read as %v", channel)
+	}
+
+	version := rustVersion.FindStringSubmatch("[workspace.package]\nrust-version = \"1.98\"\n")
+	if len(version) != 2 || version[1] != "1.98" {
+		t.Errorf("rust-version read as %v", version)
+	}
+
+	for _, inexact := range []string{"stable", "1.98", "nightly-2026-10-01", "1.98.1-x86_64"} {
+		if exactRust.MatchString(inexact) {
+			t.Errorf("%q was accepted as an exact release", inexact)
+		}
+	}
+}
+
+// rustStepProblems applies the Rust rule to steps: every toolchain step installs exactly want.
+func rustStepProblems(steps []actionStep, want string) []string {
+	var problems []string
+
+	for _, step := range steps {
+		if step.action != rustToolchainAction {
+			continue
+		}
+
+		if got := step.with["toolchain"]; got != want {
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s installs toolchain %q; it must be %s, the release of rust-toolchain.toml",
+				step.file, step.action, got, want))
+		}
+	}
+
+	return problems
 }
 
 // TestShellCheckIsOneVersion: droast's ShellCheck bridge runs the shellcheck on PATH, which CI
