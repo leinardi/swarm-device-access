@@ -170,6 +170,122 @@ func Run() string {
 }
 `
 
+// The Rust fixtures are ported from swarm-scheduler-exporter's meta/tests/suppressions.rs at
+// d57dcc220d29 (MIT, same author), where the Rust detector comes from.
+
+// rustWithOne is a Rust file carrying exactly one #[expect(clippy::too_many_lines)].
+const rustWithOne = `#[expect(clippy::too_many_lines, reason = "scratch fixture")]
+fn run() {}
+`
+
+// rustWithOneMoved carries the same single attribute on a different line: the count is unchanged.
+const rustWithOneMoved = `fn first() {}
+
+#[expect(clippy::too_many_lines, reason = "scratch fixture, moved")]
+fn run() {}
+`
+
+// rustWithTwo carries two attributes for the same lint.
+const rustWithTwo = `#[expect(clippy::too_many_lines, reason = "scratch fixture")]
+fn run() {}
+
+#[expect(clippy::too_many_lines, reason = "scratch fixture too")]
+fn walk() {}
+`
+
+// rustAfterURL puts a string holding a comment opener before the attribute on the same line. A
+// detector that stops at the first "//" on the line would miss it.
+const rustAfterURL = `const URL: &str = "https://example.com/x"; ` +
+	`#[expect(clippy::too_many_lines, reason = "behind a URL")]
+fn run() {}
+`
+
+// rustProseMention mentions an attribute in a line comment, which is not a suppression.
+const rustProseMention = `// run is written so that it needs no #[expect(clippy::too_many_lines)] at all.
+fn run() {}
+`
+
+// rustBlockComment mentions an attribute inside a block comment, which is not code either.
+const rustBlockComment = `/*
+ * run needs no #[expect(clippy::too_many_lines)], and this line is not one.
+ */
+fn run() {}
+`
+
+// rustWithCfgAttr wraps the lint attribute in cfg_attr, which the ratchet does not count.
+const rustWithCfgAttr = `#[cfg_attr(test, expect(clippy::too_many_lines, reason = "conditional"))]
+fn run() {}
+`
+
+// rustRawStringFixture holds attribute text in a raw string spanning lines. None of it counts.
+const rustRawStringFixture = `const FIXTURE: &str = r#"
+#[expect(clippy::too_many_lines, reason = "inside a raw string")]
+fn run() {}
+"#;
+`
+
+// rustRawStringFixtureExtended adds one more line inside that raw string.
+const rustRawStringFixtureExtended = `const FIXTURE: &str = r#"
+#[expect(clippy::cast_possible_truncation, reason = "inside a raw string too")]
+#[expect(clippy::too_many_lines, reason = "inside a raw string")]
+fn run() {}
+"#;
+`
+
+// rustRawStringFixtureAndAttribute adds a real attribute after the raw string closes.
+const rustRawStringFixtureAndAttribute = rustRawStringFixture + `
+#[expect(clippy::too_many_lines, reason = "in code this time")]
+fn real() {}
+`
+
+// rustWithAttributes carries every Rust lint-attribute form the ratchet counts: an inner and an
+// outer expect, an allow, and a multi-line expect naming two clippy lints the way rustfmt wraps a
+// long attribute. The reason item is not a lint, commas and parentheses inside it included.
+const rustWithAttributes = `#![expect(clippy::pedantic, reason = "scratch fixture, (inner)")]
+
+#[expect(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    reason = "scratch fixture"
+)]
+fn long() {}
+
+#[allow(dead_code)]
+fn unused() {}
+
+#![allow(missing_docs)]
+`
+
+// rustWithAttributeText holds lint attributes only as data: in a raw string spanning lines, in a
+// string, in a line comment and in a nested block comment, around character literals holding a
+// quote. None of it is a suppression.
+const rustWithAttributeText = `const FIXTURE: &str = r#"
+#[allow(clippy::unwrap_used)]
+"#;
+const TEXT: &str = "#[expect(dead_code)]";
+// #[allow(dead_code)]
+/* #[allow(dead_code)] /* nested */ #[allow(dead_code)] */
+fn quote<'a>(text: &'a str) -> char { let _quote = '"'; '#' }
+`
+
+// rustWithMultiLineExpect is a multi-line expect naming one lint.
+const rustWithMultiLineExpect = `#[expect(
+    clippy::too_many_lines,
+    reason = "scratch fixture"
+)]
+fn long() {}
+`
+
+// rustWithMultiLineExpectExtended adds a second lint on its own line inside the same attribute: the
+// opening line is untouched, so only the line naming the lint shows the addition.
+const rustWithMultiLineExpectExtended = `#[expect(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    reason = "scratch fixture"
+)]
+fn long() {}
+`
+
 func TestCheckSuppressions(t *testing.T) {
 	t.Parallel()
 
@@ -361,7 +477,8 @@ func TestCheckSuppressionsUpdate(t *testing.T) {
 	}
 }
 
-// TestCheckSuppressionsCountsEveryFamily pins the detector across all four mechanisms at once: the
+// TestCheckSuppressionsCountsEveryFamily pins the detector across the Go, shell and Dockerfile
+// mechanisms at once (TestCheckSuppressionsCountsEveryRustForm covers Rust's two): the
 // baseline is keyed per rule, so a family that resolves to the wrong key -- or to no key -- takes
 // its suppressions out of the ratchet without anything else noticing.
 func TestCheckSuppressionsCountsEveryFamily(t *testing.T) {
@@ -548,6 +665,344 @@ func TestCheckSuppressionsAllowsARename(t *testing.T) {
 	}
 }
 
+// TestCheckSuppressionsRust runs the count and staged-diff rules on Rust's #[expect] and #[allow],
+// and pins what the Rust detector must not read as a suppression.
+func TestCheckSuppressionsRust(t *testing.T) {
+	t.Parallel()
+
+	const rustScratch = "scratch.rs"
+
+	const tooManyLines = "expect/clippy::too_many_lines"
+
+	cases := []struct {
+		name        string
+		setUp       func(t *testing.T, dir string)
+		wantFailure bool
+		wantOutput  string
+	}{
+		{
+			name: "a tree that matches its baseline passes",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithOne, tooManyLines+"\t1")
+			},
+		},
+		{
+			name: "an added attribute with an untouched baseline is refused",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithOne, tooManyLines+"\t1")
+				writeFile(t, dir, rustScratch, rustWithTwo)
+				git(t, dir, "add", rustScratch)
+			},
+			wantFailure: true,
+			wantOutput:  "without touching " + baselineFile,
+		},
+		{
+			name: "the same addition passes once the baseline is staged with it",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithOne, tooManyLines+"\t1")
+				writeFile(t, dir, rustScratch, rustWithTwo)
+				writeBaseline(t, dir, tooManyLines+"\t2")
+				git(t, dir, "add", rustScratch, baselineFile)
+			},
+		},
+		{
+			name: "an attribute swapped one for one is refused even though the count holds",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithOne, tooManyLines+"\t1")
+				writeFile(t, dir, rustScratch, rustWithOneMoved)
+				git(t, dir, "add", rustScratch)
+			},
+			wantFailure: true,
+			wantOutput:  "without touching " + baselineFile,
+		},
+		{
+			name: "a count above the baseline is refused",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithTwo, tooManyLines+"\t1")
+			},
+			wantFailure: true,
+			wantOutput:  "baseline allows 1",
+		},
+		{
+			name: "a count below the baseline is refused",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithOne, tooManyLines+"\t3")
+			},
+			wantFailure: true,
+			wantOutput:  "baseline still claims 3",
+		},
+		{
+			name: "a lint the baseline has never heard of is refused",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithOne, "expect/dead_code\t1")
+			},
+			wantFailure: true,
+			wantOutput:  "does not list this rule",
+		},
+		{
+			name: "an attribute behind a string containing a comment opener still counts",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustAfterURL, "")
+			},
+			wantFailure: true,
+			wantOutput:  tooManyLines,
+		},
+		{
+			name: "an attribute mentioned in a line comment is not a suppression",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustProseMention, "")
+			},
+		},
+		{
+			name: "an attribute inside a block comment is not a suppression either",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustBlockComment, "")
+			},
+		},
+		{
+			name: "a cfg_attr-wrapped attribute is not counted",
+			setUp: func(t *testing.T, dir string) {
+				t.Helper()
+
+				commitInitialAs(t, dir, rustScratch, rustWithCfgAttr, "")
+			},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			initRepo(t, dir)
+			testCase.setUp(t, dir)
+
+			output, err := runRatchet(t, dir)
+
+			if testCase.wantFailure && err == nil {
+				t.Fatalf("the ratchet accepted the tree, want a refusal:\n%s", output)
+			}
+
+			if !testCase.wantFailure && err != nil {
+				t.Fatalf("the ratchet refused a tree it should accept: %v\n%s", err, output)
+			}
+
+			if testCase.wantOutput != "" && !strings.Contains(output, testCase.wantOutput) {
+				t.Errorf("output does not mention %q:\n%s", testCase.wantOutput, output)
+			}
+		})
+	}
+}
+
+// TestCheckSuppressionsCountsEveryRustForm pins the Rust detector's keys: each lint of a
+// multi-lint attribute counts separately, inner and outer forms both count, and attribute text
+// held as data -- strings, raw strings, comments, nested block comments -- counts as nothing.
+func TestCheckSuppressionsCountsEveryRustForm(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	writeFile(t, dir, "src/attributes.rs", rustWithAttributes)
+	writeFile(t, dir, "src/text.rs", rustWithAttributeText)
+	writeBaseline(t, dir, "")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "every rust form")
+
+	output, err := runRatchet(t, dir, "--update")
+	if err != nil {
+		t.Fatalf("--update failed: %v\n%s", err, output)
+	}
+
+	written := readFile(t, filepath.Join(dir, baselineFile))
+
+	for _, line := range []string{
+		"expect/clippy::pedantic\t1",
+		"expect/clippy::too_many_lines\t1",
+		"expect/clippy::cast_possible_truncation\t1",
+		"allow/dead_code\t1",
+		"allow/missing_docs\t1",
+	} {
+		if !strings.Contains(written, line) {
+			t.Errorf("baseline does not record %q:\n%s", line, written)
+		}
+	}
+
+	// The text fixture names clippy::unwrap_used and expect(dead_code) only as data; the one real
+	// allow(dead_code) is in the attributes fixture.
+	for _, unwanted := range []string{"allow/clippy::unwrap_used", "expect/dead_code", "reason"} {
+		if strings.Contains(written, unwanted) {
+			t.Errorf("baseline records %q, which is not a suppression:\n%s", unwanted, written)
+		}
+	}
+}
+
+// TestCheckSuppressionsSeesALintAddedToAMultiLineExpect pins that a lint is located on the line
+// that names it, not on the line that opens the attribute: rustfmt puts each lint of a long
+// attribute on its own line, and adding one there leaves the opening line untouched.
+func TestCheckSuppressionsSeesALintAddedToAMultiLineExpect(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	initRepo(t, dir)
+	commitInitialAs(
+		t,
+		dir,
+		"scratch.rs",
+		rustWithMultiLineExpect,
+		"expect/clippy::too_many_lines\t1",
+	)
+
+	writeFile(t, dir, "scratch.rs", rustWithMultiLineExpectExtended)
+	git(t, dir, "add", "scratch.rs")
+
+	output, err := runRatchet(t, dir)
+	if err == nil {
+		t.Fatalf("the ratchet accepted a lint added to an existing expect:\n%s", output)
+	}
+
+	if !strings.Contains(output, "scratch.rs:3\texpect/clippy::cast_possible_truncation") {
+		t.Errorf("the output does not locate the added lint on its own line:\n%s", output)
+	}
+}
+
+// TestCheckSuppressionsSkipsRustFixtures pins that a Rust file under a testdata/ directory is data:
+// neither counted nor treated as newly added.
+func TestCheckSuppressionsSkipsRustFixtures(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	initRepo(t, dir)
+	commitInitial(t, dir, goWithProseMention, "")
+
+	writeFile(t, dir, "tests/testdata/fixture.rs", rustWithOne)
+	writeFile(t, dir, "testdata/top.rs", rustWithOne)
+	git(t, dir, "add", "-A")
+
+	output, err := runRatchet(t, dir)
+	if err != nil {
+		t.Fatalf("the ratchet counted a Rust fixture: %v\n%s", err, output)
+	}
+}
+
+// TestCheckSuppressionsCountsNeighborsOfRustFixtures is the negative control of the test above: a
+// Rust file next to a testdata/ directory but outside it is counted, and the exclusion covers Rust
+// only, so a Go file under testdata/ is counted exactly as it was before Rust was added.
+func TestCheckSuppressionsCountsNeighborsOfRustFixtures(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range []struct {
+		name, content, key string
+	}{
+		{"tests/testdatax/x.rs", rustWithOne, "expect/clippy::too_many_lines"},
+		{"tests/testdata.rs", rustWithOne, "expect/clippy::too_many_lines"},
+		{"internal/x/testdata/x.go", goWithGosec, "nolint/gosec"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			initRepo(t, dir)
+			commitInitial(t, dir, goWithProseMention, "")
+
+			writeFile(t, dir, testCase.name, testCase.content)
+			git(t, dir, "add", "-A")
+
+			output, err := runRatchet(t, dir)
+			if err == nil || !strings.Contains(output, testCase.key) {
+				t.Fatalf("the ratchet did not count %s: %v\n%s", testCase.name, err, output)
+			}
+		})
+	}
+}
+
+// TestCheckSuppressionsReadsTheStagedRustFileNotTheHunk is the Rust side of
+// TestCheckSuppressionsReadsTheStagedFileNotTheHunk: the raw-string state carries across lines.
+func TestCheckSuppressionsReadsTheStagedRustFileNotTheHunk(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range []struct {
+		name, edited, wantOutput string
+	}{
+		{"a line added inside a raw string is not a suppression", rustRawStringFixtureExtended, ""},
+		{
+			"a real attribute added after the raw string still is", rustRawStringFixtureAndAttribute,
+			"without touching " + baselineFile,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			initRepo(t, dir)
+			commitInitialAs(t, dir, "scratch.rs", rustRawStringFixture, "")
+
+			writeFile(t, dir, "scratch.rs", testCase.edited)
+			git(t, dir, "add", "scratch.rs")
+
+			output, err := runRatchet(t, dir)
+
+			if testCase.wantOutput == "" {
+				if err != nil {
+					t.Fatalf("the ratchet read a raw-string line as an attribute: %v\n%s",
+						err, output)
+				}
+
+				return
+			}
+
+			if err == nil || !strings.Contains(output, testCase.wantOutput) {
+				t.Fatalf("the staged-diff rule did not see the added attribute: %v\n%s",
+					err, output)
+			}
+		})
+	}
+}
+
+// TestCheckSuppressionsAllowsARustRename pins that moving a Rust file is not adding its attributes.
+func TestCheckSuppressionsAllowsARustRename(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	writeFile(t, dir, "src/old.rs", rustWithAttributes)
+	writeBaseline(t, dir, "allow/dead_code\t1\n"+
+		"allow/missing_docs\t1\n"+
+		"expect/clippy::cast_possible_truncation\t1\n"+
+		"expect/clippy::pedantic\t1\n"+
+		"expect/clippy::too_many_lines\t1")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "a file with attributes")
+
+	git(t, dir, "mv", "src/old.rs", "src/new.rs")
+
+	output, err := runRatchet(t, dir)
+	if err != nil {
+		t.Fatalf("the ratchet read a moved file as newly added attributes: %v\n%s", err, output)
+	}
+}
+
 // initRepo creates an empty git repository with an identity, so committing needs no global config.
 func initRepo(t *testing.T, dir string) {
 	t.Helper()
@@ -562,7 +1017,14 @@ func initRepo(t *testing.T, dir string) {
 func commitInitial(t *testing.T, dir, source, baseline string) {
 	t.Helper()
 
-	writeFile(t, dir, "scratch.go", source)
+	commitInitialAs(t, dir, "scratch.go", source, baseline)
+}
+
+// commitInitialAs writes one source file under the given name and a baseline, and commits both.
+func commitInitialAs(t *testing.T, dir, name, source, baseline string) {
+	t.Helper()
+
+	writeFile(t, dir, name, source)
 	writeBaseline(t, dir, baseline)
 	git(t, dir, "add", "-A")
 	git(t, dir, "commit", "-q", "-m", "scratch fixture")

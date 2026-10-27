@@ -63,6 +63,28 @@ const mitHeader = `/*
 package x
 `
 
+// apacheBlock is this project's Apache-2.0 header as a Go or Rust file carries it.
+const apacheBlock = "/*\n * Copyright 2026 Roberto Leinardi.\n" + apacheBody
+
+// rustHeader is a Rust source with the header, followed by its module comment.
+const rustHeader = apacheBlock + "\n//! A module.\n"
+
+// rustNvidiaHeader is the Rust port of an NVIDIA file: NVIDIA's block, then a modification notice.
+const rustNvidiaHeader = "/*\n * Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.\n" +
+	apacheBody + "\n// Modified by Roberto Leinardi: ported to Rust.\n\n//! The cgroup API.\n"
+
+// provenanceLine is the provenance comment of a reused Rust file, on one line.
+const provenanceLine = "// Adapted from swarm-scheduler-exporter/src/clock.rs at d57dcc220d29, " +
+	"originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi\n"
+
+// provenanceWrapped is the same comment wrapped over three lines, as a long path forces it to be.
+const provenanceWrapped = "// Adapted from swarm-scheduler-exporter/src/collector/reconciler/listener.rs\n" +
+	"// at d57dcc220d29, originally MIT-licensed,\n" +
+	"// Copyright (c) 2026 Roberto Leinardi\n"
+
+// mitPermission is the opening of the MIT licence's permission paragraph.
+const mitPermission = " * Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+
 const shellHeader = `#!/usr/bin/env bash
 #
 # Copyright 2026 Roberto Leinardi.
@@ -141,6 +163,41 @@ func TestHeaderCases(t *testing.T) {
 		"upstream make fragment":          {map[string]string{".mk/docker.mk": "x:\n", ".mk/help.mk": "y:\n"}, true},
 		"bootstrap script":                {map[string]string{"scripts/bootstrap-mk-common.sh": "#!/bin/sh\n"}, true},
 		"markdown and yaml":               {map[string]string{"README.md": "# x\n", "a.yaml": "a: 1\n"}, true},
+
+		// Rust: every .rs file of every package is governed like a Go file.
+		"rust file with the header":        {map[string]string{"src/x.rs": rustHeader}, true},
+		"rust file without a header":       {map[string]string{"src/x.rs": "//! A module.\n"}, false},
+		"rust file with another license":   {map[string]string{"src/x.rs": mitHeader}, false},
+		"rust test without a header":       {map[string]string{"tests/run.rs": "fn main() {}\n"}, false},
+		"rust build script, no header":     {map[string]string{"build.rs": "fn main() {}\n"}, false},
+		"meta crate file without a header": {map[string]string{"meta/tests/x.rs": "fn main() {}\n"}, false},
+		"testenv file without a header":    {map[string]string{"testenv/src/lib.rs": "//! x\n"}, false},
+		"another holder on a rust file":    {map[string]string{"src/x.rs": strings.ReplaceAll(rustHeader, "Roberto Leinardi", "Someone Else")}, false},
+		"cargo manifest and toml":          {map[string]string{"Cargo.toml": "[package]\n", "clippy.toml": "x = 1\n"}, true},
+
+		// Rust fixtures under testdata are data; the exemption covers Rust only.
+		"rust fixture under testdata":       {map[string]string{"tests/testdata/fixture.rs": "fn main() {}\n"}, true},
+		"rust file next to testdata":        {map[string]string{"tests/testdatax/x.rs": "fn main() {}\n"}, false},
+		"go file under testdata, no header": {map[string]string{"internal/x/testdata/x.go": "package x\n"}, false},
+
+		// NVIDIA's header: the four Rust ports, and no other Rust file.
+		"nvidia header on the rust api port":  {map[string]string{"src/cgroup/api.rs": rustNvidiaHeader}, true},
+		"nvidia header on the rust ebpf port": {map[string]string{"src/cgroup/ebpf.rs": rustNvidiaHeader}, true},
+		"nvidia header on the rust v1 port":   {map[string]string{"src/cgroup/v1.rs": rustNvidiaHeader}, true},
+		"nvidia header on the rust v2 port":   {map[string]string{"src/cgroup/v2.rs": rustNvidiaHeader}, true},
+		"nvidia header on another rust file":  {map[string]string{"src/cgroup/v2plan.rs": rustNvidiaHeader}, false},
+		"own header on a rust nvidia port":    {map[string]string{"src/cgroup/v2.rs": rustHeader}, false},
+
+		// The provenance comment of a reused file: accepted, not required, and complete if present.
+		"provenance on one line":          {map[string]string{"src/clock.rs": apacheBlock + provenanceLine + "\n//! The clock.\n"}, true},
+		"provenance wrapped":              {map[string]string{"src/listener.rs": apacheBlock + provenanceWrapped + "\n//! The listener.\n"}, true},
+		"provenance without a commit":     {map[string]string{"src/clock.rs": apacheBlock + strings.Replace(provenanceLine, " at d57dcc220d29", "", 1)}, false},
+		"provenance with another holder":  {map[string]string{"src/clock.rs": apacheBlock + strings.Replace(provenanceLine, "Roberto Leinardi", "Someone Else", 1)}, false},
+		"provenance cut short":            {map[string]string{"src/clock.rs": apacheBlock + "// Adapted from swarm-scheduler-exporter/src/clock.rs\n\n//! The clock.\n"}, false},
+		"provenance without the header":   {map[string]string{"src/clock.rs": provenanceLine + "\n//! The clock.\n"}, false},
+		"pasted mit block on a rust file": {map[string]string{"src/clock.rs": strings.Replace(apacheBlock, " *\n", " *\n"+mitPermission, 1) + provenanceLine}, false},
+		// Go files keep their rules: neither Rust-only rule applies to them.
+		"go file with an incomplete provenance": {map[string]string{"internal/x/x.go": strings.Replace(goHeader, "package x", "// Adapted from somewhere\n\npackage x", 1)}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

@@ -22,10 +22,25 @@
 # one. The files preserved from NVIDIA's code keep NVIDIA's own Apache-2.0 header (AGENTS.md: never
 # relicense or reformat that block); they are named in NVIDIA_FILES, and only they may carry it.
 #
-# Governed: Go and shell sources, Dockerfiles, the Makefile and the repo-local .mk fragments.
-# Exempt: the make-common files the bootstrap fetches (upstream, under make-common's MIT license:
-# the snippets named in the Makefile's MK_COMMON_FILES, and the bootstrap script itself). YAML, JSON
-# and Markdown are never governed.
+# Governed: Go, Rust and shell sources, Dockerfiles, the Makefile and the repo-local .mk fragments.
+# Rust means every .rs file of every Cargo package: src, tests, build scripts, the meta and testenv
+# members. Exempt: the make-common files the bootstrap fetches (upstream, under make-common's MIT
+# license: the snippets named in the Makefile's MK_COMMON_FILES, and the bootstrap script itself),
+# and Rust files under a testdata/ directory, which are fixtures. YAML, JSON, TOML and Markdown are
+# never governed.
+#
+# Rust files have two more rules, which leave the Go, shell and make checks exactly as they were:
+#
+#   - Code reused from swarm-scheduler-exporter or swarm-rootless-docker (MIT, same author) carries
+#     this project's Apache-2.0 header followed by a provenance comment, "// Adapted from
+#     <repo>/<path> at <commit>, originally MIT-licensed, Copyright (c) <year> Roberto Leinardi",
+#     which may wrap over several // lines. The comment is accepted and never required, but one
+#     that is present must be complete, so a reused file's origin cannot be recorded half-way.
+#   - The MIT permission text itself must not appear in the header: the reused file is relicensed,
+#     and pasting the old block alongside the new one would leave two licences in one file.
+#
+# The Rust detection is adapted from swarm-scheduler-exporter's scripts/check-license-headers.sh at
+# d57dcc220d29, originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi.
 
 set -euo pipefail
 
@@ -58,13 +73,23 @@ REQUIRED_LINES=(
 COPYRIGHT_RE='Copyright [0-9]{4}(-[0-9]{4})? Roberto Leinardi\.'
 NVIDIA_COPYRIGHT_RE='Copyright \(c\) [0-9]{4}, NVIDIA CORPORATION\.'
 
-# The files preserved from NVIDIA's code, which keep NVIDIA's copyright line.
+# The files preserved from NVIDIA's code, which keep NVIDIA's copyright line: the Go originals and
+# their Rust ports.
 NVIDIA_FILES=(
 	"internal/cgroup/api.go"
 	"internal/cgroup/ebpf.go"
 	"internal/cgroup/v1.go"
 	"internal/cgroup/v2.go"
+	"src/cgroup/api.rs"
+	"src/cgroup/ebpf.rs"
+	"src/cgroup/v1.rs"
+	"src/cgroup/v2.rs"
 )
+
+# The provenance comment of a Rust file reused from another project, once its // lines are joined.
+PROVENANCE_RE='^Adapted from [A-Za-z0-9._-]+/[^ ]+ at [0-9a-f]{7,40}, originally MIT-licensed, Copyright \(c\) [0-9]{4}(-[0-9]{4})? Roberto Leinardi$'
+# Text only the MIT licence carries.
+MIT_MARKER='Permission is hereby granted, free of charge'
 
 # Exact paths that are not this repository's own source.
 EXEMPT_PATHS=(
@@ -82,7 +107,10 @@ is_governed() {
 	base="${path##*/}"
 
 	case "${path}" in
-	*.go | *.sh | .mk/*.mk)
+	testdata/*.rs | */testdata/*.rs)
+		return 1
+		;;
+	*.go | *.rs | *.sh | .mk/*.mk)
 		return 0
 		;;
 	esac
@@ -141,7 +169,40 @@ has_header() {
 		copyright_re="${NVIDIA_COPYRIGHT_RE}"
 	fi
 
-	grep -Eq -- "${copyright_re}" <<<"${head}"
+	grep -Eq -- "${copyright_re}" <<<"${head}" || return 1
+
+	if [[ ${path} == *.rs ]]; then
+		rust_header_ok "${head}" || return 1
+	fi
+}
+
+# rust_header_ok applies the two Rust-only rules to a file's header window.
+rust_header_ok() {
+	local head="$1" provenance
+
+	if [[ ${head} == *"${MIT_MARKER}"* ]]; then
+		return 1
+	fi
+
+	# The comment runs from its "// Adapted from" line to the line that ends in the holder's name,
+	# or to the first line that is not a plain // comment.
+	provenance="$(awk '
+		/^\/\/ Adapted from / { open = 1 }
+		open {
+			if ($0 !~ /^\/\/( |$)/) { exit }
+			text = $0
+			sub(/^\/\/ ?/, "", text)
+			joined = (joined == "" ? text : joined " " text)
+			if (text ~ /Roberto Leinardi$/) { exit }
+		}
+		END { print joined }
+	' <<<"${head}")"
+
+	if [[ -z ${provenance} ]]; then
+		return 0
+	fi
+
+	grep -Eq -- "${PROVENANCE_RE}" <<<"${provenance}"
 }
 
 COMMON_FILES="$(mk_common_files)"
@@ -174,6 +235,7 @@ if [[ ${#missing[@]} -gt 0 ]]; then
 	echo "These files lack the swarm-device-access Apache-2.0 header:" >&2
 	printf '  %s\n' "${missing[@]}" >&2
 	echo "Copy the header from any Go or shell file (IntelliJ: the Apache-2.0 copyright profile)." >&2
+	echo "A reused Rust file adds a complete provenance comment below it, never the MIT block." >&2
 	exit 1
 fi
 

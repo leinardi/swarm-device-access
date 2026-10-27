@@ -213,6 +213,11 @@ Prometheus exporter).
   lint errors)
 - `t.Skip` has no libtest equivalent → a gated test returns early with a note, and an
   environment variable CI sets turns the missing tool into a failure. (ported meta-tests)
+- Teaching the shell check scripts Rust (`#[expect]` counting, the header rules) means rewrapping
+  their prose, and ShellCheck parses any comment line whose first word is `shellcheck` as a
+  directive (SC1073, SC1072) → never start a wrapped comment line with that word. Keep a Rust-only
+  rule (a `testdata/` exemption, a header check) scoped to `*.rs`, with a Go case in the script's
+  tests as the control that the Go side did not move. (ShellCheck 0.11, swarm-device-access)
 - cargo-deny 0.20: webpki-roots is `CDLA-Permissive-2.0` (allow with a comment); `{ crate = … }`
   ignores only yanked versions → ignore advisories by ID with a reason. (cargo-deny warnings)
 - **Static builds:** cargo-zigbuild builds static musl for amd64 and arm64 from one platform; it

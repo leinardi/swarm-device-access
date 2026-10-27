@@ -161,11 +161,14 @@ symlink.
   reformat that block.
 - The README is the source of truth for the user-facing story; keep flag tables and the
   docker-compose snippet in sync if you change flags or mounts.
-- Every Go and shell source, Dockerfile, the Makefile and the repo-local `.mk` fragments carry the
-  Apache-2.0 header (the IntelliJ `Apache-2.0` copyright profile), with the year of the file's
-  first commit, after any shebang, build constraint or Dockerfile parser directive.
+- Every Go, Rust and shell source, Dockerfile, the Makefile and the repo-local `.mk` fragments
+  carry the Apache-2.0 header (the IntelliJ `Apache-2.0` copyright profile), with the year of the
+  file's first commit, after any shebang, build constraint or Dockerfile parser directive.
   `scripts/check-license-headers.sh` (the `check-license-headers` hook) checks the whole tree;
-  NVIDIA's four files keep NVIDIA's header, and make-common's files are exempt.
+  NVIDIA's four files and their Rust ports (`src/cgroup/{api,ebpf,v1,v2}.rs`) keep NVIDIA's
+  header, and make-common's files and Rust fixtures under `testdata/` are exempt. A Rust file
+  reused from swarm-scheduler-exporter or swarm-rootless-docker adds the provenance comment of
+  [`docs/rust-port.md`](docs/rust-port.md) below the header, complete, and never the MIT block.
 - The image's `dhi.io` bases are pinned by tag, not by digest, on purpose (the Dockerfile says
   why); the BuildKit frontend is pinned by digest, and the golang tag names go.mod's exact Go
   version. Dependabot takes only patch releases of golang: a new Go minor moves go.mod and the tag
@@ -212,6 +215,7 @@ repository, together with this note.
 
 Every in-file suppression is counted per rule against `.suppressions-baseline` by the
 `check-suppressions` pre-commit hook (`scripts/check-suppressions.sh`): `//nolint:<linter>`,
+each lint of a Rust `#[expect(...)]` or `#[allow(...)]` (not one wrapped in `cfg_attr`),
 `# shellcheck disable=`, `# droast ignore=` and `# droast global ignore=`.
 
 Adding one is allowed, but never silently: the hook refuses a commit that adds a suppression line
