@@ -28,6 +28,7 @@ pub mod config;
 pub mod daemon;
 pub mod docker;
 pub mod go_compat;
+pub mod launcher;
 pub mod logger;
 pub mod metrics;
 pub mod policy;

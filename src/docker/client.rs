@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
 use bytes::{Bytes, BytesMut};
-use http_body_util::{BodyExt as _, Empty, Limited};
+use http_body_util::{BodyExt as _, Full, Limited};
 use hyper::body::{Frame, SizeHint};
 use hyper::header::{ACCEPT, CONTENT_TYPE, HOST, HeaderValue, USER_AGENT};
 use hyper::{Method, Request, Response, StatusCode};
@@ -41,7 +41,7 @@ use super::connect::Connector;
 use super::context;
 use super::error::{ConfigError, Error};
 use super::host::{escape_host, escape_path, join_path, unix_socket};
-use super::pool::{Pool, PooledBody, SendError};
+use super::pool::{Pool, PooledBody, RequestBody, SendError};
 use super::version::{self, MAX_API_VERSION};
 use crate::go_compat::errno::io_error_text;
 use crate::go_compat::http_status::status_text;
@@ -200,8 +200,8 @@ impl Client {
 
     /// The one request builder: `GET` with Go's headers in Go's order (`Host`, `User-Agent`,
     /// `Accept`). Only [`Client::ping`] changes the method, to `HEAD`.
-    fn request(&self, target: &str, accept: &[&'static str]) -> Request<Empty<Bytes>> {
-        let mut request = Request::new(Empty::new());
+    fn request(&self, target: &str, accept: &[&'static str]) -> Request<RequestBody> {
+        let mut request = Request::new(Full::new(Bytes::new()));
         *request.method_mut() = Method::GET;
         *request.uri_mut() = target
             .parse()
@@ -225,7 +225,7 @@ impl Client {
     async fn send(
         &self,
         target: &str,
-        build: impl Fn() -> Request<Empty<Bytes>>,
+        build: impl Fn() -> Request<RequestBody>,
     ) -> Result<Response<Body>, Error> {
         // net/http's url.Error names the method this way: "Get", "Head".
         let method = build().method().as_str().to_owned();
@@ -321,16 +321,7 @@ impl Client {
         query: &str,
         accept: &[&'static str],
     ) -> Result<Response<Body>, Error> {
-        let version = self.api_version().await;
-        let api_path = join_path(&[
-            &format!("/v{}", version.strip_prefix('v').unwrap_or(&version)),
-            path,
-        ]);
-        let mut target = escape_path(&api_path);
-        if !query.is_empty() {
-            target.push('?');
-            target.push_str(query);
-        }
+        let target = self.versioned_target(path, query).await;
         let response = self.send(&target, || self.request(&target, accept)).await?;
         if response.status().as_u16() < 400 {
             return Ok(response);
@@ -341,6 +332,95 @@ impl Client {
             .await
             .err()
             .unwrap_or_else(|| Error::response(StatusCode::INTERNAL_SERVER_ERROR, String::new())))
+    }
+
+    /// The launcher's write engine's request (`src/launcher/engine.rs`, the only caller, which
+    /// `meta/tests/launcher_boundary.rs` pins): the versioned request of `path` and `query` from
+    /// the one builder, which `shape` turns into the write call (its method, headers and body),
+    /// sent on the shared pool. The response once its headers are in, or moby's error for a
+    /// status of 400 or above.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] for no response, as moby words it, or a response error.
+    pub(crate) async fn exchange(
+        &self,
+        path: &str,
+        query: &str,
+        shape: impl Fn(&mut Request<RequestBody>),
+    ) -> Result<Response<Body>, Error> {
+        let target = self.versioned_target(path, query).await;
+        let build = || {
+            let mut request = self.request(&target, &[]);
+            shape(&mut request);
+            request
+        };
+        let method = build().method().as_str().to_owned();
+        let response = self.send(&target, build).await?;
+        if response.status().as_u16() < 400 {
+            return Ok(response);
+        }
+        let url = self.url(&target);
+        Err(self
+            .check_response(response, &method, &url)
+            .await
+            .err()
+            .unwrap_or_else(|| Error::response(StatusCode::INTERNAL_SERVER_ERROR, String::new())))
+    }
+
+    /// [`Client::exchange`] on a connection of its own that the answer upgrades, as moby's
+    /// `postHijacked` sends the attach: the upgraded connection on a `101`, and moby's
+    /// `setupHijackConn` errors otherwise. The exchange is outside any caller's context, as moby's
+    /// hijacked round trip is.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] when the socket cannot be dialled, the exchange fails, or the answer is not an
+    /// upgrade.
+    pub(crate) async fn exchange_upgrade(
+        &self,
+        path: &str,
+        query: &str,
+        shape: impl Fn(&mut Request<RequestBody>),
+    ) -> Result<hyper::upgrade::Upgraded, Error> {
+        let target = self.versioned_target(path, query).await;
+        let mut request = self.request(&target, &[]);
+        shape(&mut request);
+        let response =
+            self.pool
+                .send_upgradable(request)
+                .await
+                .map_err(|failure| match failure {
+                    SendError::Connect(error) => Error::connection_failed(format!(
+                        "cannot connect to the Docker daemon. Is 'docker daemon' running on this \
+                     host?: {error}"
+                    )),
+                    SendError::Http(error) => Error::connection_failed(http_error_text(&error)),
+                })?;
+        if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+            return Err(Error::connection_failed(format!(
+                "unable to upgrade to tcp, received {}",
+                response.status().as_u16()
+            )));
+        }
+        hyper::upgrade::on(response)
+            .await
+            .map_err(|error| Error::connection_failed(http_error_text(&error)))
+    }
+
+    /// The target of a versioned request: the negotiated version's path, escaped, and the query.
+    async fn versioned_target(&self, path: &str, query: &str) -> String {
+        let version = self.api_version().await;
+        let api_path = join_path(&[
+            &format!("/v{}", version.strip_prefix('v').unwrap_or(&version)),
+            path,
+        ]);
+        let mut target = escape_path(&api_path);
+        if !query.is_empty() {
+            target.push('?');
+            target.push_str(query);
+        }
+        target
     }
 
     /// moby's `checkResponseErr`: a status from 200 to 399 is fine; otherwise the error carries

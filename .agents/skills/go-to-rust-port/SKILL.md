@@ -227,6 +227,24 @@ Prometheus exporter).
   shows a connection the Go client never opened. Record the Go client's wire through a proxy and
   replay it to the Rust client, connection numbers included: per-request unit tests do not see
   connection reuse. (moby v0.6.0; `tests/testdata/engine_wire`)
+- **Docker writes (moby client):** net/http sends `Content-Length: 0` with an empty `POST`
+  (start, stop, wait, attach) and none with an empty `DELETE`; hyper sends none for an empty body
+  → set it by hand on the `POST`s, or the wire differs. moby's attach dials a connection of its
+  own and hijacks it after the `101`: hyper needs `connection.with_upgrades()` on that
+  connection, `hyper::upgrade::on`, and `TokioIo` around the `Upgraded`; moby's errors there are
+  `cannot connect to the Docker daemon. Is 'docker daemon' running on this host?: <dial>` and
+  `unable to upgrade to tcp, received <code>`, and a read error on the hijacked unix socket is
+  `read unix @-><socket>: read: <errno>` (Go writes an unbound socket's address as `@`).
+  `ContainerWait` resolves once the headers are in and decodes the body later; a JSON syntax
+  error there is reported as the answer's text, not the decoder's. `json.Marshal` of a
+  `CreateRequest` writes every non-`omitempty` field, `null` for a nil slice and `[]` for an
+  empty one → write the body by hand and pin it against a Go-printed body and the captured
+  create. (moby v0.6.0 source; `launcher.jsonl`, compared byte for byte)
+- **Wrapped `os.Open` errors and `bufio.Scanner`:** `fmt.Errorf("open %s: %w", path, err)` of an
+  `os.Open` error names the path twice (`open <p>: open <p>: <errno>`), since the `PathError`
+  already has it; a default `Scanner` fails a line of 64 KiB or more, its newline counted, with
+  `bufio.Scanner: token too long`, and drops a trailing `\r` → port both, not a
+  `read_to_string` and `lines()`. (Go source; launcher self identification)
 - **Event streams:** every real close of Docker's chunked stream is a cut without the
   terminating chunk (HAProxy timeout, stopped daemon), surfaced by hyper as a body `Err` with
   `is_incomplete_message() == false` → classify "the body returned Err" vs "ended", decode with

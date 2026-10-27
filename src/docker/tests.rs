@@ -560,6 +560,39 @@ async fn idle_connection_closed_by_the_daemon_is_replaced() {
     assert_ne!(requests[1].connection, requests[2].connection);
 }
 
+/// A write whose reused connection drops after the request went out is not sent again: the
+/// daemon may have carried it out, and net/http resends a request that is not replayable only
+/// when nothing of it was written.
+#[tokio::test]
+async fn a_write_is_not_resent_on_a_dropped_connection() {
+    let daemon = FakeDaemon::new(|request| {
+        if request.target.ends_with("/start") {
+            Reply::Close
+        } else {
+            engine(Some("1.56"))(request)
+        }
+    });
+    let client = daemon.client();
+    assert_eq!(list_containers(&client).await.unwrap(), "[]");
+    let started = client
+        .exchange("/containers/c/start", "", |request| {
+            *request.method_mut() = hyper::Method::POST;
+        })
+        .await;
+    assert!(started.is_err());
+    let requests = daemon.requests();
+    assert_eq!(
+        daemon.wire(),
+        [
+            "HEAD /_ping",
+            "GET /v1.56/containers/json",
+            "POST /v1.56/containers/c/start"
+        ]
+    );
+    // It went out on the reused connection, where a GET would have been sent again.
+    assert_eq!(requests[1].connection, requests[2].connection);
+}
+
 /// moby's wording of the failures, and the status of a response error.
 #[tokio::test]
 async fn errors_are_worded_as_moby() {

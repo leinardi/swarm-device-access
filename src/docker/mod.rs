@@ -46,6 +46,7 @@ pub mod types;
 pub mod version;
 
 pub use api::{ClientEventStream, DockerApi, EventStream, Filters, since_parameter, with_timeout};
+pub(crate) use api::{encode_query, push_json_string, trim_id};
 pub use client::{Body, Client, Settings};
 pub use context::{CallContext, ContextError, with_context};
 pub use error::{ConfigError, Error, ErrorKind};

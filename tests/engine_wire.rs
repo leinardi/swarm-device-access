@@ -20,15 +20,26 @@
 //! The Rust Docker client against the Go daemon's wire (`tests/testdata/engine_wire`): driven
 //! through the calls the Go daemon made, in the same order, against a fake engine replaying what
 //! the real daemon answered, it must send the same requests (method, URI, `Host`, every other
-//! header and its values in order, and which connection each one took) and decode the same
-//! answers.
+//! header and its values in order, the body, and which connection each one took) and decode the
+//! same answers. The launcher is run whole against the launcher's capture, with its write engine.
 
 mod support;
 
+use std::io;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll};
+use std::time::Duration;
+
 use jiff::Timestamp;
+use jiff::tz::TimeZone;
+use swarm_device_access::clock::FakeClock;
 use swarm_device_access::docker::{
-    Client, DockerApi as _, ErrorKind, EventStream as _, Filters, StreamErrorKind,
+    CallContext, Client, DockerApi as _, ErrorKind, EventStream as _, Filters, StreamErrorKind,
 };
+use swarm_device_access::launcher::{Console, Engine, Launch, Options};
+use swarm_device_access::logger::{Config, Format, Level, LogHandle, Logger, MemorySink};
+use tokio::io::AsyncWrite;
 
 use support::OrPanic as _;
 use support::fake_engine::{Capture, FakeEngine};
@@ -206,4 +217,110 @@ async fn a_404_inspect_is_not_found() {
             (&wanted.method, &wanted.uri, &wanted.host, &wanted.header)
         );
     }
+}
+
+/// A writer the test reads back.
+#[derive(Clone, Default)]
+struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+impl Buffer {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap_or_else(PoisonError::into_inner)).into_owned()
+    }
+}
+
+impl AsyncWrite for Buffer {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _context: &mut Context<'_>,
+        data: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(data);
+        Poll::Ready(Ok(data.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// `TestCaptureLauncherWire`: the launcher, run against the capture with the captured launcher
+/// container's ID and the captured daemon arguments, sends the Go launcher's requests (bodies
+/// included: the create body is the Go one, byte for byte), copies the attached frames to its
+/// stdout and stderr, and on its stop sends the stop and returns the daemon's status. The wait
+/// and the attach stream are held until the stop, as the daemon answered them only then.
+#[tokio::test]
+async fn the_launcher_sends_the_go_launcher_s_requests() {
+    let capture = Capture::load("launcher.jsonl");
+    let engine = FakeEngine::start_holding(capture.clone(), &["/wait?", "/attach?"], "/stop?");
+    let launcher_id = capture
+        .uri("GET", "/v1.56/containers/", 0)
+        .strip_prefix("/v1.56/containers/")
+        .and_then(|rest| rest.strip_suffix("/json"))
+        .unwrap_or_else(|| panic!("no inspect of the launcher"))
+        .to_owned();
+    let create = capture
+        .requests()
+        .into_iter()
+        .find(|request| request.uri.starts_with("/v1.56/containers/create"))
+        .unwrap_or_else(|| panic!("no create"));
+    let created: serde_json::Value = serde_json::from_str(&create.body).or_panic();
+    let daemon_args: Vec<String> = serde_json::from_value(created["Cmd"].clone()).or_panic();
+
+    let sink = MemorySink::default();
+    let log = LogHandle::new(Logger::new(
+        Config {
+            format: Format::Plain,
+            level: Level::DEBUG,
+            include_time: false,
+        },
+        Box::new(sink.clone()),
+        TimeZone::UTC,
+        Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+    ));
+    let stdout = Buffer::default();
+    let stderr = Buffer::default();
+    let mut launch = Launch::new(
+        Arc::new(Engine::new(engine.client())),
+        Options {
+            host_docker_socket: "/var/run/docker.sock".to_owned(),
+            daemon_args: Some(daemon_args),
+            ..Options::default()
+        },
+        Console {
+            stdout: Box::new(stdout.clone()),
+            stderr: Box::new(stderr.clone()),
+        },
+        &log,
+    );
+    launch.self_id = Box::new(move || Ok(launcher_id.clone()));
+
+    let context = CallContext::new();
+    let running = {
+        let context = context.clone();
+        tokio::spawn(async move { launch.run(&context).await })
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !sink.contents().contains("daemon started") {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the daemon never started: {}",
+            sink.contents()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    context.cancel();
+    let status = running.await.or_panic().or_panic();
+
+    assert_eq!(status, 0, "{}", sink.contents());
+    assert_eq!(stdout.text(), "fake daemon ready\nfake daemon stopping\n");
+    assert_eq!(stderr.text(), "fake daemon stderr\n");
+    assert_same_wire(&engine, &capture);
 }

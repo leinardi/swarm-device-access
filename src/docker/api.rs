@@ -178,7 +178,7 @@ impl Filters {
 }
 
 /// encoding/json's string encoding with `json.Marshal`'s HTML escaping.
-fn push_json_string(out: &mut String, text: &str) {
+pub(crate) fn push_json_string(out: &mut String, text: &str) {
     out.push('"');
     for character in text.chars() {
         match character {
@@ -201,7 +201,7 @@ fn push_json_string(out: &mut String, text: &str) {
 }
 
 /// Go's `url.Values.Encode`: the pairs sorted by key, each side `url.QueryEscape`d.
-fn encode_query(pairs: &mut [(&str, String)]) -> String {
+pub(crate) fn encode_query(pairs: &mut [(&str, String)]) -> String {
     pairs.sort_by(|left, right| left.0.cmp(right.0));
     let mut out = String::new();
     for (key, value) in pairs.iter() {
@@ -242,7 +242,7 @@ pub fn since_parameter(since: Timestamp) -> String {
 }
 
 /// moby's `trimID`: surrounding whitespace dropped, an empty ID refused.
-fn trim_id<'id>(kind: &str, id: &'id str) -> Result<&'id str, Error> {
+pub(crate) fn trim_id<'id>(kind: &str, id: &'id str) -> Result<&'id str, Error> {
     let id = id.trim();
     if id.is_empty() {
         return Err(Error::invalid_parameter(format!(

@@ -33,13 +33,16 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
-use http_body_util::Empty;
+use http_body_util::Full;
 use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::client::conn::http1::{self, SendRequest};
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 
 use super::connect::{ConnectError, Connector};
+
+/// The body of a request: empty for every call but the launcher's create.
+pub(crate) type RequestBody = Full<Bytes>;
 
 /// net/http's `DefaultMaxIdleConnsPerHost`, the bound that applies with one daemon.
 const MAX_IDLE: usize = 2;
@@ -62,7 +65,7 @@ pub(crate) enum SendError {
 
 struct IdleConnection {
     id: u64,
-    sender: SendRequest<Empty<Bytes>>,
+    sender: SendRequest<RequestBody>,
 }
 
 /// The idle connections of one daemon.
@@ -96,7 +99,7 @@ impl Pool {
     }
 
     /// The most recently returned idle connection that is still open.
-    async fn checkout(&self) -> Option<SendRequest<Empty<Bytes>>> {
+    async fn checkout(&self) -> Option<SendRequest<RequestBody>> {
         loop {
             let mut sender = self.lock().pop()?.sender;
             if !sender.is_closed() && sender.ready().await.is_ok() {
@@ -107,7 +110,7 @@ impl Pool {
 
     /// A new connection, its HTTP/1.1 state driven by a task of its own; header names are
     /// written in Go's canonical case.
-    async fn connect(&self) -> Result<SendRequest<Empty<Bytes>>, SendError> {
+    async fn connect(&self) -> Result<SendRequest<RequestBody>, SendError> {
         let stream = self.connector.connect().await.map_err(SendError::Connect)?;
         let (sender, connection) = http1::Builder::new()
             .title_case_headers(true)
@@ -121,8 +124,28 @@ impl Pool {
         Ok(sender)
     }
 
+    /// Sends `request` on a connection of its own that is never pooled and can be taken over by
+    /// an HTTP upgrade, as moby's hijacked attach dials one.
+    pub(crate) async fn send_upgradable(
+        &self,
+        request: Request<RequestBody>,
+    ) -> Result<Response<Incoming>, SendError> {
+        let stream = self.connector.connect().await.map_err(SendError::Connect)?;
+        let (mut sender, connection) = http1::Builder::new()
+            .title_case_headers(true)
+            .handshake(TokioIo::new(stream))
+            .await
+            .map_err(SendError::Http)?;
+        tokio::spawn(async move {
+            // The connection ends with an error the request already reported, cleanly, or by
+            // being handed to the upgrade.
+            let _ = connection.with_upgrades().await;
+        });
+        sender.send_request(request).await.map_err(SendError::Http)
+    }
+
     /// Keeps `sender` for reuse if there is room, and closes it after [`IDLE_TIMEOUT`] unused.
-    fn give_back(self: &Arc<Self>, sender: SendRequest<Empty<Bytes>>) {
+    fn give_back(self: &Arc<Self>, sender: SendRequest<RequestBody>) {
         if sender.is_closed() {
             return;
         }
@@ -149,10 +172,13 @@ impl Pool {
 
     /// Sends the request `build` makes, on an idle connection or a new one. A failure on a
     /// reused connection before any response, which is how a connection the daemon closed while
-    /// idle shows, sends it again on another, as Go does for a `GET` or `HEAD`.
+    /// idle shows, sends it again on another, as Go does for a `GET` or `HEAD`. Any other method
+    /// (the launcher's writes) is sent again only when it was never written, as net/http's
+    /// `shouldRetryRequest` retries a request that is not replayable only on a
+    /// `nothingWrittenError`: a write the daemon may already have carried out is never repeated.
     pub(crate) async fn send(
         self: &Arc<Self>,
-        build: impl Fn() -> Request<Empty<Bytes>>,
+        build: impl Fn() -> Request<RequestBody>,
     ) -> Result<Response<PooledBody>, SendError> {
         let mut attempts = 0;
         loop {
@@ -162,13 +188,17 @@ impl Pool {
                 None => (self.connect().await?, false),
             };
             let request = build();
+            // net/http's isReplayable: the safe methods, of which the client sends GET and HEAD.
+            let replayable = request.method().is_safe();
             match sender.send_request(request).await {
                 Err(error) => {
+                    // hyper reports a request it never wrote as canceled.
+                    let unsent = error.is_canceled();
                     let retry = reused
                         && attempts < MAX_ATTEMPTS
-                        && (error.is_canceled()
-                            || error.is_closed()
-                            || error.is_incomplete_message());
+                        && (unsent
+                            || (replayable
+                                && (error.is_closed() || error.is_incomplete_message())));
                     if !retry {
                         return Err(SendError::Http(error));
                     }
@@ -188,11 +218,11 @@ impl Pool {
 #[derive(Debug)]
 pub(crate) struct PooledBody {
     inner: Incoming,
-    connection: Option<(SendRequest<Empty<Bytes>>, Weak<Pool>)>,
+    connection: Option<(SendRequest<RequestBody>, Weak<Pool>)>,
 }
 
 impl PooledBody {
-    fn new(inner: Incoming, sender: SendRequest<Empty<Bytes>>, pool: Weak<Pool>) -> Self {
+    fn new(inner: Incoming, sender: SendRequest<RequestBody>, pool: Weak<Pool>) -> Self {
         let mut body = Self {
             inner,
             connection: Some((sender, pool)),

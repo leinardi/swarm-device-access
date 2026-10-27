@@ -34,7 +34,7 @@ use serde::{Deserialize, Deserializer};
 pub type Labels = BTreeMap<String, String>;
 
 /// Go decodes a JSON `null` into the zero value; derived serde would refuse it.
-fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+pub(crate) fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: Default + Deserialize<'de>,

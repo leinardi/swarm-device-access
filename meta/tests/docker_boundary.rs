@@ -34,6 +34,10 @@
 //! - nothing under `src/` names bollard or `testenv`, the harness that creates and removes
 //!   containers on purpose.
 //!
+//! The launcher's write calls take the builder's request through the client's two crate-private
+//! hooks and set their method outside `src/docker`, in the launcher's engine; who may do that is
+//! pinned by `launcher_boundary.rs`.
+//!
 //! The checks are functions of the text, and each is also run on input built to break it.
 
 use meta::repo;

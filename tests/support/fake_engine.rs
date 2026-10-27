@@ -22,9 +22,14 @@
 //! the same method and URI, as the real daemon answered the Go client, and recorded, so a test
 //! can compare what the Rust client sent with what the Go client sent.
 //!
-//! It speaks just enough HTTP/1.1 for the client: keep-alive, `Content-Length` answers, and a
-//! chunked body (an event stream, a chunked inspect) that ends with the terminating chunk, or is
-//! cut without it where the capture cut it.
+//! It speaks just enough HTTP/1.1 for the client: keep-alive, request bodies with a
+//! `Content-Length`, `Content-Length` answers, a chunked body (an event stream, a chunked
+//! inspect) that ends with the terminating chunk, or is cut without it where the capture cut it,
+//! and the attach's `101` followed by the bytes the daemon sent on the upgraded connection.
+//!
+//! An answer the capture got only later (the launcher's wait, answered once the daemon was
+//! removed, and the attach stream, which ends with the daemon) can be held: its head goes out at
+//! once, and the rest once a given later request has been answered.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -35,6 +40,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::watch;
 
 use swarm_device_access::docker::{Client, Settings};
 
@@ -51,6 +57,8 @@ pub struct WireRequest {
     pub host: String,
     /// The other headers, keys as Go canonicalizes them, values in the order the lines came.
     pub header: BTreeMap<String, Vec<String>>,
+    /// The body, empty when there is none.
+    pub body: String,
 }
 
 /// One captured exchange: the request and the answer the daemon gave.
@@ -64,6 +72,8 @@ pub struct Exchange {
     pub body: Vec<u8>,
     /// The capture closed the connection while the body streamed.
     pub cut: bool,
+    /// For an upgrade, what the daemon sent on the upgraded connection.
+    pub upgraded: Option<Vec<u8>>,
 }
 
 /// The exchanges of one capture file, in order.
@@ -108,6 +118,7 @@ impl Capture {
                         uri: text("uri"),
                         host: text("host"),
                         header: header_map(&exchange["header"]),
+                        body: text("body"),
                     },
                     status: text("status"),
                     response_header: header_map(&exchange["responseHeader"]),
@@ -116,6 +127,10 @@ impl Capture {
                         .is_some_and(|codings| codings.iter().any(|coding| coding == "chunked")),
                     body: text("responseBody").into_bytes(),
                     cut: exchange["cut"].as_bool().unwrap_or_default(),
+                    upgraded: exchange["upgraded"]
+                        .as_bool()
+                        .unwrap_or_default()
+                        .then(|| decode_base64(&text("upgradedFromServerBase64"))),
                 }
             })
             .collect();
@@ -169,6 +184,37 @@ fn header_map(value: &Value) -> BTreeMap<String, Vec<String>> {
         .unwrap_or_default()
 }
 
+/// Go's `base64.StdEncoding.DecodeString` of a capture's bytes.
+fn decode_base64(text: &str) -> Vec<u8> {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let mut bits: u32 = 0;
+    let mut count = 0;
+    for byte in text.bytes().filter(|byte| *byte != b'=') {
+        let value = ALPHABET
+            .iter()
+            .position(|letter| *letter == byte)
+            .unwrap_or_else(|| panic!("not base64: {text}"));
+        bits = (bits << 6) | u32::try_from(value).unwrap_or_default();
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            out.push(u8::try_from((bits >> count) & 0xff).unwrap_or_default());
+        }
+    }
+    out
+}
+
+/// Answers held until a later request was answered.
+#[derive(Debug)]
+struct Hold {
+    /// The URIs (by substring) whose answer is held.
+    held: Vec<String>,
+    /// The URI (by substring) whose answer releases them.
+    trigger: String,
+    released: watch::Sender<bool>,
+}
+
 #[derive(Debug, Default)]
 struct State {
     /// Which captured exchanges have been served.
@@ -182,6 +228,7 @@ struct Shared {
     capture: Capture,
     state: Mutex<State>,
     connections: AtomicUsize,
+    hold: Option<Hold>,
 }
 
 /// The fake engine, serving until it is dropped.
@@ -207,6 +254,24 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl FakeEngine {
     /// Replays `capture` on a fresh socket.
     pub fn start(capture: Capture) -> Self {
+        Self::serve(capture, None)
+    }
+
+    /// Replays `capture`, holding the rest of the answers to requests whose URI contains one of
+    /// `held` until the answer to a request whose URI contains `trigger` has gone out; a held
+    /// upgraded connection is then closed.
+    pub fn start_holding(capture: Capture, held: &[&str], trigger: &str) -> Self {
+        Self::serve(
+            capture,
+            Some(Hold {
+                held: held.iter().map(|uri| (*uri).to_owned()).collect(),
+                trigger: trigger.to_owned(),
+                released: watch::Sender::new(false),
+            }),
+        )
+    }
+
+    fn serve(capture: Capture, hold: Option<Hold>) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
             "sda-fake-engine-{}-{}",
@@ -224,6 +289,7 @@ impl FakeEngine {
             }),
             capture,
             connections: AtomicUsize::new(0),
+            hold,
         });
         let server_shared = Arc::clone(&shared);
         let server = tokio::spawn(async move {
@@ -286,7 +352,19 @@ async fn serve_connection(shared: Arc<Shared>, mut stream: UnixStream, conn: usi
             next.map(|(_, exchange)| exchange)
         };
         let keep_open = if let Some(exchange) = exchange {
-            replay(&mut stream, &exchange, &request.method).await
+            let release = shared.hold.as_ref().and_then(|hold| {
+                hold.held
+                    .iter()
+                    .any(|held| request.uri.contains(held.as_str()))
+                    .then(|| hold.released.subscribe())
+            });
+            let open = replay(&mut stream, &exchange, &request.method, release).await;
+            if let Some(hold) = &shared.hold
+                && request.uri.contains(hold.trigger.as_str())
+            {
+                hold.released.send_replace(true);
+            }
+            open
         } else {
             let body = br#"{"message":"page not found"}"#;
             let head = format!(
@@ -304,8 +382,19 @@ async fn serve_connection(shared: Arc<Shared>, mut stream: UnixStream, conn: usi
     }
 }
 
-/// Writes the captured answer; false when the connection is over.
-async fn replay(stream: &mut UnixStream, exchange: &Exchange, method: &str) -> bool {
+/// Waits until the held answers are released.
+async fn released(release: &mut watch::Receiver<bool>) {
+    let _ = release.wait_for(|released| *released).await;
+}
+
+/// Writes the captured answer, the part after the head once `release` (if any) says so; false
+/// when the connection is over.
+async fn replay(
+    stream: &mut UnixStream,
+    exchange: &Exchange,
+    method: &str,
+    mut release: Option<watch::Receiver<bool>>,
+) -> bool {
     let mut out = format!("HTTP/1.1 {}\r\n", exchange.status);
     for (name, values) in &exchange.response_header {
         if name == "Content-Length" && method != "HEAD" {
@@ -315,9 +404,28 @@ async fn replay(stream: &mut UnixStream, exchange: &Exchange, method: &str) -> b
             let _ = write!(out, "{name}: {value}\r\n");
         }
     }
+    if let Some(upgraded) = &exchange.upgraded {
+        out.push_str("\r\n");
+        let mut bytes = out.into_bytes();
+        bytes.extend_from_slice(upgraded);
+        if stream.write_all(&bytes).await.is_ok()
+            && let Some(release) = &mut release
+        {
+            released(release).await;
+        }
+        let _ = stream.shutdown().await;
+        return false;
+    }
     let bytes = if exchange.chunked {
         out.push_str("Transfer-Encoding: chunked\r\n\r\n");
         let mut bytes = out.into_bytes();
+        if let Some(release) = &mut release {
+            if stream.write_all(&bytes).await.is_err() {
+                return false;
+            }
+            released(release).await;
+            bytes.clear();
+        }
         // One chunk per line, as the daemon flushes each event.
         for line in exchange.body.split_inclusive(|byte| *byte == b'\n') {
             bytes.extend_from_slice(format!("{:x}\r\n", line.len()).as_bytes());
@@ -364,21 +472,35 @@ async fn read_request(
             let uri = request_line.next()?.to_owned();
             let mut host = String::new();
             let mut header: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            let mut length = 0;
             for (name, value) in lines.filter_map(|line| line.split_once(':')) {
                 let name = canonical_key(name.trim());
                 let value = value.trim().to_owned();
                 if name == "Host" {
                     host = value;
                 } else {
+                    if name == "Content-Length" {
+                        length = value.parse().unwrap_or_default();
+                    }
                     header.entry(name).or_default().push(value);
                 }
             }
+            while buffer.len() < length {
+                let mut chunk = [0_u8; 4096];
+                match stream.read(&mut chunk).await {
+                    Ok(0) | Err(_) => return None,
+                    Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                }
+            }
+            let body = String::from_utf8_lossy(&buffer[..length]).into_owned();
+            buffer.drain(..length);
             return Some(WireRequest {
                 conn,
                 method,
                 uri,
                 host,
                 header,
+                body,
             });
         }
         let mut chunk = [0_u8; 4096];
