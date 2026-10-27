@@ -8,7 +8,10 @@ description: >
   internal/config/**, internal/policy/**, the label handling and rule collection in
   internal/processor/**, the SIGHUP reload path in cmd/swarm-device-access/config.go,
   internal/launcher/**, deployments/** (including the Dockerfile),
-  internal/observability/http.go or examples/**, before writing the change.
+  internal/observability/http.go or examples/**, or their Rust ports (src/config/**,
+  src/policy/**, src/processor/**, the CLI and reload path in src/cli.rs and
+  src/run.rs, src/launcher/**, the HTTP server in src/server.rs and src/server/**),
+  before writing the change.
 ---
 
 # Trust Boundary — swarm-device-access
@@ -27,6 +30,46 @@ Nothing here is enforced by a linter. The tests named under each item are what e
 an item notes a **known gap**, the test or check was missing when the item was written: verify it
 is still missing before relying on the note, close it the next time you touch that file, and do
 not widen it in the meantime.
+
+## Rust ports
+
+The daemon is being ported to Rust (`docs/rust-port.md`). Every item below applies to the Rust
+code exactly as to the Go code it ports, and the Go code stays the authority for what the rule is
+until the cutover. Load `rust-style-guide` beside this skill for a `.rs` file.
+
+| Go | Rust |
+| --- | --- |
+| `internal/config/**` | `src/config/**` (the store, the single publisher, the strict YAML loader) |
+| `internal/policy/**` | `src/policy/**` |
+| `internal/processor/**` (labels, rule collection, `devfs.go`) | `src/processor/**` |
+| `cmd/swarm-device-access/config.go`, `main.go`, `flags.go` | `src/cli.rs`, `src/run.rs` |
+| `internal/launcher/**` | `src/launcher/**`, its write-capable Engine client in `src/launcher/engine.rs` |
+| `internal/observability/http.go` | `src/server.rs`, `src/server/**` |
+| `internal/cgroup/**` | `src/cgroup/**`, the raw `bpf(2)` calls in `src/cgroup/bpf_sys.rs` |
+
+The port adds invariants of its own, because the Rust code reaches the kernel and the Engine in
+ways the Go libraries hid:
+
+- **No `unsafe` outside `src/cgroup/bpf_sys.rs`.** The workspace denies `unsafe_code`, that one
+  module lifts it, and a meta-test pins the list. Every other syscall (`openat2` with
+  `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS`, `fstat`, `readlinkat`, `pidfd_open`) goes through
+  rustix; a hand-rolled syscall elsewhere is a way around the containment in §4.
+- **The daemon cannot write to Docker.** The daemon path takes only the read-only Docker trait
+  (`ping`, list, inspect, events: `GET` plus one `HEAD /_ping`), dialling only the configured
+  unix socket and reading no `DOCKER_*` variable. The write calls exist only in
+  `src/launcher/engine.rs`, which only `src/launcher/**` may name; meta-tests enforce both.
+- **No new capability, path or listener.** The Rust launcher's daemon spec is pinned field by
+  field against the Go `daemonSpec` (§6), and the Rust daemon opens no host path and no listener
+  1.x did not. `--debug-addr`/`debug-addr` with a non-empty value is refused at startup and on
+  reload (Q2): there is no pprof server to bound.
+- **Byte-identical BPF wrapper encoding.** The owned wrapper must regenerate byte for byte, as
+  Go's does, or a program is not ours (§4's rules, `owned.go`). An encoding drift either treats a
+  foreign program as owned or makes every Go-attached wrapper a conflict after the upgrade; the
+  fixtures and goldens under `tests/testdata` pin it.
+- **Fail closed stays fail closed.** Optional booleans and lists in the file schema keep "absent"
+  apart from an explicit empty value; the strict loader refuses what yaml.v3's did (explicit
+  `null`, a quoted `"yes"` for a bool, merge keys, unknown keys, a second document). A `_` arm on
+  a string or integer refuses; an enum match names every variant.
 
 ---
 
@@ -66,7 +109,8 @@ daemon exit `1` with `config file error: …`. Covered by `TestGlobalValidate`, 
 `TestLoadFile_*` and `TestValidateEnums`.
 
 - [ ] A new enum-like key or flag is checked in `Validate` (or an equivalent load-time check) with
-      a table test covering an unknown value.
+      a table test covering an unknown value; in Rust, it parses into a type whose constructor
+      is the only way to make one.
 - [ ] The error names the key, so an operator can fix it without reading Go.
 - [ ] A new file key gets an entry in `keyShapes` (`internal/config/loader.go`), so an explicit
       `null` or a wrong type is rejected instead of decoding as "not set".
@@ -208,7 +252,8 @@ read no request body and take no input that becomes a decision.
 
 - [ ] A new listener is off by default, named by its own address flag, and documented with it.
 - [ ] Every `http.Server` sets `ReadHeaderTimeout` and `ReadTimeout`; a handler that reads a body
-      caps it (`http.MaxBytesReader`) before the first read.
+      caps it (`http.MaxBytesReader`) before the first read. The Rust server keeps Go's
+      read-header, read, write and idle deadlines (5 s, 10 s, 30 s, 60 s) and its request framer.
 - [ ] Nothing served changes what the daemon grants: no endpoint takes a mode, a label or a path.
 
 ---
@@ -245,3 +290,5 @@ re-run until green:
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional
 - [ ] Image inputs pinned: frontend by digest, bases by literal tag, golang on go.mod's Go
 - [ ] Listeners off by default and bounded by timeouts; no body read without a cap
+- [ ] Rust: no `unsafe` outside `bpf_sys.rs`; no write Docker call outside `src/launcher/**`; no
+      new capability, host path or listener; the BPF wrapper encoding byte-identical to Go's

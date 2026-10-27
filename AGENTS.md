@@ -177,9 +177,14 @@ Skills live in `.agents/skills/` (symlinked as `.claude/skills`). Load them befo
 after review:
 
 - `go-style-guide` — before any `.go` edit.
+- `rust-style-guide` — before any `.rs` edit, and before editing a Cargo manifest, `clippy.toml`,
+  `rustfmt.toml`, `rust-toolchain.toml` or `deny.toml`. It must be loaded before the Rust edit,
+  not after clippy fails. The design record it points to, with the crates, the intended
+  differences from 1.x and the reuse ledger, is [`docs/rust-port.md`](docs/rust-port.md).
 - `trust-boundary` — before touching `internal/config`, `internal/policy`, label parsing or rule
   collection in `internal/processor`, `internal/launcher`, `deployments/docker/Dockerfile` or
-  anything else under `deployments/**`.
+  anything else under `deployments/**`, or their Rust ports (`src/config`, `src/policy`,
+  `src/processor`, `src/launcher`, the CLI and reload path, the HTTP server).
 - `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
 - `go-to-rust-port` — before planning, implementing or reviewing any part of the Go-to-Rust port.
 

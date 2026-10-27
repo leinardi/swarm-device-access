@@ -2,10 +2,11 @@
 name: adversarial-review
 description: >
   Adversarial code review of changes to swarm-device-access — working tree, staged
-  diff, a branch vs master, a commit range, or a PR — in any language (Go, bash,
-  YAML, Dockerfile, Makefile, docs). Loads go-style-guide for Go and trust-boundary
-  for config, policy, label, launcher and deployment paths, hunts for real defects
-  and device-access widening, then reports ranked findings with a verdict. Use when
+  diff, a branch vs master, a commit range, or a PR — in any language (Go, Rust,
+  bash, YAML, Dockerfile, Makefile, docs). Loads go-style-guide for Go,
+  rust-style-guide for Rust and trust-boundary for config, policy, label, launcher
+  and deployment paths, hunts for real defects, device-access widening and drift
+  from 1.x in the Rust port, then reports ranked findings with a verdict. Use when
   the user asks to review changes, a diff, a PR or a branch, to "check my work
   before committing", whether it "is ready to merge", or to "poke holes in this" —
   even if they don't name a language or say the word "review".
@@ -73,15 +74,19 @@ green. Load only what the diff touches.
 | Changed path | Load skill | It owns |
 | --- | --- | --- |
 | any `**/*.go` | `go-style-guide` | style/lint rules golangci-lint enforces, the helpers to reuse, test waits, context handling |
-| `internal/config/**`, `internal/policy/**`, `internal/processor/**` (label handling, rule collection), `cmd/swarm-device-access/config.go` (SIGHUP reload), `internal/launcher/**`, `deployments/**` (including `deployments/docker/Dockerfile`), `examples/**` | `trust-boundary` | fail-closed config and mode, label parsing, `/dev`-only rules, reload safety, image privilege |
-| `internal/cgroup/**` | `go-style-guide` + the note below | NVIDIA-derived BPF/cgroup code |
+| any `**/*.rs`, `Cargo.toml` (any member), `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `rust-style-guide`, and `docs/rust-port.md` (decisions, Q table, reuse ledger) | the lint set, `#[expect]` and the ratchet, the single unsafe module, error and log text as the 1.x contract, the Docker read/write split, the blocking transaction, Go test provenance, the reuse ledger |
+| `internal/config/**`, `internal/policy/**`, `internal/processor/**` (label handling, rule collection), `cmd/swarm-device-access/config.go` (SIGHUP reload), `internal/launcher/**`, `internal/observability/http.go`, and their Rust ports `src/config/**`, `src/policy/**`, `src/processor/**`, the CLI and reload path (`src/cli.rs`, `src/run.rs`), `src/launcher/**`, the HTTP server (`src/server.rs`, `src/server/**`); `deployments/**` (including `deployments/docker/Dockerfile`), `examples/**` | `trust-boundary` | fail-closed config and mode, label parsing, `/dev`-only rules, reload safety, image privilege, listeners |
+| `internal/cgroup/**`, `src/cgroup/**` | `go-style-guide` or `rust-style-guide` + the note below | NVIDIA-derived BPF/cgroup code; `src/cgroup/bpf_sys.rs` is the one audited `unsafe` module |
+| `meta/**`, `testenv/**` | `rust-style-guide` (§14); the comment heading each test | a meta-test that can skip or pass on nothing is a finding; the integration harness's image identity check |
 | `test/**` meta-tests (`test/toolchain`, `test/dockerfiles`, `test/docs`, `test/suppressions`, `test/licenseheaders`, `test/internal/**`) | `go-style-guide`; the comment heading each test | a meta-test that can no longer fail is a finding (see below) |
 | `scripts/check-*.sh` | the script's header comment and its driver under `test/` | the check still fails on what it exists to stop |
 | `.golangci.yaml`, `.pre-commit-config.yaml`, `droast.toml`, `.suppressions-baseline` | `go-style-guide` (§3, the ratchet); `test/toolchain`, `test/dockerfiles` | no linter disabled or narrowed, no hook dropped; §5 (c) |
 
 **`internal/cgroup/**` is NVIDIA-derived code** (from k8s-device-plugin, Apache 2.0). Touch it
 with care. Never reformat or relicense NVIDIA's copyright header block — a diff that rewrites
-it is a finding, whatever else it does.
+it is a finding, whatever else it does. The same holds for its Rust ports,
+`src/cgroup/{api,ebpf,v1,v2}.rs`, which keep NVIDIA's block verbatim, the crun and runc provenance
+paragraph and a modification notice under it.
 
 A meta-test under `test/` guards a claim nothing else checks: the Go line and the droast and
 ShellCheck pins, the Dockerfile's stages and labels, the relative links, the suppression and
@@ -140,6 +145,51 @@ These are the ways this codebase breaks that generic reviewers miss. Read
 - **depguard.** No new import on the deny list in `go-style-guide` (*Forbidden packages*),
   and no `//nolint:depguard` to sneak one in.
 
+The Go-to-Rust port adds these. `docs/rust-port.md` is the design record they are checked
+against; Go stays the behavioural authority until the cutover.
+
+- **Parity with 1.x.** Any behaviour difference from the Go code that is not a numbered Q entry
+  in `docs/rust-port.md` (later, the README's *Migrating from 1.x*) is a defect: a log message,
+  attribute or level, an error text (including Go's `%w` chain and `errors.Join` newlines), an
+  exit code, a metric family or label, an Engine API request, a default. A new difference that
+  cannot be avoided adds its Q entry in the same commit. A ported test without its `Go:`
+  provenance comment, or a golden derived from reasoning instead of a Go capture, is a finding.
+- **No `unsafe` outside the bpf syscall module.** The workspace denies `unsafe_code`; only
+  `src/cgroup/bpf_sys.rs` lifts it, with a file-level `#![expect(unsafe_code, reason = ...)]`,
+  and a meta-test pins that list. A second module with `unsafe`, `libc` outside `bpf_sys.rs`, a
+  widened allowlist or an `unsafe` block without a `// SAFETY:` comment is a finding.
+- **No write Docker call outside the launcher.** The daemon path (processor, coordinator, event
+  loop, observability) takes only the read-only Docker trait, whose client sends `GET` plus the
+  one `HEAD /_ping` through one request builder. Create, start, attach, wait, stop and remove live
+  only in `src/launcher/engine.rs`, and only `src/launcher/**` may name it. A write verb reachable
+  from the daemon, a second request builder, or bollard outside `testenv` is a **critical**
+  finding.
+- **No new capability, path or listener.** The Rust daemon and launcher get exactly the
+  privileges, host paths, mounts and listeners 1.x had (`daemonSpec`, the README's runtime
+  requirements). One that appears without the README and `AGENTS.md` changing in the same commit
+  is a finding; `--debug-addr` with a non-empty value is refused (Q2), never served.
+- **Byte-identical BPF wrapper encoding.** Ownership is decided by regenerating the wrapper and
+  comparing bytes, so an encoding that differs from cilium asm by one byte turns every wrapper the
+  Go daemon attached into an owned-block conflict after the upgrade. A change to the instruction
+  model, the encoder, the header or trailer markers, the nonce or digest layout that the fixtures
+  and goldens under `tests/testdata` do not pin is a finding.
+- **Fail-closed config and labels.** The Rust loader, policy and processor keep every fail-closed
+  rule of `trust-boundary`: an empty, unknown or malformed value denies or skips, a rejected
+  reload keeps the previous settings, anything uncertain yields the empty desired set.
+- **The blocking transaction.** A reconcile's cgroup and BPF mutation runs as one
+  `spawn_blocking` transaction that owns the processor lock and its descriptors; its join handle
+  is awaited to completion even after a timeout or cancellation, and the container's reservation
+  is released only then. A mutation a dropped future can interrupt is a **critical** finding.
+- **One implementation per feature, with its provenance.** A component the reuse ledger in
+  `docs/rust-port.md` maps to SSE or SRD code is adapted from that code at the pinned commit, not
+  rewritten independently, and its ledger row is added or updated in the same commit. No equivalent
+  feature is implemented twice without a technical reason recorded in `docs/rust-port.md`. A
+  reused file carries this project's Apache-2.0 header followed by the provenance line (`Adapted
+  from <repo>/<path> at <commit>, originally MIT-licensed, Copyright (c) <year> Roberto
+  Leinardi`); a pasted MIT block, a missing provenance line or a missing ledger row is a finding.
+- **Porting traps.** A trap the change found (a spike, a failed build, a Go probe, a review
+  finding) is added to `.agents/skills/go-to-rust-port` in the same commit.
+
 ## 4. Adversarial passes — language-agnostic
 
 Do not skim for style. Run these passes, each with a "how would I make this fail" framing:
@@ -191,7 +241,8 @@ intent was. If one exists, is the diff removing exactly what that line retires a
 
 ### (c) A new suppression has to show its work
 
-Any new `//nolint:`, `# shellcheck disable=` or `# droast ignore=` is a standing decision to
+Any new `//nolint:`, `#[expect(...)]` or `#[allow(...)]` (Rust; `#[allow]` is denied outright),
+`# shellcheck disable=` or `# droast ignore=` is a standing decision to
 let a linter stay silent. The `check-suppressions` hook counts them per rule against
 `.suppressions-baseline` and refuses one added without a baseline change, so the count is
 reviewed; the reason is not. A baseline raised in the same diff is the thing to read. So demand
@@ -206,11 +257,13 @@ in this repo (copied from another project) is a finding too.
 ### (d) Cross-file duplication
 
 Before accepting a new helper, search for the one that already exists — in `internal/**` and
-`cmd/swarm-device-access/`, by *behavior*, not by the name the author chose. The *Reuse before
-writing* table in `go-style-guide` lists the helpers that already exist (the logger, the `/dev`
-mount check, context-aware waits, backoff, the nil-safe metrics recorder, test waits). Two
-implementations of the same rule drift apart, and the one the reviewer did not read is the one
-that keeps the bug.
+`cmd/swarm-device-access/`, and in the Rust workspace (`src/**`, `meta/**`, `testenv/**`), by
+*behavior*, not by the name the author chose. The *Reuse before writing* tables in
+`go-style-guide` and `rust-style-guide` list the helpers that already exist (the logger, the
+`/dev` mount check, context-aware waits, backoff, the nil-safe metrics recorder, test waits, the
+`go_compat` ports), and the reuse ledger in `docs/rust-port.md` lists the SSE and SRD code a Rust
+component must start from. Two implementations of the same rule drift apart, and the one the
+reviewer did not read is the one that keeps the bug.
 
 ### (e) Docs drift for config and flags
 
@@ -233,7 +286,8 @@ caused as a confirmed finding with the output attached:
 | Diff touched | Run |
 | --- | --- |
 | any `**/*.go` | `make go-build`, `make go-vet`, `make go-test` (race detector on), then `make check` |
-| `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (needs Docker and privileges) — it runs `make go-build` first, then `go test -tags=integration ./test/integration/...`; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload` |
+| any `**/*.rs`, a Cargo manifest or lock, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `make verify` (the Go and the Rust verification while Go exists; `verify-rust` is build, fmt check, clippy with `-D warnings`, tests and `cargo deny`), then `make check` |
+| `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**`, and their Rust ports under `src/` | also `make go-test-integration` (needs Docker and privileges) — it runs `make go-build` first, then `go test -tags=integration ./test/integration/...`; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload`. Once the Rust `testenv` suite exists, run it too, and check that it proved the image under test is Rust before any test ran |
 | `go.mod` / `go.sum` | `make go-tidy` and `make audit-deps` (govulncheck plus the banned-module check; network required) |
 | `deployments/docker/Dockerfile` | droast via `make check`, `go test ./test/dockerfiles/ ./test/toolchain/`, plus `make docker-build` |
 | `test/**`, `scripts/check-*.sh`, `.github/**`, `.pre-commit-config.yaml` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `pre-commit run actionlint --all-files` |
