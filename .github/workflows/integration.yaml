@@ -86,3 +86,80 @@ jobs:
       - name: Run integration tests (fork, enforcement skipped)
         if: env.FROM_FORK == 'true'
         run: make go-test-integration
+
+  # The Rust integration suite (the testenv crate), beside the Go one and under
+  # the same rules: SDA_IT_ENFORCE=1 and SDA_IT_REQUIRE_RELOAD=1 outside fork
+  # pull requests, and a SKIP in its own log fails the job. Its real-enforcement
+  # tests run the Rust image; the cross-language upgrade and rollback test also
+  # runs the Go daemon image (SDA_GO_TEST_IMAGE, which make rust-test-integration
+  # builds with integration-image from the dhi.io bases, hence the same login).
+  # The Rust toolchain is the exact release of rust-toolchain.toml, with the
+  # host's musl target for the static binary the suite's image is built from;
+  # Go builds the negative control's binary. The Rust cache is saved only on a
+  # pull request, as in ci.yaml.
+  rust-integration:
+    name: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'rust-integration (fork: enforcement skipped)' || 'rust-integration' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      FROM_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-unknown-linux-musl
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.event_name == 'pull_request' }}
+
+      - name: Require the dhi.io token
+        if: env.FROM_FORK != 'true'
+        env:
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+        run: |
+          if [ -z "$DHI_TOKEN" ]; then
+            echo "::error::DHI_TOKEN is not set; enforcement tests are mandatory outside fork pull requests"
+            exit 1
+          fi
+
+      - name: Log in to Docker Hardened Images (dhi.io)
+        if: env.FROM_FORK != 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: dhi.io
+          username: ${{ vars.DHI_USERNAME }}
+          password: ${{ secrets.DHI_TOKEN }}
+
+      - name: Run the Rust integration tests
+        if: env.FROM_FORK != 'true'
+        env:
+          SDA_IT_ENFORCE: "1"
+          SDA_IT_REQUIRE_RELOAD: "1"
+        run: |
+          set -o pipefail
+          make rust-test-integration 2>&1 | tee rust-integration.log
+          if grep -E -- '^[[:space:]]*--- SKIP' rust-integration.log; then
+            echo "::error::Rust integration tests were skipped; SDA_IT_ENFORCE=1 requires every test to run"
+            exit 1
+          fi
+
+      # Fork pull requests: the dry-run tests only; the enforcement tests and
+      # the upgrade test skip themselves without SDA_IT_ENFORCE.
+      - name: Run the Rust integration tests (fork, enforcement skipped)
+        if: env.FROM_FORK == 'true'
+        run: make rust-test-integration

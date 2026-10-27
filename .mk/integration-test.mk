@@ -57,6 +57,16 @@
 # runner's --run, with Go's -run semantics, and a pattern that selects no test
 # fails the run:
 #   make rust-test-integration RUN='^TestDaemon_DryRun_'
+#
+# SDA_IT_ENFORCE=1 and SDA_IT_REQUIRE_RELOAD=1 mean in the Rust suite what they
+# mean in the Go one: the real-enforcement tests run (on the Rust image), and a
+# missing prerequisite or reload capability fails the run instead of skipping.
+# With them the target also builds $(INTEGRATION_IMAGE), the Go Dockerfile's
+# build, as SDA_GO_TEST_IMAGE for the cross-language upgrade and rollback test
+# (TestUpgrade_GoToRustAndBack), which must answer -help as the Go daemon. That
+# test reads the BPF programs attached to its container through `sudo -n`, as
+# the reload test runs systemctl; throwaway or trusted hosts only:
+#   make rust-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
 
 INTEGRATION_TIMEOUT  ?= 6m
 INTEGRATION_PKG      ?= ./test/integration/...
@@ -87,6 +97,8 @@ RUST_IT_CONTEXT   := $(REPO_ROOT)/target/rust-integration-image
 RUST_IT_IMAGE     := $(INTEGRATION_IMAGE_REPO):rust-integration
 export SDA_RUST_TEST_BINARY ?= $(RUST_IT_BINARY)
 export SDA_RUST_TEST_IMAGE ?= $(RUST_IT_IMAGE)
+# The Go daemon image of the Rust suite's upgrade test: the Go suite's image.
+export SDA_GO_TEST_IMAGE ?= $(INTEGRATION_IMAGE)
 
 # -count=1: the results depend on Docker and host state that go test's result
 # cache cannot see, so a cached PASS would replay without running anything.
@@ -122,9 +134,10 @@ rust-integration-image: ## Build the static host-arch Rust binary and its throwa
 	  docker build --quiet --tag "$(RUST_IT_IMAGE)" --file - "$(RUST_IT_CONTEXT)"
 
 # The suite's own deadline is SDA_IT_SUITE_TIMEOUT, as the Go suite's; cargo has
-# no test timeout of its own. go-build provides the negative control's Go binary.
+# no test timeout of its own. go-build provides the negative control's Go binary,
+# and with SDA_IT_ENFORCE=1 integration-image the upgrade test's Go image.
 .PHONY: rust-test-integration
-rust-test-integration: go-build rust-integration-image ## Run the Rust integration suite against the Rust binary and image (requires Docker)
+rust-test-integration: go-build rust-integration-image $(if $(filter 1,$(SDA_IT_ENFORCE)),integration-image) ## Run the Rust integration suite against the Rust binary and image (requires Docker)
 	$(CARGO) test --locked -p testenv --features integration --test integration -- --run '$(RUN)'
 
 .PHONY: sweep-test-leaks

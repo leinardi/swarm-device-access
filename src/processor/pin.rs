@@ -152,6 +152,19 @@ pub fn read_proc_cgroup(proc_root: &str, pid: i64) -> Result<ProcCgroup, ProcCgr
     parse_proc_cgroup(&cgroup, &mountinfo).map_err(|source| ProcCgroupError::Parse { pid, source })
 }
 
+/// Where the cgroup directory of a process whose [`read_proc_cgroup`] answer is `mount_point`,
+/// `mount_prefix` and `root` is seen from a mount namespace whose view of the host's root is
+/// `host_root`: `/host` inside the daemon's container, `/` on the host itself.
+#[must_use]
+pub fn host_cgroup_path(
+    host_root: &str,
+    mount_point: &str,
+    mount_prefix: &str,
+    root: &str,
+) -> String {
+    filepath::join(&[host_root, mount_point, mount_prefix, root])
+}
+
 fn read_at(dir: &OwnedFd, name: &'static str) -> Result<Vec<u8>, ProcCgroupError> {
     let fd = rustix::fs::openat(dir, name, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())
         .map_err(|errno| ProcCgroupError::Open { name, errno })?;

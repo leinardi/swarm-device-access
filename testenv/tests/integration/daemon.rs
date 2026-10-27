@@ -264,7 +264,7 @@ pub async fn metrics_endpoint(test: TestHandle) -> TestResult {
 
 /// Go's `requireProcessed`: waits for the daemon to process `container_id` and checks the exact
 /// counts of its `container processed` record.
-async fn require_processed(
+pub async fn require_processed(
     test: &TestHandle,
     log: &DaemonLog,
     container_id: &str,
@@ -283,7 +283,7 @@ async fn require_processed(
 }
 
 /// Go's `checkCounts`: the granted, skipped and error counts of a `container processed` record.
-fn check_counts(test: &TestHandle, record: &Record, granted: i64, skipped: i64) {
+pub fn check_counts(test: &TestHandle, record: &Record, granted: i64, skipped: i64) {
     for (key, want) in [
         ("devices_granted", granted),
         ("skipped", skipped),
@@ -302,7 +302,7 @@ fn check_counts(test: &TestHandle, record: &Record, granted: i64, skipped: i64) 
 /// Go's `requireSkipped`: waits for a skip record about `container_id` and checks that the
 /// daemon did not process the container anyway. A skip and a processed record are alternative
 /// outcomes of one pass, so once the skip is logged no processed record for that pass can follow.
-async fn require_skipped(
+pub async fn require_skipped(
     test: &TestHandle,
     log: &DaemonLog,
     container_id: &str,

@@ -479,3 +479,26 @@ fn the_gate_matches_the_go_golden() {
         assert_eq!(verdict, case.verdict, "{name}");
     }
 }
+
+/// The classification the cgroup v2 pass and the integration suite share: a bare program is not
+/// owned, a wrapper keeps its own nonce and rules, and a wrapper around a wrapper is stripped to
+/// the original underneath both, where `parse_owned` stops at the inner wrapper.
+#[test]
+fn parse_owned_innermost_strips_to_the_original() {
+    let original = canonical(&allow_null_original());
+    assert_eq!(parse_owned_innermost(&original).unwrap(), None);
+
+    let inner = emit(&[rule("c", 10, 200, "rw")], 7, &original);
+    let outer_rules = [rule("b", 8, 0, "r")];
+    let outer = emit(&outer_rules, 9, &inner);
+    assert_eq!(parse_owned(&outer).unwrap().unwrap().original, inner);
+
+    let stripped = parse_owned_innermost(&outer).unwrap().unwrap();
+    assert_eq!(stripped.nonce, 9);
+    assert_eq!(stripped.rules, outer_rules);
+    assert_eq!(stripped.original, original);
+    assert_eq!(
+        parse_owned_innermost(&inner).unwrap().unwrap().original,
+        original
+    );
+}

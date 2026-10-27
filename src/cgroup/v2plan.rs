@@ -28,7 +28,7 @@ use super::error::Error;
 use super::handle::Identity;
 use super::owned::{
     OWNED_PROGRAM_NAME, ProgMeta, canonical_bytes, check_wrappable, emit_owned, from_canonical,
-    new_nonce, parse_owned,
+    new_nonce, parse_owned_innermost,
 };
 use super::v2::CgroupV2;
 use super::v2ops::{F_ALLOW_MULTI, V2Ops};
@@ -185,7 +185,7 @@ impl<O: V2Ops> CgroupV2<O> {
     pub(super) fn classify(&self, index: usize, prog: &O::Prog) -> Result<AttachedProg, Error> {
         let (instructions, meta) = self.ops.instructions(prog).map_err(Error::Ops)?;
         let raw = canonical_bytes(&instructions).map_err(Error::Canonical)?;
-        let Some(owned) = parse_owned(&raw).map_err(Error::Owned)? else {
+        let Some(owned) = parse_owned_innermost(&raw).map_err(Error::Owned)? else {
             return Ok(AttachedProg {
                 index,
                 original: raw.clone(),
@@ -195,18 +195,14 @@ impl<O: V2Ops> CgroupV2<O> {
                 nonce: 0,
             });
         };
-        let mut original = owned.original;
-        while let Some(inner) = parse_owned(&original).map_err(Error::Owned)? {
-            original = inner.original;
-        }
-        gate(&original, meta)?;
+        gate(&owned.original, meta)?;
         Ok(AttachedProg {
             index,
             raw,
             meta,
             owned: true,
             nonce: owned.nonce,
-            original,
+            original: owned.original,
         })
     }
 

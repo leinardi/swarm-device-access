@@ -21,6 +21,9 @@
 //! answer to `-help` tells the two apart, and anything but the Rust answer fails the run: a
 //! mismatch is never a skip.
 //!
+//! Inverted ([`check_go_identity`]), the same answer proves that the Go image the cross-language
+//! upgrade test runs is Go: never a Go image standing in for Rust, nor the reverse.
+//!
 //! Also here, since it needs no daemon either: whether an ELF binary is static, which a binary
 //! copied into a `FROM scratch` image has to be.
 
@@ -62,6 +65,40 @@ pub fn check_identity(
         excerpt(stdout),
         excerpt(stderr),
         quote::quote(RUST_REFUSAL)
+    )))
+}
+
+/// The exit code the Go daemon answers [`IDENTITY_FLAG`] with: its flag package prints the usage
+/// and exits 0.
+pub const GO_HELP_EXIT_CODE: i64 = 0;
+
+/// How the Go daemon's usage starts on stderr (`run` in `cmd/swarm-device-access/main.go`).
+pub const GO_USAGE_PREFIX: &str = "Usage: swarm-device-access [flags]\n";
+
+/// The identity check inverted, for the Go image the cross-language upgrade test needs: the
+/// answer `subject` gave to [`IDENTITY_FLAG`] must be the Go daemon's (exit
+/// [`GO_HELP_EXIT_CODE`], its usage on stderr, nothing on stdout). The Rust refusal, or anything
+/// else, is refused, so the Rust image can never stand in for the Go one.
+///
+/// # Errors
+///
+/// Any other answer, naming `subject`, what it answered and what the Go daemon answers.
+pub fn check_go_identity(
+    subject: &str,
+    exit_code: i64,
+    stdout: &str,
+    stderr: &str,
+) -> Result<(), Error> {
+    if exit_code == GO_HELP_EXIT_CODE && stderr.starts_with(GO_USAGE_PREFIX) && stdout.is_empty() {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "{subject} is not the Go daemon: {IDENTITY_FLAG} exited {exit_code} with stdout {} and \
+         stderr {}, want exit {GO_HELP_EXIT_CODE} with stderr starting {} (the Rust daemon \
+         refuses the flag with exit {RUST_REFUSAL_EXIT_CODE})",
+        excerpt(stdout),
+        excerpt(stderr),
+        quote::quote(GO_USAGE_PREFIX)
     )))
 }
 
@@ -144,7 +181,9 @@ fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RUST_REFUSAL, RUST_REFUSAL_EXIT_CODE, check_identity, is_static_elf};
+    use super::{
+        RUST_REFUSAL, RUST_REFUSAL_EXIT_CODE, check_go_identity, check_identity, is_static_elf,
+    };
 
     /// What the Go daemon answers to `-help`, captured from `make go-build`'s binary (go1.26.10,
     /// at the commit before this harness): `dist/swarm-device-access -help`, which exited 0 with
@@ -206,6 +245,39 @@ mod tests {
             assert!(
                 check_identity("image x", exit_code, stdout, stderr).is_err(),
                 "{name} was accepted"
+            );
+        }
+    }
+
+    /// The inverted check accepts the Go daemon's real answer.
+    #[test]
+    fn the_go_answer_is_accepted_as_go() {
+        check_go_identity("image go:x", GO_EXIT_CODE, GO_STDOUT, GO_STDERR)
+            .expect("the Go answer was refused as Go");
+    }
+
+    /// The inverted check's negative control: the Rust refusal is refused, naming the image, and
+    /// so is a partial match of the Go answer.
+    #[test]
+    fn the_rust_answer_is_refused_as_go() {
+        let error = check_go_identity("image rust:x", RUST_REFUSAL_EXIT_CODE, "", RUST_REFUSAL)
+            .expect_err("the Rust answer was accepted as Go");
+        assert!(
+            error
+                .to_string()
+                .starts_with("image rust:x is not the Go daemon: -help exited 2"),
+            "{error}"
+        );
+        for (name, exit_code, stdout, stderr) in [
+            ("exit 2", 2, GO_STDOUT, GO_STDERR),
+            ("usage on stdout", 0, GO_STDERR, ""),
+            ("output on both", 0, "x\n", GO_STDERR),
+            ("another usage", 0, "", "Usage of swarm-device-access:\n"),
+            ("nothing", 0, "", ""),
+        ] {
+            assert!(
+                check_go_identity("image x", exit_code, stdout, stderr).is_err(),
+                "{name} was accepted as Go"
             );
         }
     }

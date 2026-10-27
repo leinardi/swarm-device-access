@@ -29,14 +29,13 @@ use bollard::query_parameters::{
 use futures_util::StreamExt as _;
 use swarm_device_access::launcher::spec::{DAEMON_NAME, LABEL_LAUNCHER, LABEL_ROLE, ROLE_DAEMON};
 use testenv::context::Context;
+use testenv::enforce::ENV_ENFORCE;
 use testenv::host::{OP_TIMEOUT, with_timeout};
 
 use crate::daemon_process::follow_logs;
 use crate::docker::{CLEANUP_TIMEOUT, remove_test_container, short_id, start_container};
+use crate::enforce::enforce_requested;
 use crate::testing::{Fatal, TestHandle, TestResult, docker, suite};
-
-/// The variable that opts into the tests that change the host: the Go suite's `envEnforce`.
-pub const ENV_ENFORCE: &str = "SDA_IT_ENFORCE";
 
 /// The host's Docker socket, the one mount the launcher needs.
 const HOST_DOCKER_SOCKET: &str = "/var/run/docker.sock";
@@ -44,11 +43,6 @@ const HOST_DOCKER_SOCKET: &str = "/var/run/docker.sock";
 /// Matches the compose files' `stop_grace_period`: the launcher needs up to its shutdown budget to
 /// stop the daemon.
 const LAUNCHER_STOP_TIMEOUT_SECS: i32 = 30;
-
-/// Go's `enforceRequested`: whether the run opted into the tests that change the host.
-pub fn enforce_requested() -> bool {
-    std::env::var(ENV_ENFORCE).is_ok_and(|value| value == "1")
-}
 
 /// Go: `TestLauncher_RunsDaemonFromItsOwnImage`. Starts the image in launcher mode with only the
 /// Docker socket, and checks the daemon container it creates, a graceful stop, and the

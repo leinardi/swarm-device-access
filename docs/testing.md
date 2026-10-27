@@ -95,10 +95,31 @@ build. It also runs `go-build`, for the negative control below.
   other answer, an unset variable or an unreachable Docker daemon fails the run; none of them
   skips it. `TestIdentity_RefusesGoImage` is the check's negative control: it builds a scratch
   image of the static Go binary (`SDA_TEST_BINARY`) and requires the check to refuse it.
-- **Tests.** The dry-run tests of `daemon_test.go` and `TestLauncher_RunsDaemonFromItsOwnImage`,
-  under their Go names. The binary runs as a host process with `--dry-run` and the double-dash
-  flags the Rust daemon takes; the launcher test runs the image and, as in Go, only with
-  `SDA_IT_ENFORCE=1`. The enforcement tests of `enforce_test.go` are not ported yet.
+- **Tests.** The dry-run tests of `daemon_test.go`, the enforcement tests of `enforce_test.go`
+  and `TestLauncher_RunsDaemonFromItsOwnImage`, under their Go names. The binary runs as a host
+  process with `--dry-run` and the double-dash flags the Rust daemon takes; the enforcement and
+  launcher tests run the Rust image and, as in Go, only with `SDA_IT_ENFORCE=1`, which also turns
+  every missing prerequisite into a failure. `SDA_IT_REQUIRE_RELOAD=1` makes the reload subtest
+  fail, instead of skip, on a host where `systemctl daemon-reload` does not wipe the device
+  program. Throwaway or trusted hosts only, as for the Go suite:
+
+  ```bash
+  make rust-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
+  ```
+
+- **Upgrade and rollback gate.** `TestUpgrade_GoToRustAndBack`, new to the Rust suite and also
+  behind `SDA_IT_ENFORCE=1`, runs both daemons on one labelled container whose cgroup survives
+  every step: the Go daemon grants the device, the Rust daemon with `--device-deny` for it revokes
+  the Go-attached wrapper, the Rust daemon with the original policy grants it again, and the Go
+  daemon with the narrower policy revokes the Rust-attached wrapper. After each step it probes the
+  device from inside the container and reads the BPF programs attached to the container's cgroup:
+  after a grant exactly one owned wrapper per runtime original and no stale wrapper, after a
+  revocation no owned wrapper and each runtime original attached bare exactly once. The programs
+  are read as root by the suite's own binary (`sudo -n <binary> --dump-device-programs <pid>`)
+  and classified with the daemon's own code. The Go daemon is `SDA_GO_TEST_IMAGE`, by default
+  `swarm-device-access:integration`, which the target builds with `integration-image` when
+  `SDA_IT_ENFORCE=1`; it must answer `-help` as the Go daemon (exit 0 and its usage), the identity
+  check inverted, so neither build can stand in for the other.
 - **Run filter.** `RUN` goes to the runner's `--run` with Go's `-run` semantics (a regular
   expression per `/`-separated level), and a pattern that selects no test fails the run, where Go
   would pass with "no tests to run".

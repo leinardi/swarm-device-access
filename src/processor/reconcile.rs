@@ -44,7 +44,7 @@ use tokio_util::task::TaskTracker;
 use super::devfs::{DEV_ROOT, DevFs, RealDevFs, SysError, sysfs_root_for};
 use super::error::{Error, VerifyCause, join};
 use super::lifecycle::{LifecycleRecord, LifecycleState, Lifecycles, RunCgroup};
-use super::pin::{PidfdPinner, PinnedProcess, ProcessPinner, read_proc_cgroup};
+use super::pin::{PidfdPinner, PinnedProcess, ProcessPinner, host_cgroup_path, read_proc_cgroup};
 use super::rules::{ContainerRules, DeviceError, Judge, collect_container_rules, is_device_mount};
 use crate::cgroup::{
     self, CgroupHandle, CgroupVersion, DeviceRule, FilterCache, HandleError, Identity, Interface,
@@ -54,7 +54,6 @@ use crate::clock::Clock;
 use crate::config::{Publisher, Runtime, Store};
 use crate::docker::types::{ContainerInspect, ContainerState, MountPoint};
 use crate::docker::{self, CallContext, ContextError, DockerApi, with_context};
-use crate::go_compat::filepath;
 use crate::go_compat::quote::quote;
 use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
@@ -1148,11 +1147,6 @@ impl std::fmt::Display for StatError {
             SysError::new("", self.errno)
         )
     }
-}
-
-/// Where the host's cgroup directory is seen from inside the daemon's container.
-fn host_cgroup_path(host_root: &str, mount_point: &str, mount_prefix: &str, root: &str) -> String {
-    filepath::join(&[host_root, mount_point, mount_prefix, root])
 }
 
 /// The version as Go's `int` logs it.

@@ -27,6 +27,11 @@
 //! and exits 0. A mismatch, a missing variable or an unreachable Docker daemon fails the run; none
 //! of them skips it. Then it sweeps the abandoned runs of earlier crashed suites.
 //!
+//! The real-enforcement tests, and the cross-language upgrade gate, which also runs the Go daemon
+//! image (`SDA_GO_TEST_IMAGE`, proven Go by the same identity flag), run only with
+//! `SDA_IT_ENFORCE=1`; the upgrade gate reads the attached programs by running this binary as
+//! root with `--dump-device-programs <pid>`, which prints them and runs no test.
+//!
 //! As Go's `TestMain` did, the run has one deadline (`SDA_IT_SUITE_TIMEOUT`, default 4m), which
 //! SIGINT and SIGTERM also end, so blocked waits return and cleanups still run. Tests run one
 //! after another and keep their Go names. `--run <pattern>` selects them with Go's `-run`
@@ -37,11 +42,14 @@
 mod daemon;
 mod daemon_process;
 mod docker;
+mod enforce;
 mod identity;
 mod launcher;
 mod testing;
+mod upgrade;
 
 use std::collections::HashMap;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -53,6 +61,7 @@ use swarm_device_access::clock::{Clock as _, SystemClock};
 use swarm_device_access::go_compat::{duration, quote};
 use swarm_device_access::logger::Attr;
 use testenv::context::Context;
+use testenv::enforce::{DUMP_FLAG, dump_device_programs};
 use testenv::envid::{LABEL_ENV_ID, generate_env_id, label_filter};
 use testenv::host::{
     check_image_identity, cleanup, cleanup_command, default_sweep_rules, host_client, run_labels,
@@ -87,7 +96,8 @@ struct Test {
     run: fn(TestHandle) -> LocalBoxFuture<'static, TestResult>,
 }
 
-/// Every test, in the order they run: Go's order, then the identity check's negative control.
+/// Every test, in the order they run: Go's order, then the cross-language upgrade gate and the
+/// identity check's negative control.
 const TESTS: &[Test] = &[
     Test {
         name: "TestDaemon_DryRun_DetectsDeviceMount",
@@ -146,8 +156,20 @@ const TESTS: &[Test] = &[
         run: |test| Box::pin(daemon::metrics_endpoint(test)),
     },
     Test {
+        name: "TestEnforce_GrantsDeviceAccess",
+        run: |test| Box::pin(enforce::grants_device_access(test)),
+    },
+    Test {
+        name: "TestEnforce_RestartReconcilesLeftoverGrants",
+        run: |test| Box::pin(enforce::restart_reconciles_leftover_grants(test)),
+    },
+    Test {
         name: "TestLauncher_RunsDaemonFromItsOwnImage",
         run: |test| Box::pin(launcher::runs_daemon_from_its_own_image(test)),
+    },
+    Test {
+        name: "TestUpgrade_GoToRustAndBack",
+        run: |test| Box::pin(upgrade::go_to_rust_and_back(test)),
     },
     Test {
         name: "TestIdentity_RefusesGoImage",
@@ -157,6 +179,11 @@ const TESTS: &[Test] = &[
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, pid] = args.as_slice()
+        && flag == DUMP_FLAG
+    {
+        return dump_programs(pid);
+    }
     let pattern = match run_pattern(&args) {
         Ok(pattern) => pattern,
         Err(message) => {
@@ -202,6 +229,34 @@ fn main() -> ExitCode {
         }
     };
     runtime.block_on(run_suite(filter, &tests))
+}
+
+/// The suite's binary run as root by the upgrade test (`sudo -n <binary> --dump-device-programs
+/// <pid>`): prints the device programs attached to the cgroup of `pid` and exits, running no test.
+fn dump_programs(pid: &str) -> ExitCode {
+    let dumped = pid
+        .parse()
+        .map_err(|error| format!("{DUMP_FLAG} {pid}: {error}"))
+        .and_then(|pid| dump_device_programs(pid).map_err(|error| error.to_string()));
+    match dumped {
+        Ok(dump) => {
+            let mut stdout = std::io::stdout().lock();
+            match stdout
+                .write_all(dump.render().as_bytes())
+                .and_then(|()| stdout.flush())
+            {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    say(&format!("[it] write the dump: {error}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Err(message) => {
+            say(&format!("[it] {message}"));
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// The `--run` value: `--run <pattern>` or `--run=<pattern>`, the last one winning as Go's flag

@@ -45,7 +45,7 @@ use swarm_device_access::logger::Attr;
 use crate::Error;
 use crate::context::{Context, Ended};
 use crate::envid::{LABEL_ENV_ID, label_filter};
-use crate::identity::{IDENTITY_FLAG, check_identity};
+use crate::identity::{IDENTITY_FLAG, check_go_identity, check_identity};
 use crate::redact::RedactingLogger;
 use crate::sweep_rules::{
     Found, LABEL_OWNER, LABEL_PID_NAMESPACE, LABEL_STARTED, Owner, SweepRules, stale_after_from_env,
@@ -379,6 +379,33 @@ pub async fn check_image_identity<S: BuildHasher>(
     image: &str,
     labels: &HashMap<String, String, S>,
 ) -> Result<(), Error> {
+    check_image_answer(ctx, client, image, labels, check_identity).await
+}
+
+/// [`check_image_identity`] inverted: runs `image` with [`IDENTITY_FLAG`] and checks the answer is
+/// the Go daemon's ([`check_go_identity`]).
+///
+/// # Errors
+///
+/// The image could not be run, or its answer is not the Go daemon's; either way the message names
+/// the image.
+pub async fn check_go_image_identity<S: BuildHasher>(
+    ctx: &Context,
+    client: &Docker,
+    image: &str,
+    labels: &HashMap<String, String, S>,
+) -> Result<(), Error> {
+    check_image_answer(ctx, client, image, labels, check_go_identity).await
+}
+
+/// Runs `image` with [`IDENTITY_FLAG`] and applies `check` to its answer.
+async fn check_image_answer<S: BuildHasher>(
+    ctx: &Context,
+    client: &Docker,
+    image: &str,
+    labels: &HashMap<String, String, S>,
+    check: fn(&str, i64, &str, &str) -> Result<(), Error>,
+) -> Result<(), Error> {
     let labels = labels
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
@@ -386,7 +413,7 @@ pub async fn check_image_identity<S: BuildHasher>(
     let (exit_code, stdout, stderr) = Box::pin(answer_to_identity_flag(ctx, client, image, labels))
         .await
         .map_err(|error| error.context(format!("run image {image} with {IDENTITY_FLAG}")))?;
-    check_identity(&format!("image {image}"), exit_code, &stdout, &stderr)
+    check(&format!("image {image}"), exit_code, &stdout, &stderr)
 }
 
 /// `docker run --rm <image> -help`: the exit code, stdout and stderr.

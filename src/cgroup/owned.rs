@@ -220,6 +220,23 @@ pub fn parse_owned(raw: &[u8]) -> Result<Option<OwnedProgram>, OwnedError> {
         .map_err(OwnedError::Conflict)
 }
 
+/// [`parse_owned`] with a wrapper around a wrapper stripped down to the original underneath them
+/// all: how the cgroup v2 pass classifies an attached program, re-emitting such a stack as one
+/// wrapper. The nonce and the rules are the outermost wrapper's; `None` for a bare program.
+///
+/// # Errors
+///
+/// As [`parse_owned`], for the program or any wrapper inside it.
+pub fn parse_owned_innermost(raw: &[u8]) -> Result<Option<OwnedProgram>, OwnedError> {
+    let Some(mut owned) = parse_owned(raw)? else {
+        return Ok(None);
+    };
+    while let Some(inner) = parse_owned(&owned.original)? {
+        owned.original = inner.original;
+    }
+    Ok(Some(owned))
+}
+
 fn validate_owned(instructions: &[Instruction], raw: &[u8]) -> Result<OwnedProgram, Conflict> {
     if instructions.len() < HEADER_LEN {
         return Err(Conflict::Header);

@@ -23,7 +23,7 @@ use std::sync::Arc;
 use super::*;
 use crate::cgroup::asm::{Instruction, MOV, R0};
 use crate::cgroup::bpfinterp::{DevRequest, READ, run_device_filter};
-use crate::cgroup::owned::{HDR_BLOCK_LEN, marker_value};
+use crate::cgroup::owned::{HDR_BLOCK_LEN, marker_value, parse_owned};
 use crate::cgroup::testing::{
     allow_null_original, canonical, corrupt, emit, rule, runtime_original,
 };

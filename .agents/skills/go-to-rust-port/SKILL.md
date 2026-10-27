@@ -381,6 +381,14 @@ Prometheus exporter).
   lint errors)
 - `t.Skip` has no libtest equivalent → a gated test returns early with a note, and an
   environment variable CI sets turns the missing tool into a failure. (ported meta-tests)
+- An integration test that must read kernel state only root may read (the BPF programs attached
+  to a cgroup: `BPF_PROG_QUERY` answers `EPERM` to the runner's user) cannot do it in-process, and
+  a second helper binary or a shell tool (`bpftool` is not on the CI image) duplicates the
+  daemon's reading → give the `harness = false` runner a hidden mode (`--dump-device-programs
+  <pid>`) that prints the raw state, run the suite's own binary through `sudo -n`, and classify
+  the output unprivileged with the daemon's public code. Keep the root side to the read alone.
+  (swarm-device-access, `TestUpgrade_GoToRustAndBack`; a non-root run of the mode resolved the
+  cgroup and stopped at `bpf_prog_query(BPF_CGROUP_DEVICE) failed: operation not permitted`)
 - Teaching the shell check scripts Rust (`#[expect]` counting, the header rules) means rewrapping
   their prose, and ShellCheck parses any comment line whose first word is `shellcheck` as a
   directive (SC1073, SC1072) → never start a wrapped comment line with that word. Keep a Rust-only

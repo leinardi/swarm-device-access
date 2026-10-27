@@ -64,7 +64,7 @@ pub use ledger::Ledger;
 pub use owned::{
     CanonicalError, Conflict, EmitError, GateError, NonceError, OWNED_PROGRAM_NAME, OwnedError,
     OwnedProgram, ProgMeta, RuleBlock, canonical_bytes, check_wrappable, emit_owned,
-    from_canonical, new_nonce, parse_owned,
+    from_canonical, new_nonce, parse_owned, parse_owned_innermost,
 };
 pub use v1::CgroupV1;
 pub use v2::CgroupV2;

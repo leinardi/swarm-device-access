@@ -43,6 +43,7 @@ Integration tests (need a live Docker daemon; see [`docs/testing.md`](docs/testi
 make go-test-integration                   # dry-run tests
 make go-test-integration SDA_IT_ENFORCE=1  # plus the real-enforcement test: attaches BPF, runs systemctl daemon-reload; throwaway hosts only
 make rust-test-integration                 # the Rust suite (testenv) against the Rust binary and scratch image
+make rust-test-integration SDA_IT_ENFORCE=1  # plus its enforcement tests and the Go-to-Rust upgrade gate (builds the Go image; sudo -n); throwaway hosts only
 make sweep-test-leaks                      # remove containers and images left behind by killed runs
 ```
 
