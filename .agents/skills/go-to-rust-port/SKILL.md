@@ -193,7 +193,12 @@ Prometheus exporter).
   decompressed. The process collector counts 100 ticks per second (not `CLK_TCK`), reads
   `open_fds` from `st_size` of `/proc/self/fd` and namespace-wide netstat counters → an in-tree
   `/proc` reader. To diff against Go, scrape over raw TCP (Go's client adds gzip silently), pin
-  the `Accept` string, and settle on the fake daemon's request log. (client_golang v1.24.1)
+  the `Accept` string, and settle on the fake daemon's request log. The negotiation changed in
+  prometheus/common v0.71.0 (`NegotiateAccept` lets `*/plain` or `application/*` match a
+  format; v0.70.1's `Negotiate` needs the exact type and keeps reading `escaping` past a
+  wildcard), and client_golang does not pin common → port the version in the Go module's
+  `go.sum`, not a reused port's, and capture the answers from the Go program being replaced.
+  (client_golang v1.24.1, common v0.70.1 and v0.71.0)
 
 ## 4. Concurrency and shutdown
 

@@ -70,6 +70,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+# gzip for /metrics, as promhttp offers it; the pure-Rust backend, so no C zlib.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 # Zone data (TZif parsing) and civil time only: the zone is resolved and the times are formatted
 # in-tree, the way Go does (src/go_compat), so none of jiff's tzdb or system features is on.
 jiff = { version = "0.2.38", default-features = false, features = ["std"] }

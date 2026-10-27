@@ -29,14 +29,16 @@
 //!   `2006-01-02T15:04:05.000Z07:00`, for 70 instant and zone pairs;
 //! - `strings/go-strings.tsv` (go1.26.10): every pair of 50 words `strings.EqualFold` calls
 //!   equal, their `strings.ToLower`, and `strings.TrimSpace` of 10 texts, strings as the hex of
-//!   their bytes (`-` for empty).
+//!   their bytes (`-` for empty);
+//! - `sort/go-sort.tsv` (go1.26.10): `sort.Sort`'s order of 237 lists under goautoneg's
+//!   comparison, which is not a strict weak order.
 
 use std::fs;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 use jiff::tz::Offset;
-use swarm_device_access::go_compat::{duration, float, strings, time_layout};
+use swarm_device_access::go_compat::{duration, float, sort, strings, time_layout};
 
 fn testdata(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -195,4 +197,58 @@ fn strings_match_go_on_its_unicode_15_tables() {
     }
     expect_all("strings/go-strings.tsv", &mismatches, checked);
     assert_eq!((words.len(), folds.len()), (50, 124));
+}
+
+/// goautoneg's `Accept` comparison, which is not a strict weak order: a clause is less than
+/// another if its q is higher, or its type or subtype is concrete where the other's is `*`.
+fn autoneg_less(left: &(usize, &str), right: &(usize, &str)) -> bool {
+    let (left, right) = (left.1.as_bytes(), right.1.as_bytes());
+    let quality = |code: u8| match code {
+        b'a' => 1.0,
+        b'b' => 0.5,
+        _ => 0.1,
+    };
+    quality(left[0]) > quality(right[0])
+        || (left[1] != b'*' && right[1] == b'*')
+        || (left[2] != b'*' && right[2] == b'*')
+}
+
+#[test]
+fn sort_matches_go_on_237_inputs() {
+    let data = testdata("sort/go-sort.tsv");
+    let mut mismatches = Vec::new();
+    let mut checked = 0;
+    let mut differs_from_insertion = 0;
+    for line in data.lines() {
+        let (codes, order) = line
+            .split_once('\t')
+            .unwrap_or_else(|| panic!("malformed line {line:?}"));
+        let mut items: Vec<(usize, &str)> = codes.split(' ').enumerate().collect();
+        let mut insertion = items.clone();
+        sort::sort(&mut items, autoneg_less);
+        let got: Vec<String> = items.iter().map(|(index, _)| index.to_string()).collect();
+        if got.join(" ") != order {
+            mismatches.push(format!("{codes}: Go {order} Rust {}", got.join(" ")));
+        }
+        // The control: a plain insertion sort, Go's algorithm up to 12 elements, orders many of the
+        // longer inputs differently. (Rust's own sort refuses the comparison: it panics with
+        // "user-provided comparison function does not correctly implement a total order".)
+        for outer in 1..insertion.len() {
+            let mut inner = outer;
+            while inner > 0 && autoneg_less(&insertion[inner], &insertion[inner - 1]) {
+                insertion.swap(inner, inner - 1);
+                inner -= 1;
+            }
+        }
+        if insertion != items {
+            differs_from_insertion += 1;
+        }
+        checked += 1;
+    }
+    expect_all("sort/go-sort.tsv", &mismatches, checked);
+    assert_eq!(checked, 237);
+    assert!(
+        differs_from_insertion >= 200,
+        "only {differs_from_insertion} inputs tell pdqsort from insertion sort"
+    );
 }
