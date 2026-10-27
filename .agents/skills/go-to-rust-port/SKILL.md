@@ -54,6 +54,11 @@ Prometheus exporter).
   `initLocal` does and read the TZif file into `TimeZone::tzif`. jiff's RFC 3339 writes UTC as
   `+00:00` (Go `Z`) and rounds an LMT offset (Go truncates) → format with an in-tree layout port.
   (slim-host probe; 70 of 70 layouts against Go)
+- A Go `time.Now()` carries a monotonic reading, so `due.Sub(time.Now())` and an age check
+  between two `time.Now()`s ignore wall-clock steps; a `Timestamp` from the injected `Clock` is
+  wall time only, and a backward NTP step delays every retry by its size → keep deadlines and
+  ages as `tokio::time::Instant`, and a `Timestamp` only where Go compares with a wall time from
+  outside (a Docker event time). (coordinator review)
 - go-solar computes sunrise/sunset for the **UTC** date of the instant; the `sunrise` crate 3
   matches it within ±1 s. (golden test against go-solar v1.0.1)
 
@@ -292,6 +297,18 @@ Prometheus exporter).
   `tokio::time::timeout` around the Rust call yields only the bare text → make the context
   visible to the client for the call (a task-local) and race each request against it there.
   (Go program against a socket that never answers, moby v0.6.0)
+- A Go caller that reserves a key, works and releases it cannot be stopped between the steps; a
+  Rust future can be dropped there (a `timeout` or `select!` around it), which either leaks the
+  reservation or, with a drop guard, frees it while the work still runs → run the reserved work
+  on a tracked task of its own that releases the key itself, and have the caller await its
+  handle; shutdown waits for the tracker. (coordinator mutation test: an inline hold fails both
+  regression tests)
+- Go's one-slot wake channel with a non-blocking send (`select { case ch <- x: default: }`) is
+  `Notify::notify_one`: its single stored permit is the slot. (coordinator port)
+- Under `start_paused`, a running `spawn_blocking` task stops the clock from auto-advancing
+  (tokio 1.23, #5115), so a test whose blocking task waits for the test hangs on any tokio sleep
+  → signal entry with a token and move time with `tokio::time::advance`. (coordinator regression
+  test)
 
 ## 5. Tooling, lints and packaging
 

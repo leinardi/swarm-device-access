@@ -39,7 +39,6 @@ use std::time::Duration;
 use jiff::{SignedDuration, Timestamp};
 use rustix::io::Errno;
 use tokio::runtime::Handle;
-use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
 
 use super::devfs::{DEV_ROOT, DevFs, RealDevFs, SysError, sysfs_root_for};
@@ -60,6 +59,7 @@ use crate::go_compat::quote::quote;
 use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global, unknown_labels};
+use crate::task::finish;
 
 /// How long a provisional record without a cgroup is kept before the sweep drops it: it names no
 /// cgroup, so nothing can be revoked through it.
@@ -1111,18 +1111,6 @@ impl<I: Inspector> Processor<I> {
             Arc::clone(&self.filter_cache),
             self.log.clone(),
         )
-    }
-}
-
-/// Awaits a blocking transaction to completion. A panic inside it is resumed here, as Go's would
-/// crash the process; `None` only when the runtime shut down before it started.
-async fn finish<T>(transaction: JoinHandle<T>) -> Option<T> {
-    match transaction.await {
-        Ok(value) => Some(value),
-        Err(join_error) if join_error.is_panic() => {
-            std::panic::resume_unwind(join_error.into_panic())
-        }
-        Err(_) => None,
     }
 }
 
