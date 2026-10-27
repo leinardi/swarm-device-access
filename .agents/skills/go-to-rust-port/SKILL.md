@@ -192,6 +192,18 @@ Prometheus exporter).
   `lookup_host` refuses `%` → port `parseHost`'s checks, build the `SocketAddrV6` with its scope
   (sysfs `ifindex`, else the zone as a number, else 0), and strip the zone from `Host`. (Go 1.26
   probe against a fake Engine on `[::1]`)
+- **D-Bus (godbus):** zbus 6 with `default-features = false, features = ["tokio"]` pulls no
+  async-io, smol or blocking crate, and its system bus address order is godbus's
+  (`DBUS_SYSTEM_BUS_ADDRESS`, else `/var/run/dbus/system_bus_socket`).
+  `MessageStream::for_match_rule` sends the `AddMatch` and registers the stream together, so the
+  stream exists before a later `GetNameOwner`, as godbus's channel did; it writes `path` after
+  `member` in the rule text, which the bus ignores. A dead bus makes the stream yield an I/O error
+  rather than end → treat an error as the end, where godbus closed its channel. A failed dial reads
+  `dial unix <path>: connect: <errno>` in Go → dial the socket yourself and hand zbus the stream
+  (`Builder::unix_stream`). zbus keeps the bus's own error replies as `Error::FDO`, whose text
+  prefixes the error name, where godbus printed the message alone → map `MethodError`, `FDO` and
+  `DBus` to the description. Compare the two clients on a private `dbus-daemon` with `dbus-monitor`
+  rather than by reading code. (zbus 6.1.0, godbus v5)
 - **Docker over a unix socket:** moby's defaults there are not its TCP ones: no gzip, no
   response-header timeout, `Host: api.moby.localhost`, the socket path as the escaped host in
   error URLs, and the `User-Agent` `moby-client/<version> <GOOS>/<GOARCH>` (Go's arch names);

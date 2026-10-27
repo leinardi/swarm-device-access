@@ -30,5 +30,6 @@ pub mod go_compat;
 pub mod logger;
 pub mod metrics;
 pub mod policy;
+pub mod systemd;
 #[cfg(test)]
 mod test_support;
