@@ -88,9 +88,14 @@ export SDA_TEST_IMAGE ?= $(INTEGRATION_IMAGE)
 export SDA_IT_ENFORCE SDA_IT_REQUIRE_RELOAD
 
 # The Rust suite's binary and image: the host architecture's static musl build
-# and a scratch image of it, under a fixed tag. Its context (the binary) is
-# copied under target/ and its Dockerfile goes to docker build on stdin, so no
-# second Dockerfile exists in the tree, tracked or not (test/dockerfiles).
+# and a scratch image of it, under a fixed tag. The binary is built by
+# rust-release.mk's rust_static_build, the release binaries' one build (zig,
+# cargo-zigbuild, the version stamps and the remapped paths), for the host's
+# target, so the suite tests the bytes a release of that architecture would
+# carry; it needs the pinned zig and cargo-zigbuild on PATH. Its context (the
+# binary) is copied under target/ and its Dockerfile goes to docker build on
+# stdin, so no second Dockerfile exists in the tree, tracked or not
+# (test/dockerfiles).
 RUST_IT_TARGET    ?= $(shell uname -m)-unknown-linux-musl
 RUST_IT_BINARY    := $(REPO_ROOT)/target/$(RUST_IT_TARGET)/release/$(BIN_NAME)
 RUST_IT_CONTEXT   := $(REPO_ROOT)/target/rust-integration-image
@@ -123,8 +128,8 @@ integration-image: ## Build the daemon image the enforcement test runs, as $(INT
 	$(MAKE) docker-build IMAGE_REPO=$(INTEGRATION_IMAGE_REPO) IMAGE_TAG=$(INTEGRATION_IMAGE_TAG)
 
 .PHONY: rust-integration-image
-rust-integration-image: ## Build the static host-arch Rust binary and its throwaway scratch image, $(RUST_IT_IMAGE)
-	$(RUST_VERSION_ENV) $(CARGO) build --locked --release --target $(RUST_IT_TARGET) --bin $(BIN_NAME)
+rust-integration-image: rust-zigbuild-check ## Build the static host-arch Rust binary and its throwaway scratch image, $(RUST_IT_IMAGE)
+	$(call rust_static_build,$(RUST_IT_TARGET))
 	@set -eu; \
 	mkdir -p "$(RUST_IT_CONTEXT)"; \
 	cp "$(RUST_IT_BINARY)" "$(RUST_IT_CONTEXT)/$(BIN_NAME)"; \

@@ -18,15 +18,19 @@
 
 //! The repository's tooling pins: the Go line of go.mod in the image's golang tag and every
 //! setup-go step; one exact Rust release across rust-toolchain.toml, the workspace's
-//! `rust-version` and every CI toolchain step; one droast and one ShellCheck between the hooks and
-//! the CI actions; the whole-tree hooks running once; and no meta-test that skips on a missing
-//! tool. The Rust side of `test/toolchain/pins_test.go` and of `TestToolGateListIsClosed`, which
-//! stay until the cutover; `ci_gates.rs` and `vacuous_flags.rs` port the rest of that package.
+//! `rust-version` and every CI toolchain step; one zig and one cargo-zigbuild between the
+//! setup-zigbuild action and the release fragment, and the fragment's musl standard libraries at
+//! that exact Rust release; one droast and one ShellCheck between the hooks and the CI actions;
+//! the whole-tree hooks running once; and no meta-test that skips on a missing tool. The Rust side
+//! of `test/toolchain/pins_test.go` and of `TestToolGateListIsClosed`, which stay until the
+//! cutover; `ci_gates.rs` and `vacuous_flags.rs` port the rest of that package.
 //!
 //! Not ported: `TestUntaggedTestsAvoidDocker` and its negative control read Go build tags and
 //! imports through `go/ast`, which only the Go tests have; `integration_targets.rs` is the Rust
-//! side of the same rule. SSE's zig, cargo-zigbuild and Trivy pins and its Rust line in the image
-//! come with the Rust image and release, which this repository does not have yet.
+//! side of the same rule. SSE checks its zig, cargo-zigbuild and rust-std pins against its
+//! Dockerfile; here the Dockerfile still builds Go, so they are checked against
+//! `.mk/rust-release.mk`, the record the Rust image will take. SSE's Trivy pin and its Rust line in
+//! the image come with the Rust image and release, which this repository does not have yet.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -395,6 +399,358 @@ const DROAST_HOOK: &str =
     r#"repo: https://github\.com/immanuwell/dockerfile-roast\s+rev:\s*["']?([\d.]+)"#;
 const DROAST_ACTION: &str = ".github/actions/setup-droast/action.yaml";
 const DROAST_PIN: &str = r#"DROAST_VERSION:\s*["']?([\d.]+)"#;
+
+const SETUP_ZIGBUILD: &str = ".github/actions/setup-zigbuild/action.yaml";
+const RUST_RELEASE_FRAGMENT: &str = ".mk/rust-release.mk";
+
+/// One place a pin is written: a file's name, its content, and the pattern whose first group is
+/// the pin there.
+struct PinSource<'content> {
+    file: &'content str,
+    content: &'content str,
+    pattern: &'content str,
+}
+
+/// SSE's `expect_one_value`, as a function of the contents: a problem for every source that does
+/// not write the pin, and one when the values written are not all the same.
+fn one_value_problems(what: &str, sources: &[PinSource<'_>]) -> Vec<String> {
+    let mut found: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut problems = Vec::new();
+    for source in sources {
+        let pattern = regex(source.pattern);
+        let mut matched = false;
+        for captures in pattern.captures_iter(source.content) {
+            matched = true;
+            found
+                .entry(captures[1].to_owned())
+                .or_default()
+                .push(source.file);
+        }
+        if !matched {
+            problems.push(format!(
+                "{what}: {} does not write it ({pattern})",
+                source.file
+            ));
+        }
+    }
+    if found.len() > 1 {
+        let values: Vec<String> = found
+            .iter()
+            .map(|(value, files)| {
+                let mut files = files.clone();
+                files.dedup();
+                format!("{value} in {}", files.join(", "))
+            })
+            .collect();
+        problems.push(format!("{what} is not one value: {}", values.join("; ")));
+    }
+    problems
+}
+
+/// The zig and cargo-zigbuild pins of the action and the release fragment: each version, and the
+/// digest of the `x86_64` archive both name, as (what, action pattern, fragment pattern).
+const ZIGBUILD_PINS: [(&str, &str, &str); 4] = [
+    (
+        "zig",
+        r#"(?m)^\s*ZIG_VERSION:\s*"?(\d+\.\d+\.\d+)"?\s*$"#,
+        r"(?m)^RUST_RELEASE_ZIG_VERSION := (\S+)$",
+    ),
+    (
+        "zig x86_64 sha256",
+        r"(?m)^\s*ZIG_SHA256:\s*([0-9a-f]{64})\s*$",
+        r"(?m)^RUST_RELEASE_ZIG_SHA256_x86_64 := ([0-9a-f]{64})$",
+    ),
+    (
+        "cargo-zigbuild",
+        r#"(?m)^\s*CARGO_ZIGBUILD_VERSION:\s*"?(\d+\.\d+\.\d+)"?\s*$"#,
+        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_VERSION := (\S+)$",
+    ),
+    (
+        "cargo-zigbuild x86_64 sha256",
+        r"(?m)^\s*CARGO_ZIGBUILD_SHA256:\s*([0-9a-f]{64})\s*$",
+        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := ([0-9a-f]{64})$",
+    ),
+];
+
+/// Every zig and cargo-zigbuild pin that is not one value between the action and the fragment.
+fn zigbuild_problems(action: &str, fragment: &str) -> Vec<String> {
+    ZIGBUILD_PINS
+        .iter()
+        .flat_map(|(what, action_pattern, fragment_pattern)| {
+            one_value_problems(
+                what,
+                &[
+                    PinSource {
+                        file: SETUP_ZIGBUILD,
+                        content: action,
+                        pattern: action_pattern,
+                    },
+                    PinSource {
+                        file: RUST_RELEASE_FRAGMENT,
+                        content: fragment,
+                        pattern: fragment_pattern,
+                    },
+                ],
+            )
+        })
+        .collect()
+}
+
+/// SSE's `zig_is_one_version` and `cargo_zigbuild_is_one_version`, with the release fragment in
+/// place of the Dockerfile, which still builds Go: CI's static builds (setup-zigbuild) and the
+/// record the Rust image will take use one zig and one cargo-zigbuild, from the same `x86_64`
+/// archives, so a bump that moves one copy fails here rather than in the first build that runs it.
+#[test]
+fn zig_and_cargo_zigbuild_are_one_version() {
+    let problems = zigbuild_problems(
+        &repo::read(SETUP_ZIGBUILD),
+        &repo::read(RUST_RELEASE_FRAGMENT),
+    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control: a moved version or digest on either side, and a pin the fragment does
+/// not write, are each a problem; a pin written twice with two values is one.
+#[test]
+fn zigbuild_pin_rules() {
+    let digest = "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026";
+    let zigbuild_digest = "52be2cb85ad3875682564a29bac1832b2ab3db68b1c504765c92d5249cc9b96f";
+    let action = format!(
+        "      env:\n        ZIG_VERSION: \"0.17.0\"\n        ZIG_SHA256: {digest}\n        \
+         CARGO_ZIGBUILD_VERSION: \"0.24.0\"\n        CARGO_ZIGBUILD_SHA256: {zigbuild_digest}\n"
+    );
+    let fragment = format!(
+        "RUST_RELEASE_ZIG_VERSION := 0.17.0\nRUST_RELEASE_ZIG_SHA256_x86_64 := {digest}\n\
+         RUST_RELEASE_CARGO_ZIGBUILD_VERSION := 0.24.0\n\
+         RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := {zigbuild_digest}\n"
+    );
+    assert_eq!(zigbuild_problems(&action, &fragment), Vec::<String>::new());
+
+    let other_digest = "9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8";
+    for (name, action, fragment) in [
+        (
+            "a moved zig in the action",
+            action.replace("ZIG_VERSION: \"0.17.0\"", "ZIG_VERSION: \"0.16.0\""),
+            fragment.clone(),
+        ),
+        (
+            "a moved cargo-zigbuild in the fragment",
+            action.clone(),
+            fragment.replace("ZIGBUILD_VERSION := 0.24.0", "ZIGBUILD_VERSION := 0.23.0"),
+        ),
+        (
+            "another zig digest in the fragment",
+            action.clone(),
+            fragment.replace(digest, other_digest),
+        ),
+        (
+            "another cargo-zigbuild digest in the action",
+            action.replace(zigbuild_digest, other_digest),
+            fragment.clone(),
+        ),
+        (
+            "a fragment without the zig digest",
+            action.clone(),
+            fragment.replace(&format!("RUST_RELEASE_ZIG_SHA256_x86_64 := {digest}\n"), ""),
+        ),
+        (
+            "a fragment writing zig twice",
+            action.clone(),
+            format!("{fragment}RUST_RELEASE_ZIG_VERSION := 0.16.0\n"),
+        ),
+    ] {
+        let problems = zigbuild_problems(&action, &fragment);
+        assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
+    }
+}
+
+/// The release fragment's musl standard library pins.
+static RUST_STD_VERSION: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_RUST_STD_VERSION := (\S+)$"));
+/// A rust-std digest line, of any value, so a malformed digest is seen rather than skipped.
+static RUST_STD_SHA256: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_RUST_STD_SHA256_(\S+) := (\S*)$"));
+/// The release platforms, as `<docker arch>:<Rust target>` pairs.
+static RELEASE_PLATFORMS: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_PLATFORMS\s*:= (.*)$"));
+/// A sha256, as the archives' `.sha256` files publish it.
+static SHA256: LazyLock<Regex> = LazyLock::new(|| regex(r"^[0-9a-f]{64}$"));
+
+/// The targets rust-toolchain.toml installs.
+fn toolchain_targets(toolchain: &str) -> Vec<String> {
+    let table: toml::Table = toml::from_str(toolchain)
+        .unwrap_or_else(|error| panic!("parse rust-toolchain.toml: {error}"));
+    table
+        .get("toolchain")
+        .and_then(|section| section.get("targets"))
+        .and_then(toml::Value::as_array)
+        .map(|targets| {
+            targets
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What is wrong with the fragment's release targets and musl standard libraries, against the
+/// exact release and the targets of rust-toolchain.toml: the rust-std release is the toolchain's,
+/// each target has one well-formed digest and no other target has one, and the release platforms
+/// build exactly those targets.
+fn rust_std_problems(fragment: &str, release: &str, targets: &[String]) -> Vec<String> {
+    let mut problems = Vec::new();
+    if targets.is_empty() {
+        problems.push("rust-toolchain.toml installs no target; the check would see nothing".into());
+    }
+    match RUST_STD_VERSION.captures(fragment) {
+        Some(version) if version[1] == *release => {}
+        Some(version) => problems.push(format!(
+            "{RUST_RELEASE_FRAGMENT} pins rust-std {}, but rust-toolchain.toml says {release}",
+            &version[1]
+        )),
+        None => problems.push(format!(
+            "{RUST_RELEASE_FRAGMENT} writes no RUST_RELEASE_RUST_STD_VERSION"
+        )),
+    }
+
+    let mut digests: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for captures in RUST_STD_SHA256.captures_iter(fragment) {
+        if let (Some(target), Some(digest)) = (captures.get(1), captures.get(2)) {
+            digests
+                .entry(target.as_str())
+                .or_default()
+                .push(digest.as_str());
+        }
+    }
+    for target in targets {
+        match digests.get(target.as_str()).map(Vec::as_slice) {
+            Some([digest]) if SHA256.is_match(digest) => {}
+            Some([digest]) => problems.push(format!(
+                "the rust-std digest of {target} is {digest:?}, not a sha256"
+            )),
+            Some(written) => problems.push(format!(
+                "the rust-std digest of {target} is written {} times, want once",
+                written.len()
+            )),
+            None => problems.push(format!("{target} has no rust-std digest")),
+        }
+    }
+    for target in digests.keys() {
+        if !targets.iter().any(|wanted| wanted == target) {
+            problems.push(format!(
+                "a rust-std digest names {target}, which rust-toolchain.toml does not install"
+            ));
+        }
+    }
+
+    let platforms: Vec<&str> = RELEASE_PLATFORMS
+        .captures(fragment)
+        .and_then(|captures| captures.get(1))
+        .map(|platforms| {
+            platforms
+                .as_str()
+                .split_whitespace()
+                .filter_map(|platform| platform.split_once(':').map(|(_, target)| target))
+                .collect()
+        })
+        .unwrap_or_default();
+    if platforms != targets.iter().map(String::as_str).collect::<Vec<_>>() {
+        problems.push(format!(
+            "the release platforms build {platforms:?}, but rust-toolchain.toml installs \
+             {targets:?}"
+        ));
+    }
+    problems
+}
+
+/// The musl standard libraries the Rust image's build stage will unpack are the exact release of
+/// rust-toolchain.toml, one sha256 for each of its targets, and the release binaries are built for
+/// exactly those targets. (SSE's `image_toolchain_patch_is_the_standard_library_version`, against
+/// the toolchain file rather than the image tag, which still names Go.)
+#[test]
+fn rust_std_is_the_rust_release() {
+    let toolchain = repo::read("rust-toolchain.toml");
+    let release = RUST_CHANNEL
+        .captures(&toolchain)
+        .map(|captures| captures[1].to_owned())
+        .expect("rust-toolchain.toml names a channel");
+    let problems = rust_std_problems(
+        &repo::read(RUST_RELEASE_FRAGMENT),
+        &release,
+        &toolchain_targets(&toolchain),
+    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control: another release, a missing, short, doubled or extra digest, and a
+/// platform list that leaves a target out are each refused.
+#[test]
+fn rust_std_rules() {
+    let targets = toolchain_targets(
+        "[toolchain]\nchannel = \"1.98.1\"\ntargets = [\"x86_64-unknown-linux-musl\", \
+         \"aarch64-unknown-linux-musl\"]\n",
+    );
+    assert_eq!(targets.len(), 2, "{targets:?}");
+    let amd64 = "bd9f35880de21dab0e387e84009c00001ae7836a4ba565cb16823f13f75f325f";
+    let arm64 = "7e0ad2e67817f224b7a6331e48d6397303fc050edaccf81784ed786ffddc884a";
+    let fragment = format!(
+        "RUST_RELEASE_RUST_STD_VERSION := 1.98.1\n\
+         RUST_RELEASE_RUST_STD_SHA256_x86_64-unknown-linux-musl := {amd64}\n\
+         RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := {arm64}\n\
+         RUST_RELEASE_PLATFORMS := amd64:x86_64-unknown-linux-musl \
+         arm64:aarch64-unknown-linux-musl\n"
+    );
+    assert_eq!(
+        rust_std_problems(&fragment, "1.98.1", &targets),
+        Vec::<String>::new()
+    );
+    assert!(
+        !rust_std_problems(&fragment, "1.98.1", &[]).is_empty(),
+        "no target at all was accepted"
+    );
+
+    let arm64_line =
+        format!("RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := {arm64}\n");
+    for (name, sample, release) in [
+        ("another release", fragment.clone(), "1.98.0"),
+        (
+            "no rust-std version",
+            fragment.replace("RUST_RELEASE_RUST_STD_VERSION := 1.98.1\n", ""),
+            "1.98.1",
+        ),
+        (
+            "a missing digest",
+            fragment.replace(&arm64_line, ""),
+            "1.98.1",
+        ),
+        (
+            "a short digest",
+            fragment.replace(arm64, &arm64[1..]),
+            "1.98.1",
+        ),
+        (
+            "a doubled digest",
+            format!("{fragment}{arm64_line}"),
+            "1.98.1",
+        ),
+        (
+            "a digest of another target",
+            format!(
+                "{fragment}RUST_RELEASE_RUST_STD_SHA256_riscv64gc-unknown-linux-musl := {arm64}\n"
+            ),
+            "1.98.1",
+        ),
+        (
+            "a platform left out",
+            fragment.replace(" arm64:aarch64-unknown-linux-musl", ""),
+            "1.98.1",
+        ),
+    ] {
+        let problems = rust_std_problems(&sample, release, &targets);
+        assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
+    }
+}
 
 /// Go: `TestShellCheckIsOneVersion`. droast's ShellCheck bridge runs the `shellcheck` on `PATH`,
 /// which CI installs with setup-shellcheck; it must be the release the shellcheck-py hook wraps

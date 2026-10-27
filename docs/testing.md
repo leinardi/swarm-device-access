@@ -82,12 +82,14 @@ make rust-test-integration                              # every ported test
 make rust-test-integration RUN='^TestDaemon_DryRun_'    # Go's -run semantics
 ```
 
-The target builds the static host-architecture musl binary (`cargo build --release --target
-<arch>-unknown-linux-musl`, one architecture, no release packaging) and a throwaway `FROM scratch`
-image of it, `swarm-device-access:rust-integration`, whose Dockerfile goes to `docker build` on
-stdin. It exports them as `SDA_RUST_TEST_BINARY` and `SDA_RUST_TEST_IMAGE`, variables of the Rust
-suite's own: it never reads `SDA_TEST_BINARY` or `SDA_TEST_IMAGE` for them, which name the Go
-build. It also runs `go-build`, for the negative control below.
+The target builds the static host-architecture musl binary with the release binaries' one build
+(`cargo zigbuild --release --target <arch>-unknown-linux-musl`, with the version stamps and the
+build paths remapped; `.mk/rust-release.mk`), so it needs the zig and cargo-zigbuild releases
+`.github/actions/setup-zigbuild` pins on `PATH` and refuses any other. It then builds a throwaway
+`FROM scratch` image of the binary, `swarm-device-access:rust-integration`, whose Dockerfile goes
+to `docker build` on stdin. It exports them as `SDA_RUST_TEST_BINARY` and `SDA_RUST_TEST_IMAGE`,
+variables of the Rust suite's own: it never reads `SDA_TEST_BINARY` or `SDA_TEST_IMAGE` for them,
+which name the Go build. It also runs `go-build`, for the negative control below.
 
 - **Identity check.** Before any test, the runner runs the binary and the image with `-help`. Go's
   `flag` package prints its usage and exits 0; the Rust daemon refuses a single-dash long flag

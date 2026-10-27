@@ -94,9 +94,10 @@ jobs:
   # runs the Go daemon image (SDA_GO_TEST_IMAGE, which make rust-test-integration
   # builds with integration-image from the dhi.io bases, hence the same login).
   # The Rust toolchain is the exact release of rust-toolchain.toml, with the
-  # host's musl target for the static binary the suite's image is built from;
-  # Go builds the negative control's binary. The Rust cache is saved only on a
-  # pull request, as in ci.yaml.
+  # host's musl target for the static binary the suite's image is built from,
+  # which cargo-zigbuild links with the pinned zig, as the release binaries are
+  # (make rust-release-binaries); Go builds the negative control's binary. The
+  # Rust cache is saved only on a pull request, as in ci.yaml.
   rust-integration:
     name: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'rust-integration (fork: enforcement skipped)' || 'rust-integration' }}"
     runs-on: ubuntu-latest
@@ -126,6 +127,9 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.event_name == 'pull_request' }}
+
+      - name: Set up cargo-zigbuild
+        uses: ./.github/actions/setup-zigbuild
 
       - name: Require the dhi.io token
         if: env.FROM_FORK != 'true'

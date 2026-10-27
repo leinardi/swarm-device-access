@@ -28,6 +28,7 @@ make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust
 make verify        # verify-go, then verify-rust: both while the Go and Rust code live side by side
 make rust-fmt      # cargo fmt --all
 make rust-deny     # cargo deny --workspace check (network required)
+make rust-release-binaries  # static musl amd64 and arm64 binaries into dist/rust/ (pinned zig and cargo-zigbuild on PATH; not shipped yet)
 make go-tidy       # go mod tidy + go mod verify
 make audit-deps    # govulncheck -test + banned-module check (network required); also runs in CI and as a pre-commit hook on go.mod/go.sum changes
 make check         # pre-commit on all files: the authoritative local gate, as CI's pre-commit-all
@@ -67,6 +68,11 @@ The Dockerfile hook is droast (Dockerfile Roast), with its policy in `droast.tom
 builds it from source at its pinned rev, which needs a Rust toolchain (`cargo`) locally. Its
 required ShellCheck bridge runs the `shellcheck` on PATH, so install ShellCheck locally at the
 release `.github/actions/setup-shellcheck` pins (CI installs it with that action).
+
+The static Rust builds (`make rust-release-binaries`, and `make rust-integration-image` under
+`make rust-test-integration`) link with zig through cargo-zigbuild and refuse any release on PATH
+but the ones `.github/actions/setup-zigbuild` pins (`.mk/rust-release.mk` records them, with the
+`rust-std` digests the Rust image will take).
 
 The meta-tests under `test/` (all untagged, no Docker) guard the tooling itself: `test/toolchain`
 (the Go line, the droast and ShellCheck pins, flags that make a gate pass on nothing, Docker kept
@@ -257,6 +263,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify-rust` (load `rust-style-guide` first), then `make check-stage` |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify-rust`, `make rust-deny` (network) |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/`, `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
+| `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
 | `.golangci.yaml` | `make go-lint` |
 | `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/`, `cargo test --locked -p meta --test suppressions` |
 | `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/`, `cargo test --locked -p meta --test license_headers` |

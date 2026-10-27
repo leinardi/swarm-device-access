@@ -408,6 +408,16 @@ Prometheus exporter).
   <arch>-unknown-linux-musl` on a glibc host with the rustup target is enough: it links
   static-pie with the target's self-contained musl CRT, no linker setting or zig. Check static by
   the absence of `PT_INTERP`, not by `file`'s wording. (Rust 1.98.1, x86_64)
+- A release build remapped only by `--remap-path-prefix` for the checkout and the cargo home
+  still carries host paths when the toolchain has `rust-src` installed: rustc rewrites the
+  standard library's `/rustc/<commit-hash>/library/...` panic locations to the local copy under the
+  rustup home, so a developer machine and CI's minimal profile build different bytes → also map
+  `$(rustc --print sysroot)/lib/rustlib/src/rust` back to `/rustc/<commit-hash>` (from `rustc
+  -vV`), set `RUSTFLAGS` in the recipe rather than inheriting it, and check with `strings | grep
+  "$HOME/"`. cargo-zigbuild links a musl target as a static non-PIE executable (`file`:
+  "statically linked"), where plain `cargo build` gives static-pie; both have no `PT_INTERP`.
+  (swarm-device-access `rust-release-binaries`, Rust 1.98.1 with rust-src, zig 0.17.0,
+  cargo-zigbuild 0.24.0: 53 `.rustup` paths before the third remap, none after)
 - A Go meta-test that walks the working tree with `filepath.WalkDir` (rather than `git ls-files`)
   also walks cargo's `target/`, so a generated `Dockerfile` there (a throwaway test image) fails
   "the shipped Dockerfile is the only one" → feed such a Dockerfile to `docker build --file -` on

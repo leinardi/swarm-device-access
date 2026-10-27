@@ -380,6 +380,58 @@ jobs:
           arguments: --workspace
           command: check
 
+  # The static musl binaries of the Rust daemon for both release platforms, built the way a release
+  # will build them: make rust-release-binaries (cargo-zigbuild with the pinned zig, the version
+  # stamps, the checkout and cargo home remapped), adapted from swarm-scheduler-exporter's release
+  # build step at d57dcc220d29 (MIT, same author). Nothing is uploaded or published: the Go release
+  # still ships. The toolchain is the exact release of rust-toolchain.toml with both musl targets;
+  # the cache is saved only on a pull request, as in pre-commit-all.
+  rust-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.event_name == 'pull_request' }}
+
+      - name: Set up cargo-zigbuild
+        uses: ./.github/actions/setup-zigbuild
+
+      - name: Build the static binaries (linux/amd64, linux/arm64)
+        run: make rust-release-binaries
+
+      # A binary with a program interpreter is not static, and one that names the runner's home
+      # (the checkout and the cargo home are under it) was not remapped.
+      - name: Check the binaries are static and carry no build path
+        run: |
+          set -euo pipefail
+          for binary in dist/rust/swarm-device-access-linux-amd64 dist/rust/swarm-device-access-linux-arm64; do
+            readelf -lW "${binary}" > "${RUNNER_TEMP}/headers"
+            if grep -q INTERP "${RUNNER_TEMP}/headers"; then
+              echo "::error::${binary} has a program interpreter; it is not static"
+              exit 1
+            fi
+            strings "${binary}" > "${RUNNER_TEMP}/strings"
+            if grep -F "${HOME}/" "${RUNNER_TEMP}/strings"; then
+              echo "::error::${binary} carries a path of the runner"
+              exit 1
+            fi
+          done
+          cat dist/rust/checksums.txt
+
   # The one required check that stands for the rest: GitHub counts a skipped required job as
   # passing, so this job always runs and decides. On a pull request every needed job must succeed;
   # on a push or a dispatch conventional-commits, which only runs on pull requests, is skipped and
@@ -395,6 +447,7 @@ jobs:
       - conventional-commits
       - repo-gates
       - rust
+      - rust-static
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
