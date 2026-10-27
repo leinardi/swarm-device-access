@@ -2,47 +2,39 @@
 
 ## Prerequisites
 
-- Linux host (all device/cgroup/BPF code carries `//go:build linux`; building for Linux from
-  macOS/Windows works via cross-compilation but tests require a Linux runner)
-- Go 1.26+
-- Docker (for running Linux tests from a non-Linux host and for building the container image)
+- Linux host: the daemon is Linux-only, and its tests run on a Linux kernel
+- Rust through `rustup` (`rust-toolchain.toml` pins the exact release and its components)
+- Docker, logged in to `dhi.io` (`docker login dhi.io`), for building the container image and
+  running the integration suite
 - [`pre-commit`](https://pre-commit.com/) — install hooks once with `make pre-commit-install`
 
 ## Building
 
 ```bash
-make go-build        # builds for Linux (GOOS=linux, the host's GOARCH) into ./dist/
+make rust-build      # builds the workspace (target/debug/swarm-device-access)
 make docker-build    # builds the container image for the host's architecture (single-arch)
 ```
 
 ## Testing
 
 ```bash
-make go-test         # go test -race ./... (requires Linux; see below)
-```
-
-Tests carry `//go:build linux` and must run on a Linux kernel. From macOS or Windows:
-
-```bash
-docker run --rm -v "$PWD:/work" -w /work golang:1.26 go test -race ./...
+make verify            # build, format check, clippy and every test, the meta-tests included
+make test-integration  # the integration suite against the image (Docker; see docs/testing.md)
 ```
 
 ## Linting
 
 ```bash
-make check           # runs the full pre-commit suite (golangci-lint, droast, shellcheck, etc.)
+make check           # runs the full pre-commit suite (clippy, droast, shellcheck, etc.)
 make check-stage     # same, but only on staged files
 ```
 
-CI runs the same checks on every pull request via `golangci-lint-full` in
-`.github/workflows/ci.yaml`.
+CI runs the same checks on every pull request in `.github/workflows/ci.yaml`.
 
 The Dockerfile is linted by [droast](https://github.com/immanuwell/dockerfile-roast) (Dockerfile
 Roast) with the policy in `droast.toml`. pre-commit builds droast from source, so `make check`
 needs a Rust toolchain (`cargo`); its required ShellCheck bridge runs the `shellcheck` on PATH, at
-the release `.github/actions/setup-shellcheck` pins. The Dockerfile meta-test in `test/dockerfiles`
-also needs a `droast` binary on PATH, at the release `.github/actions/setup-droast` pins; without
-one it skips, unless `SDA_REQUIRE_TOOLS=1` is set.
+the release `.github/actions/setup-shellcheck` pins.
 
 ## Branch and PR conventions
 
@@ -52,9 +44,10 @@ one it skips, unless `SDA_REQUIRE_TOOLS=1` is set.
   propagation_.
 - All CI checks must pass before merge.
 
-## `internal/cgroup/` — NVIDIA-derived code
+## `src/cgroup/` — NVIDIA-derived code
 
-The files in `internal/cgroup/` carry a `Copyright (c) 2021, NVIDIA CORPORATION` header.
+`src/cgroup/{api,ebpf,v1,v2}.rs` port NVIDIA's files and carry a
+`Copyright (c) 2021, NVIDIA CORPORATION` header.
 
 **Etiquette:**
 
@@ -65,8 +58,19 @@ The files in `internal/cgroup/` carry a `Copyright (c) 2021, NVIDIA CORPORATION`
 - Before proposing a change, check whether the upstream already fixed it.
 - If you fix a bug that also exists upstream, note the upstream file and line in your PR
   description, and consider sending a patch upstream.
-- If golangci-lint flags something in this directory, check whether the linter exclusion in
-  `.golangci.yaml` covers it before adding a `//nolint` directive.
+
+## Reused code and the 1.x contract
+
+Several Rust modules are adapted from swarm-scheduler-exporter and swarm-rootless-docker. The reuse
+ledger in [`docs/rust-port.md`](docs/rust-port.md) names the source and pinned commit of each one
+and every adaptation: check it before changing a reused component, and update its row in the same
+commit when a reused component changes or an upstream fix is taken.
+
+Log lines, error texts, exit codes, metrics and Docker Engine requests are those of 1.x. A change
+that cannot keep one adds a numbered entry to the README's
+[Migrating from 1.x](README.md#-migrating-from-1x) table in the same commit. `AGENTS.md` lists the
+project skills (`rust-style-guide`, `trust-boundary`, `adversarial-review`) that hold the coding,
+fail-closed and review rules.
 
 ## Commit messages
 

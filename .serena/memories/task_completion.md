@@ -3,17 +3,15 @@
 Run these after any code change before committing:
 
 ```bash
-make go-fmt-check   # formatting (gofmt + goimports)
-make go-vet         # static checks
-make go-test        # tests with race detector (CGO_ENABLED=1)
-make go-tidy        # go.mod/go.sum consistent
-make check-stage    # pre-commit hooks on staged files (catches lint, trailing whitespace, etc.)
+make verify         # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test
+make check-stage    # pre-commit hooks on staged files (license headers, suppressions, docs links, ...)
 ```
+
+Also, by what changed (full table: AGENTS.md, Validation matrix):
+
+- a Cargo manifest, `Cargo.lock` or `deny.toml`: `make rust-deny` (network).
+- `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**`: `make test-integration` (Docker).
+- Markdown: `cargo test --locked -p meta --test docs`; prose wraps at 100 columns.
+- a new suppression: `scripts/check-suppressions.sh --update`, commit the baseline.
 
 Or run `make check` to run pre-commit on all files (slower but thorough).
-
-Note: tests are `//go:build linux`. On non-Linux hosts, run them inside the golang Docker image:
-
-```bash
-docker run --rm -v $PWD:/work -w /work golang:1.26 go test ./...
-```

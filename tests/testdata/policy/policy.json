@@ -1,0 +1,5618 @@
+{
+  "parseBool": [
+    {
+      "input": "1",
+      "value": true,
+      "error": ""
+    },
+    {
+      "input": "t",
+      "value": true,
+      "error": ""
+    },
+    {
+      "input": "T",
+      "value": true,
+      "error": ""
+    },
+    {
+      "input": "TRUE",
+      "value": true,
+      "error": ""
+    },
+    {
+      "input": "true",
+      "value": true,
+      "error": ""
+    },
+    {
+      "input": "True",
+      "value": true,
+      "error": ""
+    },
+    {
+      "input": "0",
+      "value": false,
+      "error": ""
+    },
+    {
+      "input": "f",
+      "value": false,
+      "error": ""
+    },
+    {
+      "input": "F",
+      "value": false,
+      "error": ""
+    },
+    {
+      "input": "FALSE",
+      "value": false,
+      "error": ""
+    },
+    {
+      "input": "false",
+      "value": false,
+      "error": ""
+    },
+    {
+      "input": "False",
+      "value": false,
+      "error": ""
+    },
+    {
+      "input": "",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"\": invalid syntax"
+    },
+    {
+      "input": " true",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \" true\": invalid syntax"
+    },
+    {
+      "input": "true ",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"true \": invalid syntax"
+    },
+    {
+      "input": "tRUE",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"tRUE\": invalid syntax"
+    },
+    {
+      "input": "fALSE",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"fALSE\": invalid syntax"
+    },
+    {
+      "input": "yes",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"yes\": invalid syntax"
+    },
+    {
+      "input": "no",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"no\": invalid syntax"
+    },
+    {
+      "input": "on",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"on\": invalid syntax"
+    },
+    {
+      "input": "off",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"off\": invalid syntax"
+    },
+    {
+      "input": "y",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"y\": invalid syntax"
+    },
+    {
+      "input": "n",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"n\": invalid syntax"
+    },
+    {
+      "input": "2",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"2\": invalid syntax"
+    },
+    {
+      "input": "-1",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"-1\": invalid syntax"
+    },
+    {
+      "input": "01",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"01\": invalid syntax"
+    },
+    {
+      "input": "trUe",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"trUe\": invalid syntax"
+    },
+    {
+      "input": "\ttrue",
+      "value": false,
+      "error": "strconv.ParseBool: parsing \"\\ttrue\": invalid syntax"
+    }
+  ],
+  "parseMode": [
+    {
+      "input": "opt-in",
+      "mode": "opt-in",
+      "error": ""
+    },
+    {
+      "input": "all",
+      "mode": "all",
+      "error": ""
+    },
+    {
+      "input": "",
+      "mode": "",
+      "error": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "input": "ALL",
+      "mode": "",
+      "error": "unknown policy mode \"ALL\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "input": "Opt-In",
+      "mode": "",
+      "error": "unknown policy mode \"Opt-In\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "input": "optin",
+      "mode": "",
+      "error": "unknown policy mode \"optin\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "input": "opt_in",
+      "mode": "",
+      "error": "unknown policy mode \"opt_in\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "input": " all",
+      "mode": "",
+      "error": "unknown policy mode \" all\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "input": "none",
+      "mode": "",
+      "error": "unknown policy mode \"none\": must be \"opt-in\" or \"all\""
+    }
+  ],
+  "parseContainer": [
+    {
+      "labels": {},
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "com.example.other": "x"
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.enable": "true"
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.enable": "false"
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.enable": "1"
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.enable": "yes"
+      },
+      "container": null,
+      "error": "invalid value for label \"swarm-device-access.enable\": \"yes\" is not a boolean",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.enable": ""
+      },
+      "container": null,
+      "error": "invalid value for label \"swarm-device-access.enable\": \"\" is not a boolean",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.enable": " true"
+      },
+      "container": null,
+      "error": "invalid value for label \"swarm-device-access.enable\": \" true\" is not a boolean",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/dri/*"
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/dri/*, /dev/snd/*"
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/snd/*"
+        ],
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": " /dev/a ,,/dev/b, "
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/a",
+          "/dev/b"
+        ],
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": " "
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": " , ,"
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/etc/passwd"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-allow\": glob pattern must start with /dev/: \"/etc/passwd\"",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/../etc"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-allow\": glob pattern is not a clean path: \"/dev/../etc\"",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/dri/"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-allow\": glob pattern is not a clean path: \"/dev/dri/\"",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/[a"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-allow\": invalid glob pattern \"/dev/[a\": syntax error in pattern",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev\\x"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-allow\": glob pattern must start with /dev/: \"/dev\\\\x\"",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-deny": "/dev/sda*"
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sda*"
+        ]
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-deny": "dev/sda"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-deny\": glob pattern must start with /dev/: \"dev/sda\"",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-deny": "/dev//sda"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-deny\": glob pattern is not a clean path: \"/dev//sda\"",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/[a",
+        "swarm-device-access.enable": "maybe"
+      },
+      "container": null,
+      "error": "invalid value for label \"swarm-device-access.enable\": \"maybe\" is not a boolean",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/[a",
+        "swarm-device-access.device-deny": "/etc"
+      },
+      "container": null,
+      "error": "invalid glob in label \"swarm-device-access.device-allow\": invalid glob pattern \"/dev/[a\": syntax error in pattern",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.device-allow": "/dev/dri/*",
+        "swarm-device-access.device-deny": "/dev/dri/card1",
+        "swarm-device-access.enable": "true"
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ]
+      },
+      "error": "",
+      "unknownLabels": null
+    },
+    {
+      "labels": {
+        "swarm-device-access.": "x",
+        "swarm-device-access.device_allow": "/dev/x",
+        "swarm-device-access.enabled": "true"
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": [
+        "swarm-device-access.",
+        "swarm-device-access.device_allow",
+        "swarm-device-access.enabled"
+      ]
+    },
+    {
+      "labels": {
+        "swarm-device-access.alpha": "2",
+        "swarm-device-access.enable": "true",
+        "swarm-device-access.zeta": "1"
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": [
+        "swarm-device-access.alpha",
+        "swarm-device-access.zeta"
+      ]
+    },
+    {
+      "labels": {
+        "SWARM-DEVICE-ACCESS.enable": "true"
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "error": "",
+      "unknownLabels": null
+    }
+  ],
+  "validateGlobs": [
+    {
+      "patterns": null,
+      "error": ""
+    },
+    {
+      "patterns": [],
+      "error": ""
+    },
+    {
+      "patterns": [
+        "/dev/null"
+      ],
+      "error": ""
+    },
+    {
+      "patterns": [
+        "/dev/dri/*",
+        "/dev/snd/*"
+      ],
+      "error": ""
+    },
+    {
+      "patterns": [
+        "/dev/[ab]?",
+        "/dev/[!a]*",
+        "/dev/[^a]*",
+        "/dev/\\*"
+      ],
+      "error": ""
+    },
+    {
+      "patterns": [
+        "/dev/[a-"
+      ],
+      "error": "invalid glob pattern \"/dev/[a-\": syntax error in pattern"
+    },
+    {
+      "patterns": [
+        "/dev/["
+      ],
+      "error": "invalid glob pattern \"/dev/[\": syntax error in pattern"
+    },
+    {
+      "patterns": [
+        "/dev/\\"
+      ],
+      "error": "invalid glob pattern \"/dev/\\\\\": syntax error in pattern"
+    },
+    {
+      "patterns": [
+        "/dev/[]a]"
+      ],
+      "error": "invalid glob pattern \"/dev/[]a]\": syntax error in pattern"
+    },
+    {
+      "patterns": [
+        "/dev/a]"
+      ],
+      "error": ""
+    },
+    {
+      "patterns": [
+        "/dev/"
+      ],
+      "error": "glob pattern is not a clean path: \"/dev/\""
+    },
+    {
+      "patterns": [
+        "/dev"
+      ],
+      "error": "glob pattern must start with /dev/: \"/dev\""
+    },
+    {
+      "patterns": [
+        "/devices/x"
+      ],
+      "error": "glob pattern must start with /dev/: \"/devices/x\""
+    },
+    {
+      "patterns": [
+        "dev/x"
+      ],
+      "error": "glob pattern must start with /dev/: \"dev/x\""
+    },
+    {
+      "patterns": [
+        "/dev/./x"
+      ],
+      "error": "glob pattern is not a clean path: \"/dev/./x\""
+    },
+    {
+      "patterns": [
+        "/dev/x/"
+      ],
+      "error": "glob pattern is not a clean path: \"/dev/x/\""
+    },
+    {
+      "patterns": [
+        "/dev/x/.."
+      ],
+      "error": "glob pattern is not a clean path: \"/dev/x/..\""
+    },
+    {
+      "patterns": [
+        "/dev//x"
+      ],
+      "error": "glob pattern is not a clean path: \"/dev//x\""
+    },
+    {
+      "patterns": [
+        ""
+      ],
+      "error": "glob pattern is not a clean path: \"\""
+    },
+    {
+      "patterns": [
+        "/dev/ok",
+        "/etc/bad",
+        "/dev/[bad"
+      ],
+      "error": "glob pattern must start with /dev/: \"/etc/bad\""
+    },
+    {
+      "patterns": [
+        "/dev/[a-z]*[0-9]"
+      ],
+      "error": ""
+    },
+    {
+      "patterns": [
+        "/dev/[z-a]"
+      ],
+      "error": ""
+    },
+    {
+      "patterns": [
+        "/dev/[\\]]"
+      ],
+      "error": ""
+    }
+  ],
+  "globalValidate": [
+    {
+      "mode": "all",
+      "deviceAllow": null,
+      "deviceDeny": null,
+      "validateError": ""
+    },
+    {
+      "mode": "opt-in",
+      "deviceAllow": [
+        "/dev/dri/*"
+      ],
+      "deviceDeny": null,
+      "validateError": ""
+    },
+    {
+      "mode": "all",
+      "deviceAllow": null,
+      "deviceDeny": [
+        "/dev/sd*"
+      ],
+      "validateError": ""
+    },
+    {
+      "mode": "all",
+      "deviceAllow": [
+        "/dev/dri/*",
+        "/dev/null"
+      ],
+      "deviceDeny": [
+        "/dev/dri/card1"
+      ],
+      "validateError": ""
+    },
+    {
+      "mode": "",
+      "deviceAllow": null,
+      "deviceDeny": null,
+      "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "mode": "bogus",
+      "deviceAllow": null,
+      "deviceDeny": null,
+      "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "mode": "all",
+      "deviceAllow": [
+        "/etc/x"
+      ],
+      "deviceDeny": null,
+      "validateError": "device-allow: glob pattern must start with /dev/: \"/etc/x\""
+    },
+    {
+      "mode": "all",
+      "deviceAllow": null,
+      "deviceDeny": [
+        "/dev/[a"
+      ],
+      "validateError": "device-deny: invalid glob pattern \"/dev/[a\": syntax error in pattern"
+    },
+    {
+      "mode": "all",
+      "deviceAllow": [
+        "/dev/x/"
+      ],
+      "deviceDeny": [
+        "/etc"
+      ],
+      "validateError": "device-allow: glob pattern is not a clean path: \"/dev/x/\""
+    }
+  ],
+  "decisions": [
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": true,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "opt-in",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": true,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/sd*"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": true,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": true,
+      "denied": true,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "all",
+        "deviceAllow": [
+          "/dev/dri/*",
+          "/dev/null"
+        ],
+        "deviceDeny": [
+          "/dev/dri/card1"
+        ],
+        "validateError": ""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": true,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": false,
+        "deviceAllow": null,
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": true,
+        "deviceAllow": [
+          "/dev/dri/card0"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": true,
+      "authorized": true,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/null"
+        ]
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card0",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/card1",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/null",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/sda",
+      "enabled": false,
+      "denied": false,
+      "authorized": true,
+      "deviceAllowed": true,
+      "explicitlyAllowed": true
+    },
+    {
+      "global": {
+        "mode": "bogus",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "validateError": "unknown policy mode \"bogus\": must be \"opt-in\" or \"all\""
+      },
+      "container": {
+        "enable": null,
+        "deviceAllow": [
+          "/dev/sd*"
+        ],
+        "deviceDeny": null
+      },
+      "path": "/dev/dri/by-path/x",
+      "enabled": false,
+      "denied": false,
+      "authorized": false,
+      "deviceAllowed": false,
+      "explicitlyAllowed": false
+    }
+  ],
+  "filepathMatch": [
+    {
+      "pattern": "*",
+      "name": "",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "*",
+      "name": "abc",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "*",
+      "name": "a/b",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/*",
+      "name": "/dev/sda",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/*",
+      "name": "/dev/dri/card0",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/*/*",
+      "name": "/dev/dri/card0",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd?",
+      "name": "/dev/sda",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd?",
+      "name": "/dev/sda1",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd?",
+      "name": "/dev/sd/",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd[a-c]",
+      "name": "/dev/sdb",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd[a-c]",
+      "name": "/dev/sdd",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd[!a-c]",
+      "name": "/dev/sdd",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd[^a-c]",
+      "name": "/dev/sdd",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd[^a-c]",
+      "name": "/dev/sda",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/sd[a-c",
+      "name": "/dev/sda",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "/dev/sd[",
+      "name": "/dev/sda",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "/dev/\\*",
+      "name": "/dev/*",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/\\*",
+      "name": "/dev/a",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/\\",
+      "name": "/dev/",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "a\\",
+      "name": "a",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "[]a]",
+      "name": "]",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "[]a]",
+      "name": "a",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "[-]",
+      "name": "-",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "[x-]",
+      "name": "x",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "[a-]",
+      "name": "b",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "[\\]]",
+      "name": "]",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "[\\-]",
+      "name": "-",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "[z-a]",
+      "name": "m",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "*x",
+      "name": "xxx",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "a*b*c",
+      "name": "abxbc",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "a*b*c",
+      "name": "abxbcx",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "*/b",
+      "name": "a/b",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "a*",
+      "name": "a/b",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "[!]",
+      "name": "a",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "[",
+      "name": "[",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "?",
+      "name": "日",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "[日本]",
+      "name": "本",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "[^日]",
+      "name": "本",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "a?b",
+      "name": "a/b",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "",
+      "name": "",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "",
+      "name": "a",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "*[",
+      "name": "a",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "a[",
+      "name": "a",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "/dev/dri/*",
+      "name": "/dev/dri/",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "/dev/[a",
+      "name": "/dev/b",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "[a-b-c]",
+      "name": "a",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "\\[",
+      "name": "[",
+      "matched": true,
+      "error": ""
+    },
+    {
+      "pattern": "[\\",
+      "name": "a",
+      "matched": false,
+      "error": "syntax error in pattern"
+    },
+    {
+      "pattern": "*?",
+      "name": "",
+      "matched": false,
+      "error": ""
+    },
+    {
+      "pattern": "**",
+      "name": "ab",
+      "matched": true,
+      "error": ""
+    }
+  ],
+  "filepathClean": [
+    {
+      "input": "",
+      "output": "."
+    },
+    {
+      "input": ".",
+      "output": "."
+    },
+    {
+      "input": "..",
+      "output": ".."
+    },
+    {
+      "input": "/",
+      "output": "/"
+    },
+    {
+      "input": "//",
+      "output": "/"
+    },
+    {
+      "input": "///a",
+      "output": "/a"
+    },
+    {
+      "input": "/dev/",
+      "output": "/dev"
+    },
+    {
+      "input": "/dev//sda",
+      "output": "/dev/sda"
+    },
+    {
+      "input": "/dev/./sda",
+      "output": "/dev/sda"
+    },
+    {
+      "input": "/dev/../etc",
+      "output": "/etc"
+    },
+    {
+      "input": "/../dev",
+      "output": "/dev"
+    },
+    {
+      "input": "a/b/../..",
+      "output": "."
+    },
+    {
+      "input": "a/../../b",
+      "output": "../b"
+    },
+    {
+      "input": "../../a",
+      "output": "../../a"
+    },
+    {
+      "input": "/dev/sda/",
+      "output": "/dev/sda"
+    },
+    {
+      "input": "dev",
+      "output": "dev"
+    },
+    {
+      "input": "./dev",
+      "output": "dev"
+    },
+    {
+      "input": "/dev/*/",
+      "output": "/dev/*"
+    },
+    {
+      "input": "/a/b/c/../../d",
+      "output": "/a/d"
+    },
+    {
+      "input": "a//b/./c/..",
+      "output": "a/b"
+    },
+    {
+      "input": "/.",
+      "output": "/"
+    },
+    {
+      "input": "/..",
+      "output": "/"
+    },
+    {
+      "input": "a/.",
+      "output": "a"
+    },
+    {
+      "input": "/dev/dri/by-path/../card0",
+      "output": "/dev/dri/card0"
+    },
+    {
+      "input": "/dev/\\x/..",
+      "output": "/dev"
+    },
+    {
+      "input": "日本/../語",
+      "output": "語"
+    }
+  ]
+}

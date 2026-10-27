@@ -1,0 +1,49 @@
+# HELP sda_apply_duration_seconds Time spent applying device rules per container.
+# TYPE sda_apply_duration_seconds histogram
+sda_apply_duration_seconds_bucket{le="0.005"} 3
+sda_apply_duration_seconds_bucket{le="0.01"} 3
+sda_apply_duration_seconds_bucket{le="0.025"} 3
+sda_apply_duration_seconds_bucket{le="0.05"} 3
+sda_apply_duration_seconds_bucket{le="0.1"} 3
+sda_apply_duration_seconds_bucket{le="0.25"} 3
+sda_apply_duration_seconds_bucket{le="0.5"} 3
+sda_apply_duration_seconds_bucket{le="1"} 3
+sda_apply_duration_seconds_bucket{le="2.5"} 3
+sda_apply_duration_seconds_bucket{le="5"} 3
+sda_apply_duration_seconds_bucket{le="10"} 3
+sda_apply_duration_seconds_bucket{le="+Inf"} 3
+sda_apply_duration_seconds_sum <time>
+sda_apply_duration_seconds_count 3
+# HELP sda_containers_scanned_total Containers that passed policy and entered the device-rule pipeline.
+# TYPE sda_containers_scanned_total counter
+sda_containers_scanned_total 3
+# HELP sda_device_files_discovered_total Device files for which rules were collected.
+# TYPE sda_device_files_discovered_total counter
+sda_device_files_discovered_total 0
+# HELP sda_docker_reconnects_total Times the Docker event stream reconnected after an error.
+# TYPE sda_docker_reconnects_total counter
+sda_docker_reconnects_total 0
+# HELP sda_dry_run_skips_total Rules logged but not written due to dry-run mode.
+# TYPE sda_dry_run_skips_total counter
+sda_dry_run_skips_total 0
+# HELP sda_events_total Total Docker container events received.
+# TYPE sda_events_total counter
+sda_events_total{event="start"} 1
+# HELP sda_last_event_timestamp_seconds Unix timestamp of the last container processed successfully (event, startup or reload).
+# TYPE sda_last_event_timestamp_seconds gauge
+sda_last_event_timestamp_seconds <time>
+# HELP sda_reconcile_pending_containers Containers whose last reconciliation failed and that are being retried with backoff.
+# TYPE sda_reconcile_pending_containers gauge
+sda_reconcile_pending_containers 0
+# HELP sda_reload_incomplete 1 until a reconciliation pass for the latest config and trigger has visited every running container, else 0.
+# TYPE sda_reload_incomplete gauge
+sda_reload_incomplete 0
+# HELP sda_reload_reapplies_total Times device rules were re-applied after a systemd daemon-reload.
+# TYPE sda_reload_reapplies_total counter
+sda_reload_reapplies_total 0
+# HELP sda_rule_failures_total Per-device rule failures (entries that passed policy but could not be turned into a rule, and walk errors).
+# TYPE sda_rule_failures_total counter
+sda_rule_failures_total 0
+# HELP sda_rules_applied_total Containers handled, by result: ok = no container-level failure (includes policy, label and no-pid skips and partial per-device failures), error = container-level failure.
+# TYPE sda_rules_applied_total counter
+sda_rules_applied_total{result="ok"} 3

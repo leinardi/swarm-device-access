@@ -39,7 +39,7 @@ succeeds. Deny globs also apply to aliases, but only as a best-effort veto at
 evaluation time; the boundary to rely on is a glob on the kernel name (see the
 README's Security section).
 
-**Opt-in default.** The daemon defaults to `-policy-mode=opt-in`, processing only
+**Opt-in default.** The daemon defaults to `--policy-mode=opt-in`, processing only
 containers that carry `swarm-device-access.enable: "true"`. This minimises blast
 radius — containers that happen to bind-mount `/dev/...` paths are not silently
 granted extra device access unless an operator explicitly opts them in.
@@ -73,7 +73,7 @@ confirmed issues.
   launcher's own image. Swarm services do support `cap_add` (Docker Engine 20.10 and newer), but not
   the host cgroup, PID and user namespaces the daemon also needs, which is why the launcher exists.
   The launcher itself holds the Docker socket, so it is host-root equivalent too. The privileged set
-  the daemon gets is fixed in `daemonSpec` (`internal/launcher/spec.go`). Outside Swarm, explicit
+  the daemon gets is fixed in `daemon_spec` (`src/launcher/spec.rs`). Outside Swarm, explicit
   capabilities could be used instead of `privileged`; that is not tested or supported (see above).
 - **cgroup v1: grants made by a previous daemon instance are not revoked.** On cgroup v1 the daemon
   can only tell its own `devices.allow` exceptions from the runtime's through an in-memory ledger. A
@@ -86,6 +86,6 @@ confirmed issues.
   (it runs unprivileged in tests), so grants left by a previous live run stay until a live start
   or a container restart; the daemon warns about this at every dry-run start. Restart live with a
   narrower policy, or restart the affected containers, to take grants back.
-- The cgroup BPF code in `internal/cgroup/` is derived from [NVIDIA's container
+- The cgroup BPF code in `src/cgroup/` is derived from [NVIDIA's container
   toolkit](https://github.com/NVIDIA/libnvidia-container) (Apache 2.0). Security issues in that code
   should also be reported to NVIDIA.

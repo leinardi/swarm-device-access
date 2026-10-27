@@ -1,0 +1,1848 @@
+{
+  "load": [
+    {
+      "name": "valid file",
+      "input": "\nlog-format: json\nlog-level: debug\nlog-time: true\ndocker-socket: /run/docker.sock\ndry-run: false\npolicy-mode: all\ndevice-allow:\n  - /dev/nvidia*\n  - /dev/dri/*\ndevice-deny: []\nmetrics-addr: \"\"\ndebug-addr: \"127.0.0.1:6060\"\n",
+      "schema": {
+        "logFormat": "json",
+        "logLevel": "debug",
+        "logTime": true,
+        "dockerSocket": "/run/docker.sock",
+        "dryRun": false,
+        "policyMode": "all",
+        "deviceAllow": [
+          "/dev/nvidia*",
+          "/dev/dri/*"
+        ],
+        "deviceDeny": [],
+        "metricsAddr": "",
+        "debugAddr": "127.0.0.1:6060"
+      },
+      "error": ""
+    },
+    {
+      "name": "empty file",
+      "input": "",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "only comments",
+      "input": "# nothing set\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "bare doc marker",
+      "input": "---\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "shipped template",
+      "input": "# log-level: info\n# device-deny: []\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "log-time absent",
+      "input": "log-level: info\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "info",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "unknown key",
+      "input": "device_deny:\n  - /dev/sda\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field device_deny not found in type config.FileSchema"
+    },
+    {
+      "name": "second document",
+      "input": "dry-run: true\n---\npolicy-mode: all\n",
+      "schema": null,
+      "error": "config file \"{path}\": multiple YAML documents"
+    },
+    {
+      "name": "empty second document",
+      "input": "dry-run: true\n---\n",
+      "schema": null,
+      "error": "config file \"{path}\": multiple YAML documents"
+    },
+    {
+      "name": "document after an empty one",
+      "input": "---\n---\ndry-run: true\n",
+      "schema": null,
+      "error": "config file \"{path}\": multiple YAML documents"
+    },
+    {
+      "name": "malformed trailing content",
+      "input": "dry-run: true\n---\n: : [\n",
+      "schema": null,
+      "error": "config file \"{path}\": parse trailing content: yaml: line 2: did not find expected key"
+    },
+    {
+      "name": "duplicate key",
+      "input": "policy-mode: all\npolicy-mode: opt-in\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 2: mapping key \"policy-mode\" already defined at line 1"
+    },
+    {
+      "name": "root not a mapping",
+      "input": "- dry-run\n",
+      "schema": null,
+      "error": "config file \"{path}\": the document must be a mapping"
+    },
+    {
+      "name": "explicit null document",
+      "input": "~\n",
+      "schema": null,
+      "error": "config file \"{path}\": the document must be a mapping"
+    },
+    {
+      "name": "dry-run as a string",
+      "input": "dry-run: \"yes\"\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "dry-run null",
+      "input": "dry-run: null\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "policy-mode null",
+      "input": "policy-mode: ~\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"policy-mode\" must be a non-empty string: wrong shape"
+    },
+    {
+      "name": "policy-mode empty",
+      "input": "policy-mode: \"\"\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"policy-mode\" must be a non-empty string: wrong shape"
+    },
+    {
+      "name": "device-allow null",
+      "input": "device-allow:\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "device-deny null",
+      "input": "device-deny: null\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-deny\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "device-allow null element",
+      "input": "device-allow: [null]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "device-deny empty element",
+      "input": "device-deny: [\"\"]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-deny\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "device-deny scalar",
+      "input": "device-deny: /dev/sda\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-deny\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "log-time null",
+      "input": "log-time: null\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-time\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "metrics-addr number",
+      "input": "metrics-addr: 9090\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "null behind an alias",
+      "input": "x: &n null\ndevice-deny: *n\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-deny\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "null element behind an alias",
+      "input": "x: &n null\ndevice-allow: [*n]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "inline merge",
+      "input": "<<: {device-deny: null}\n",
+      "schema": null,
+      "error": "config file \"{path}\": YAML merge keys are not supported"
+    },
+    {
+      "name": "aliased merge",
+      "input": "base: &b {dry-run: false}\n<<: *b\n",
+      "schema": null,
+      "error": "config file \"{path}\": YAML merge keys are not supported"
+    },
+    {
+      "name": "unknown log-format",
+      "input": "log-format: xml\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-format\": unknown value \"xml\", must be one of [text json plain]"
+    },
+    {
+      "name": "retired log-level alias",
+      "input": "log-level: warning\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-level\": unknown value \"warning\", must be one of [debug info warn error]"
+    },
+    {
+      "name": "unknown policy-mode",
+      "input": "policy-mode: everything\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"policy-mode\": unknown policy mode \"everything\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "name": "bool yes",
+      "input": "dry-run: yes\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool no",
+      "input": "dry-run: no\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool on",
+      "input": "dry-run: on\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool off",
+      "input": "dry-run: off\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool y",
+      "input": "dry-run: y\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool True",
+      "input": "dry-run: True\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "bool TRUE",
+      "input": "log-time: TRUE\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": true,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "bool tRUE",
+      "input": "log-time: tRUE\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-time\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool one",
+      "input": "log-time: 1\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-time\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool zero",
+      "input": "dry-run: 0\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool quoted true",
+      "input": "dry-run: \"true\"\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "bool single quoted",
+      "input": "dry-run: 'false'\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "null word",
+      "input": "null\n",
+      "schema": null,
+      "error": "config file \"{path}\": the document must be a mapping"
+    },
+    {
+      "name": "tilde value",
+      "input": "metrics-addr: ~\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "Null value",
+      "input": "metrics-addr: Null\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "NULL value",
+      "input": "debug-addr: NULL\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"debug-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "empty value",
+      "input": "metrics-addr:\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "empty string addr",
+      "input": "metrics-addr: ''\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "empty list",
+      "input": "device-allow: []\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": [],
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "empty block list",
+      "input": "device-deny:\n  []\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": [],
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "empty document end",
+      "input": "...\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: did not find expected node content"
+    },
+    {
+      "name": "start and end markers",
+      "input": "---\n...\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "comments around marker",
+      "input": "# c\n---\n# c\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "document end after content",
+      "input": "dry-run: true\n...\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "document end then content",
+      "input": "dry-run: true\n...\n---\npolicy-mode: all\n",
+      "schema": null,
+      "error": "config file \"{path}\": multiple YAML documents"
+    },
+    {
+      "name": "explicit start",
+      "input": "--- \ndry-run: true\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "anchor unused",
+      "input": "policy-mode: &m all\nlog-level: info\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "info",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "list alias",
+      "input": "device-allow: &l [/dev/a]\ndevice-deny: *l\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": [
+          "/dev/a"
+        ],
+        "deviceDeny": [
+          "/dev/a"
+        ],
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "scalar alias",
+      "input": "log-level: &v debug\nlog-format: *v\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-format\": unknown value \"debug\", must be one of [text json plain]"
+    },
+    {
+      "name": "element alias",
+      "input": "device-allow: [&e /dev/a, *e]\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": [
+          "/dev/a",
+          "/dev/a"
+        ],
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "alias to mapping",
+      "input": "x: &m {a: 1}\ndevice-deny: *m\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-deny\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "alias undefined",
+      "input": "device-deny: *missing\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: unknown anchor 'missing' referenced"
+    },
+    {
+      "name": "self alias",
+      "input": "device-allow: &a [*a]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "merge in a list",
+      "input": "device-allow: [{<<: {a: b}}]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "quoted merge key",
+      "input": "\"<<\": x\n",
+      "schema": null,
+      "error": "config file \"{path}\": YAML merge keys are not supported"
+    },
+    {
+      "name": "duplicate list key",
+      "input": "device-allow: [/dev/a]\ndevice-allow: [/dev/b]\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 2: mapping key \"device-allow\" already defined at line 1"
+    },
+    {
+      "name": "duplicate through alias",
+      "input": "a: &k dry-run\n*k : true\ndry-run: false\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema\n  line 3: field dry-run already set in type config.FileSchema"
+    },
+    {
+      "name": "case-different key",
+      "input": "Dry-Run: true\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field Dry-Run not found in type config.FileSchema"
+    },
+    {
+      "name": "underscore key",
+      "input": "dry_run: true\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field dry_run not found in type config.FileSchema"
+    },
+    {
+      "name": "numeric key",
+      "input": "1: x\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field 1 not found in type config.FileSchema"
+    },
+    {
+      "name": "null key",
+      "input": "~: x\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "complex key",
+      "input": "? [a]\n: x\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string"
+    },
+    {
+      "name": "tag bool",
+      "input": "dry-run: !!bool true\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "tag bool on string",
+      "input": "dry-run: !!bool \"true\"\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "tag str on bool",
+      "input": "dry-run: !!str true\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "tag str",
+      "input": "policy-mode: !!str all\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "tag int addr",
+      "input": "metrics-addr: !!int 9090\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "tag str number",
+      "input": "metrics-addr: !!str 9090\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "9090",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "tag custom",
+      "input": "policy-mode: !custom all\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"policy-mode\" must be a non-empty string: wrong shape"
+    },
+    {
+      "name": "tag seq",
+      "input": "device-allow: !!seq [/dev/a]\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": [
+          "/dev/a"
+        ],
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "tag map on root",
+      "input": "!!map {dry-run: true}\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "tag null",
+      "input": "metrics-addr: !!null ''\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "tag str null",
+      "input": "metrics-addr: !!str null\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "null",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "tag binary",
+      "input": "metrics-addr: !!binary aGk=\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "tag float",
+      "input": "metrics-addr: !!float 1\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "tag timestamp",
+      "input": "metrics-addr: 2026-01-02\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "flow mapping root",
+      "input": "{dry-run: true, policy-mode: all}\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "hex number addr",
+      "input": "metrics-addr: 0x10\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "octal number addr",
+      "input": "metrics-addr: 0o17\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "float addr",
+      "input": "debug-addr: 1.5\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"debug-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "colon addr",
+      "input": "metrics-addr: :9090\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": ":9090",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "ip addr",
+      "input": "debug-addr: 127.0.0.1:6060\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": "127.0.0.1:6060"
+      },
+      "error": ""
+    },
+    {
+      "name": "ipv6 addr",
+      "input": "metrics-addr: \"[::]:9090\"\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "[::]:9090",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "spaced flow list",
+      "input": "device-allow: [ /dev/a , /dev/b ]\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": [
+          "/dev/a",
+          "/dev/b"
+        ],
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "block list with comment",
+      "input": "device-allow:\n  # GPUs\n  - /dev/dri/*\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": [
+          "/dev/dri/*"
+        ],
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "nested list",
+      "input": "device-allow: [[/dev/a]]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "mapping element",
+      "input": "device-allow: [{a: b}]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "number element",
+      "input": "device-deny: [1]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-deny\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "bool element",
+      "input": "device-deny: [true]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-deny\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "literal block",
+      "input": "docker-socket: |\n  /run/docker.sock\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "/run/docker.sock\n",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "folded block",
+      "input": "docker-socket: >-\n  /run/docker.sock\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "/run/docker.sock",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "glob outside dev",
+      "input": "device-allow: [/etc/*]\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": [
+          "/etc/*"
+        ],
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "glob not clean",
+      "input": "device-deny: [/dev//sda]\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev//sda"
+        ],
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "glob bad syntax",
+      "input": "device-deny: [\"/dev/[a\"]\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": [
+          "/dev/[a"
+        ],
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "debug-addr set",
+      "input": "debug-addr: localhost:6060\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": "localhost:6060"
+      },
+      "error": ""
+    },
+    {
+      "name": "policy-mode opt-in",
+      "input": "policy-mode: opt-in\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "opt-in",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "log-format plain",
+      "input": "log-format: plain\n",
+      "schema": {
+        "logFormat": "plain",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "log-format upper",
+      "input": "log-format: JSON\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-format\": unknown value \"JSON\", must be one of [text json plain]"
+    },
+    {
+      "name": "log-level fatal",
+      "input": "log-level: fatal\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"log-level\": unknown value \"fatal\", must be one of [debug info warn error]"
+    },
+    {
+      "name": "unclosed flow",
+      "input": "dry-run: [\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: line 1: did not find expected node content"
+    },
+    {
+      "name": "tab indent",
+      "input": "device-allow:\n\t- /dev/a\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: line 2: found character that cannot start any token"
+    },
+    {
+      "name": "unterminated quote",
+      "input": "policy-mode: 'all\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: line 2: found unexpected end of stream"
+    },
+    {
+      "name": "bad indentation",
+      "input": "dry-run: true\n  policy-mode: all\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: line 2: mapping values are not allowed in this context"
+    },
+    {
+      "name": "crlf line ends",
+      "input": "dry-run: true\r\npolicy-mode: all\r\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "all",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "byte order mark",
+      "input": "﻿dry-run: true\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "no final newline",
+      "input": "dry-run: true",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "trailing spaces",
+      "input": "dry-run: true   \n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "directive",
+      "input": "%YAML 1.2\n---\ndry-run: true\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: found incompatible YAML document"
+    },
+    {
+      "name": "bad directive",
+      "input": "%YAML 2.0\n---\ndry-run: true\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: found incompatible YAML document"
+    },
+    {
+      "name": "scalar root",
+      "input": "hello\n",
+      "schema": null,
+      "error": "config file \"{path}\": the document must be a mapping"
+    },
+    {
+      "name": "integer root",
+      "input": "42\n",
+      "schema": null,
+      "error": "config file \"{path}\": the document must be a mapping"
+    },
+    {
+      "name": "empty flow mapping root",
+      "input": "{}\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "alias key named as a key",
+      "input": "a: &dry-run x\n*dry-run : \"yes\"\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"dry-run\" must be a boolean (true or false): wrong shape"
+    },
+    {
+      "name": "alias key quoted bool",
+      "input": "a: &k dry-run\n*k : \"yes\"\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema"
+    },
+    {
+      "name": "alias key null",
+      "input": "a: &k dry-run\n*k : null\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema"
+    },
+    {
+      "name": "alias key int",
+      "input": "a: &k dry-run\n*k : 2\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema\n  line 2: cannot unmarshal !!int `2` into bool"
+    },
+    {
+      "name": "alias key list",
+      "input": "a: &k dry-run\n*k : [x]\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema\n  line 2: cannot unmarshal !!seq into bool"
+    },
+    {
+      "name": "alias key scalar list",
+      "input": "a: &k device-allow\n*k : x\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema\n  line 2: cannot unmarshal !!str `x` into []string"
+    },
+    {
+      "name": "alias key null element",
+      "input": "a: &k device-allow\n*k : [~, x]\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema"
+    },
+    {
+      "name": "alias key null list",
+      "input": "a: &k device-allow\n*k : ~\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema"
+    },
+    {
+      "name": "alias key bad int tag",
+      "input": "a: &k log-level\n*k : !!int abc\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: cannot decode !!str `abc` as a !!int"
+    },
+    {
+      "name": "alias key mapping",
+      "input": "a: &k log-level\n*k : {b: c}\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema\n  line 2: cannot unmarshal !!map into string"
+    },
+    {
+      "name": "alias key bool tag on yes",
+      "input": "a: &k dry-run\n*k : !!bool yes\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: cannot decode !!str `yes` as a !!bool"
+    },
+    {
+      "name": "alias key float tag",
+      "input": "a: &k dry-run\n*k : !!float 1\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema\n  line 2: cannot unmarshal !!float `1` into bool"
+    },
+    {
+      "name": "alias key null tag",
+      "input": "a: &k dry-run\n*k : !!null ''\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema"
+    },
+    {
+      "name": "alias key long string",
+      "input": "a: &k dry-run\n*k : !!str abcdefghijkl\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema\n  line 2: cannot unmarshal !!str `abcdefg...` into bool"
+    },
+    {
+      "name": "binary key",
+      "input": "!!binary aGk=: x\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field hi not found in type config.FileSchema"
+    },
+    {
+      "name": "bad binary key",
+      "input": "!!binary aGk: x\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: !!binary value contains invalid base64 data"
+    },
+    {
+      "name": "two sequence keys",
+      "input": "[a]: x\n[b]: y\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 2: mapping key \"\" already defined at line 1"
+    },
+    {
+      "name": "quoted duplicate key",
+      "input": "x: 1\n\"x\": 2\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 2: mapping key \"x\" already defined at line 1"
+    },
+    {
+      "name": "block scalar key",
+      "input": "? |\n  log-level\n: debug\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field log-level\n not found in type config.FileSchema"
+    },
+    {
+      "name": "unknown anchor after the document",
+      "input": "dry-run: true\n---\nb: *nope\n",
+      "schema": null,
+      "error": "config file \"{path}\": parse trailing content: yaml: unknown anchor 'nope' referenced"
+    },
+    {
+      "name": "directive 1.1",
+      "input": "%YAML 1.1\n---\ndry-run: true\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "comment then document end",
+      "input": "# c\n...\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: line 1: did not find expected node content"
+    },
+    {
+      "name": "repeated document end",
+      "input": "dry-run: true # c\n...\n...\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": true,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "excessive aliasing",
+      "input": "b: &b [/dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x, /dev/x]\ndevice-allow: *b\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: document contains excessive aliasing"
+    },
+    {
+      "name": "aliases within the limit",
+      "input": "a: &x /dev/a\ndevice-allow: [*x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x]\n",
+      "schema": null,
+      "error": "config file \"{path}\": decode: yaml: unmarshal errors:\n  line 1: field a not found in type config.FileSchema"
+    },
+    {
+      "name": "float out of range",
+      "input": "metrics-addr: 1e999\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "1e999",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "no such day",
+      "input": "metrics-addr: 2026-02-29\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "2026-02-29",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "leap day",
+      "input": "metrics-addr: 2024-02-29\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"metrics-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "hex float",
+      "input": "metrics-addr: 0x1p-2\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "0x1p-2",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "dot float with underscore",
+      "input": "debug-addr: .5_5\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"debug-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "uint64 max",
+      "input": "debug-addr: 18446744073709551615\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"debug-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "leading zero not octal",
+      "input": "debug-addr: 09\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"debug-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "timestamp without zone",
+      "input": "debug-addr: 2026-01-02T03:04:05\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": "2026-01-02T03:04:05"
+      },
+      "error": ""
+    },
+    {
+      "name": "timestamp with space",
+      "input": "debug-addr: 2026-01-02 3:4:5.5\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"debug-addr\" must be a string (empty disables it): wrong shape"
+    },
+    {
+      "name": "deep block nesting",
+      "input": "device-allow:\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - x\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: line 2: exceeded max depth of 10000"
+    },
+    {
+      "name": "block nesting within the limit",
+      "input": "device-allow:\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - x\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "deep flow nesting",
+      "input": "device-allow: [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: exceeded max depth of 10000"
+    },
+    {
+      "name": "flow nesting within the limit",
+      "input": "device-allow: [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]\n",
+      "schema": null,
+      "error": "config file \"{path}\": key \"device-allow\" must be a list of non-empty strings: wrong shape"
+    },
+    {
+      "name": "directive text in a quoted value",
+      "input": "debug-addr: \"a\n%YAML 1.2 b\"\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": "a %YAML 1.2 b"
+      },
+      "error": ""
+    },
+    {
+      "name": "directive text in a root scalar",
+      "input": "\"a\n%YAML 1.2 b\"\n",
+      "schema": null,
+      "error": "config file \"{path}\": the document must be a mapping"
+    },
+    {
+      "name": "unindented quoted continuation",
+      "input": "debug-addr: \"a\nb\"\n",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": "a b"
+      },
+      "error": ""
+    },
+    {
+      "name": "directive after a document end",
+      "input": "dry-run: true\n...\n%YAML 1.2\n---\nb: 1\n",
+      "schema": null,
+      "error": "config file \"{path}\": parse trailing content: yaml: line 2: found incompatible YAML document"
+    },
+    {
+      "name": "directive after an implicit end",
+      "input": "dry-run: true\n%YAML 1.2\n---\nb: 1\n",
+      "schema": null,
+      "error": "config file \"{path}\": parse trailing content: yaml: line 1: found incompatible YAML document"
+    },
+    {
+      "name": "directive after a comment",
+      "input": "# c\n%YAML 1.2\n---\ndry-run: true\n",
+      "schema": null,
+      "error": "parse config file \"{path}\": yaml: line 1: found incompatible YAML document"
+    },
+    {
+      "name": "alias to an earlier document",
+      "input": "docker-socket: &a /x\n---\nb: *a\n",
+      "schema": null,
+      "error": "config file \"{path}\": multiple YAML documents"
+    },
+    {
+      "name": "empty path",
+      "input": "",
+      "schema": {
+        "logFormat": "",
+        "logLevel": "",
+        "logTime": null,
+        "dockerSocket": "",
+        "dryRun": null,
+        "policyMode": "",
+        "deviceAllow": null,
+        "deviceDeny": null,
+        "metricsAddr": "",
+        "debugAddr": ""
+      },
+      "error": ""
+    },
+    {
+      "name": "missing file",
+      "input": "",
+      "schema": null,
+      "error": "read config file \"{path}\": open {path}: no such file or directory"
+    }
+  ],
+  "shippedExample": {
+    "name": "deployments/docker/config.yaml",
+    "input": "# swarm-device-access config file\n# All settings are optional. CLI flags override file values.\n# Send SIGHUP to reload this file without restarting the daemon.\n# Settings marked [restart required] take effect only at startup.\n\n# log-level: info        # debug | info | warn | error\n# log-format: text       # text | json | plain\n# log-time: false        # include timestamps in log lines\n\n# docker-socket: /var/run/docker.sock   # [restart required]\n# metrics-addr: \":9090\"                 # Prometheus /metrics + /healthz + /readyz [restart required]\n# debug-addr: \"\"                        # pprof endpoints [restart required]\n\n# dry-run: false         # log rules without writing to cgroup\n\n# Policy mode: opt-in (default) or all.\n# opt-in: process only containers with label swarm-device-access.enable=true\n# all:    process all containers unless swarm-device-access.enable=false\n# policy-mode: opt-in\n\n# Glob patterns for /dev/... paths to allow (empty = allow all).\n# Per-container labels (swarm-device-access.device-allow) can narrow this further.\n# device-allow:\n#   - /dev/nvidia*\n#   - /dev/dri/*\n\n# Glob patterns for /dev/... paths to deny (deny takes priority over allow).\n# Per-container labels (swarm-device-access.device-deny) add to this list.\n# device-deny: []\n",
+    "schema": {
+      "logFormat": "",
+      "logLevel": "",
+      "logTime": null,
+      "dockerSocket": "",
+      "dryRun": null,
+      "policyMode": "",
+      "deviceAllow": null,
+      "deviceDeny": null,
+      "metricsAddr": "",
+      "debugAddr": ""
+    },
+    "error": ""
+  },
+  "validateEnums": [
+    {
+      "logFormat": "",
+      "logLevel": "",
+      "policyMode": "",
+      "source": "flag",
+      "error": ""
+    },
+    {
+      "logFormat": "",
+      "logLevel": "",
+      "policyMode": "",
+      "source": "config file",
+      "error": ""
+    },
+    {
+      "logFormat": "text",
+      "logLevel": "info",
+      "policyMode": "all",
+      "source": "flag",
+      "error": ""
+    },
+    {
+      "logFormat": "text",
+      "logLevel": "info",
+      "policyMode": "all",
+      "source": "config file",
+      "error": ""
+    },
+    {
+      "logFormat": "plain",
+      "logLevel": "warn",
+      "policyMode": "opt-in",
+      "source": "flag",
+      "error": ""
+    },
+    {
+      "logFormat": "plain",
+      "logLevel": "warn",
+      "policyMode": "opt-in",
+      "source": "config file",
+      "error": ""
+    },
+    {
+      "logFormat": "json",
+      "logLevel": "debug",
+      "policyMode": "",
+      "source": "flag",
+      "error": ""
+    },
+    {
+      "logFormat": "json",
+      "logLevel": "debug",
+      "policyMode": "",
+      "source": "config file",
+      "error": ""
+    },
+    {
+      "logFormat": "xml",
+      "logLevel": "",
+      "policyMode": "",
+      "source": "flag",
+      "error": "flag \"log-format\": unknown value \"xml\", must be one of [text json plain]"
+    },
+    {
+      "logFormat": "xml",
+      "logLevel": "",
+      "policyMode": "",
+      "source": "config file",
+      "error": "config file \"log-format\": unknown value \"xml\", must be one of [text json plain]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "warning",
+      "policyMode": "",
+      "source": "flag",
+      "error": "flag \"log-level\": unknown value \"warning\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "warning",
+      "policyMode": "",
+      "source": "config file",
+      "error": "config file \"log-level\": unknown value \"warning\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "fatal",
+      "policyMode": "",
+      "source": "flag",
+      "error": "flag \"log-level\": unknown value \"fatal\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "fatal",
+      "policyMode": "",
+      "source": "config file",
+      "error": "config file \"log-level\": unknown value \"fatal\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "panic",
+      "policyMode": "",
+      "source": "flag",
+      "error": "flag \"log-level\": unknown value \"panic\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "panic",
+      "policyMode": "",
+      "source": "config file",
+      "error": "config file \"log-level\": unknown value \"panic\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "",
+      "policyMode": "everything",
+      "source": "flag",
+      "error": "flag \"policy-mode\": unknown policy mode \"everything\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "logFormat": "",
+      "logLevel": "",
+      "policyMode": "everything",
+      "source": "config file",
+      "error": "config file \"policy-mode\": unknown policy mode \"everything\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "logFormat": "TEXT",
+      "logLevel": "",
+      "policyMode": "",
+      "source": "flag",
+      "error": "flag \"log-format\": unknown value \"TEXT\", must be one of [text json plain]"
+    },
+    {
+      "logFormat": "TEXT",
+      "logLevel": "",
+      "policyMode": "",
+      "source": "config file",
+      "error": "config file \"log-format\": unknown value \"TEXT\", must be one of [text json plain]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "INFO",
+      "policyMode": "",
+      "source": "flag",
+      "error": "flag \"log-level\": unknown value \"INFO\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "INFO",
+      "policyMode": "",
+      "source": "config file",
+      "error": "config file \"log-level\": unknown value \"INFO\", must be one of [debug info warn error]"
+    },
+    {
+      "logFormat": "",
+      "logLevel": "",
+      "policyMode": "ALL",
+      "source": "flag",
+      "error": "flag \"policy-mode\": unknown policy mode \"ALL\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "logFormat": "",
+      "logLevel": "",
+      "policyMode": "ALL",
+      "source": "config file",
+      "error": "config file \"policy-mode\": unknown policy mode \"ALL\": must be \"opt-in\" or \"all\""
+    },
+    {
+      "logFormat": "xml",
+      "logLevel": "bogus",
+      "policyMode": "none",
+      "source": "flag",
+      "error": "flag \"log-format\": unknown value \"xml\", must be one of [text json plain]"
+    },
+    {
+      "logFormat": "xml",
+      "logLevel": "bogus",
+      "policyMode": "none",
+      "source": "config file",
+      "error": "config file \"log-format\": unknown value \"xml\", must be one of [text json plain]"
+    }
+  ]
+}

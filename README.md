@@ -18,9 +18,14 @@ for that device's major/minor pair. On cgroup v2 hosts that means attaching a
 
 This project is a fork of
 [`allfro/device-mapping-manager`](https://github.com/allfro/device-mapping-manager).
-The cgroup/BPF implementation in `internal/cgroup/` comes from
+The cgroup/BPF implementation in `src/cgroup/` is ported from
 [NVIDIA's container toolkit](https://github.com/NVIDIA/k8s-device-plugin)
 and remains Apache 2.0 licensed.
+
+Version 2.0 is a Rust rewrite of the 1.x Go daemon, with the same behaviour
+except for the differences listed in
+[Migrating from 1.x](#-migrating-from-1x), the first of them that every flag
+is spelled with two dashes.
 
 ## 💡 What It Does
 
@@ -185,23 +190,23 @@ is dropped only once its cgroup is verified gone; a periodic sweep checks.
 ```yaml
 services:
   swarm-device-access:
-    image: ghcr.io/leinardi/swarm-device-access:1
+    image: ghcr.io/leinardi/swarm-device-access:2
     # Swarm rejects privileged/cgroup/pid/userns on services. The launcher runs
     # unprivileged and creates the daemon container from this same image.
     command:
       - launch
       # Launcher flags. Reapply device rules after systemctl daemon-reload:
-      # - -dbus
+      # - --dbus
       # Bind a host directory read-only at /etc/swarm-device-access. Mount the
       # directory, not the file: an editor that replaces the file would leave a
       # file mount on the old content, and a reload would silently apply it.
-      # - -config-dir=/etc/swarm-device-access
+      # - --config-dir=/etc/swarm-device-access
       - --
       # Daemon flags, passed to the daemon verbatim.
       # Reload the config file with: docker kill -s HUP swarm-device-access
-      # - -config=/etc/swarm-device-access/config.yaml
-      - -log-level=info
-      - -log-format=text
+      # - --config=/etc/swarm-device-access/config.yaml
+      - --log-level=info
+      - --log-format=text
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
@@ -246,13 +251,13 @@ daemon, and exits with the daemon's status.
 
 | Launch flag | Default | Description |
 | --- | --- | --- |
-| `-dbus` | `false` | Bind the host's `/run/dbus/system_bus_socket` at `/var/run/dbus/system_bus_socket` in the daemon, so it reapplies rules after `systemctl daemon-reload`. |
-| `-config-dir` | `""` | Host directory bound read-only at `/etc/swarm-device-access`, for the daemon's `-config`. Must be an absolute, clean path. |
-| `-host-network` | `false` | Run the daemon in the host network instead of none; only `-metrics-addr` and `-debug-addr` need it. |
-| `-host-docker-socket` | `/var/run/docker.sock` | Host path of the Docker socket bound into the daemon. Must be an absolute, clean path. The launcher itself always uses its own `/var/run/docker.sock` mount. |
-| `-log-level` | `info` | The launcher's own log level: `debug`, `info`, `warn`, `error`. |
-| `-log-format` | `text` | The launcher's own log format: `text`, `json`, `plain`. |
-| `-help` |  | Print the launch flags and exit |
+| `--dbus` | `false` | Bind the host's `/run/dbus/system_bus_socket` at `/var/run/dbus/system_bus_socket` in the daemon, so it reapplies rules after `systemctl daemon-reload`. |
+| `--config-dir` | `""` | Host directory bound read-only at `/etc/swarm-device-access`, for the daemon's `--config`. Must be an absolute, clean path. |
+| `--host-network` | `false` | Run the daemon in the host network instead of none; only `--metrics-addr` needs it. |
+| `--host-docker-socket` | `/var/run/docker.sock` | Host path of the Docker socket bound into the daemon. Must be an absolute, clean path. The launcher itself always uses its own `/var/run/docker.sock` mount. |
+| `--log-level` | `info` | The launcher's own log level: `debug`, `info`, `warn`, `error`. |
+| `--log-format` | `text` | The launcher's own log format: `text`, `json`, `plain`. |
+| `-h`, `--help` |  | Print the launch flags and exit |
 
 Running the daemon from the launcher's own image ID, not a tag, means the
 service image is the daemon image:
@@ -287,28 +292,28 @@ value is set in both places, the CLI flag wins.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-log-level` | `info` | `debug`, `info`, `warn`, `error` |
-| `-log-format` | `text` | `text`, `json`, `plain` |
-| `-log-time` | `false` | Include timestamps in log lines |
-| `-docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
-| `-dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay, and a reload can turn it off but not on (see [Config File](#config-file)) |
-| `-policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
-| `-device-allow` | `""` | Glob for `/dev/...` paths to allow, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Empty means allow all. |
-| `-device-deny` | `""` | Glob for `/dev/...` paths to deny, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Deny takes priority over allow. |
-| `-metrics-addr` | `""` | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. A busy or invalid address stops startup. |
-| `-debug-addr` | `""` | `host:port` for pprof `/debug/pprof/*`. Empty disables it. Keep it on a loopback address such as `127.0.0.1:6060`: it has no write timeout, since profiles stream for as long as requested. A busy or invalid address stops startup. |
-| `-config` | `""` | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |
-| `-help` |  | Print this flag list and exit |
+| `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
+| `--log-format` | `text` | `text`, `json`, `plain` |
+| `--log-time` | `false` | Include timestamps in log lines |
+| `--docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
+| `--dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay, and a reload can turn it off but not on (see [Config File](#config-file)) |
+| `--policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
+| `--device-allow` | `""` | Glob for `/dev/...` paths to allow, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Empty means allow all. |
+| `--device-deny` | `""` | Glob for `/dev/...` paths to deny, one glob per flag; repeat the flag for more (not comma-split, unlike the labels). Deny takes priority over allow. |
+| `--metrics-addr` | `""` | `host:port` for Prometheus `/metrics`, `/healthz`, `/readyz`. Empty disables it. A busy or invalid address stops startup. |
+| `--debug-addr` | `""` | Removed in 2.0 with the pprof debug server: any value but the empty one is refused at startup and on reload. |
+| `--config` | `""` | Path to a YAML config file. CLI flags override file values. Reload with SIGHUP. |
+| `-h`, `--help` |  | Print this flag list and exit |
 
-`-log-level`, `-log-format` and `-policy-mode` (and their config file keys)
+`--log-level`, `--log-format` and `--policy-mode` (and their config file keys)
 accept only the values listed; anything else is an error at startup and makes a
-reload keep the previous config. The undocumented `-log-level` aliases
+reload keep the previous config. The undocumented `--log-level` aliases
 `warning`, `fatal` and `panic`, which earlier versions mapped to `warn` and
 `error`, are no longer accepted.
 
 ### Config File
 
-All CLI flags can be represented in YAML and loaded with `-config`. See
+All CLI flags can be represented in YAML and loaded with `--config`. See
 [`deployments/docker/config.yaml`](deployments/docker/config.yaml) for an
 example.
 
@@ -316,8 +321,8 @@ The file is checked strictly: an unknown key (for example `device_deny` for
 `device-deny`), a second YAML document, a YAML merge key (`<<`) or a value of
 the wrong type is an error. `dry-run` and `log-time` must be `true` or
 `false` (not `"yes"`); `policy-mode`, `log-format`, `log-level` and
-`docker-socket` must be non-empty strings; `metrics-addr` and `debug-addr` must
-be strings, and an empty one disables the listener; `device-allow` and
+`docker-socket` must be non-empty strings; `metrics-addr` must be a string,
+and an empty one disables the listener; `debug-addr` must be empty; `device-allow` and
 `device-deny` must be lists of non-empty strings. An explicit `null` (also
 through an alias) is an error, never a silent "not set": leave a key out to
 keep the flag's value.
@@ -329,14 +334,14 @@ docker kill -s HUP swarm-device-access
 ```
 
 Mount the directory holding the file into the daemon container and pass
-`-config` after the image name; the compose files above show both as commented
+`--config` after the image name; the compose files above show both as commented
 lines. Mount the directory rather than the file: editors and tools that write a
 new file and rename it over the old one would leave a single-file mount on the
 old content, and the reload would silently apply that.
 
 Some settings are only read at startup and still require a restart:
-`docker-socket`, `metrics-addr`, and `debug-addr`. A reload that changes one of
-them logs that it was ignored and applies the rest.
+`docker-socket` and `metrics-addr`. A reload that changes one of them logs
+that it was ignored and applies the rest.
 
 A reload computes every setting afresh from the command line, the file and the
 defaults, in that order: a key removed from the file falls back to the flag
@@ -438,9 +443,42 @@ up its numbers (`ls -l /dev/pts/0` shows `136, 0`) and check
 such a device is intentional: bind-mount only the devices you need, or
 exclude the rest with an allow list.
 
-Global `-device-allow` and `-device-deny` define the broadest access the daemon
+Global `--device-allow` and `--device-deny` define the broadest access the daemon
 may grant. Per-container labels can only narrow that access. Deny rules always
 win.
+
+## 🔁 Migrating from 1.x
+
+Version 2.0 replaces the Go daemon with a Rust one. The image name, the
+`launch` mode, the config file keys, the labels, the log lines, the error texts
+and the `sda_` metrics are those of 1.x; what differs is in the numbered table
+below. Every flag now takes two dashes (Q1): update the `command:` of the Swarm
+service, both the launch flags and the daemon flags after `--`, before you
+deploy 2.0. A 1.x command line such as `- -log-level=info` makes the 2.0
+launcher or daemon exit with status 2 and
+`error: single-dash long flags are not supported: '-log-level'; use '--log-level'`,
+and Swarm keeps restarting the task until the command is fixed.
+
+Upgrading in place keeps every grant: the 2.0 daemon recognises the device
+filters 1.x attached, and a rollback to 1.x recognises the ones 2.0 attached,
+so neither direction needs the containers restarted. The numbers are stable
+and referenced from the code and from
+[`docs/rust-port.md`](docs/rust-port.md).
+
+| # | Area | 1.x | 2.0 |
+| --- | --- | --- | --- |
+| Q1 | CLI | Go's `flag`: `-flag` and `--flag` both accepted; the daemon ignores positional arguments (`launch` refuses them) | Only `--flag`. A single-dash flag or a positional argument is refused with exit 2; `-h`/`--help` print to stdout and exit 0, with clap's layout of the same flag help. This also applies to the daemon arguments after `launch --`. The launcher's own refusals of an unknown flag or a stray argument, which Go's flag package made exit 1 after printing its usage, are clap's usage errors with exit 2; its host-path errors name the flag by its `--` spelling (`launch: flag "--config-dir": "rel" must be an absolute, clean path`). |
+| Q2 | `debug-addr` / `--debug-addr` | Serves pprof | No pprof. A non-empty value is refused at startup and on reload. |
+| Q3 | `/metrics` | `go_*` runtime families | No `go_*` families; `process_*` and `promhttp_metric_handler_*` are kept. |
+| Q4 | `/metrics` | Protobuf or text, negotiated | Always text 0.0.4, with no protobuf negotiation. |
+| Q5 | Environment | `GOMAXPROCS`, `GOMEMLIMIT`, `GOGC`, `GODEBUG` tune the runtime | These variables no longer have any effect. |
+| Q6 | Config file syntax errors | yaml.v3's libyaml wording, e.g. `parse config file "<path>": yaml: line 2: found unexpected end of stream` | The same files are refused, with the same prefix up to `yaml:` and the space after it; the rest is saphyr-parser's wording and line, e.g. `yaml: line 1: while scanning a quoted scalar, found unexpected end of stream`. A file that is not UTF-8 reads `yaml: invalid UTF-8`, and a UTF-16 file, which yaml.v3 decodes, is refused the same way. saphyr-parser reads YAML 1.2 more strictly in three places, all refusals: a quoted value continued on a line indented no more than its key, which libyaml accepts; flow collections nested deeper than 255, which 1.x refused as a wrong shape or an unknown key; and a tab between `:` and a plain value (`policy-mode:<TAB>all`), which libyaml reads as separation and saphyr-parser refuses with `yaml: line 1: ':' must be followed by a valid YAML whitespace` (a space, or a tab before a quoted value, reads as in 1.x). yaml.v3's own errors keep their text: unknown anchors, nesting past libyaml's depth of 10000, a `%YAML` version other than 1.1, a `...` before the first document, and every shape, decode, duplicate-key and multiple-document error. |
+| Q7 | cgroup v1 refusal of a device rule that is not a concrete allow (unreachable: the daemon builds only concrete rules) | Go's `%+v` of the rule prints the addresses of its numbers: `{Allow:true Type:a Major:0xc000012345 Minor:0xc000012350 Access:r}` | The numbers themselves: `{Allow:true Type:a Major:10 Minor:200 Access:r}`; an absent one still reads `<nil>`. |
+| Q8 | systemd reload watcher: the `err` of `systemd reload handling unavailable; retrying in the background` for the rarer failures | godbus's wording for a failed authentication or `Hello`, a broken reply, and any bus address other than one `unix:path=`, e.g. `connect system bus: dbus: authentication failed` | The same prefixes (`connect system bus:`, `add match signal <signal>:`, `resolve the owner of org.freedesktop.systemd1:`, each followed by a space) with zbus's wording after them. A socket that is missing or refuses the connection, a D-Bus error reply (no systemd on the bus) and the setup timeout read as in 1.x. |
+| Q9 | Container process liveness before a device-rule mutation | `pidfd_send_signal(fd, 0)`: an exited process that is not yet reaped (a zombie) counts as alive, and the mutation goes ahead | The pidfd is polled, and a process that has exited counts as gone, reaped or not: the reconcile fails with `pinned container process exited: no such process` and is retried. rustix cannot send signal 0. |
+| Q10 | Launcher: a wait answer whose JSON has a wrong type (unreachable: dockerd sends a number for `StatusCode`) | `encoding/json`'s wording, e.g. `daemon wait stream failed: json: cannot unmarshal string into Go struct field WaitResponse.StatusCode of type int64` | The same prefix, with serde_json's wording after it, e.g. `daemon wait stream failed: invalid type: string "x", expected i64 at line 1 column 17`. A wait answer that is not JSON at all reads as in 1.x: the answer's own text. |
+| Q11 | Metrics server: requests net/http refuses or frames otherwise | net/http's own answers to a malformed request (a bad request line or header, an unknown version, a missing `Host`), its header-count and size limits, its 400 to a partial pipelined request at the header deadline, and its 10 s drain of a slowly sent body before answering | hyper's: a 400 without a reason or a body to a malformed request or an unknown version, an HTTP/1.1 request without `Host` served, other header limits (for example a 431 above 100 headers), a close without a 400 at the header deadline, and the answer sent at once without reading the body. Paths, routes, status codes, bodies, header order, the 307 for unclean paths, HEAD, `Content-Length` or chunked framing and the four server deadlines are unchanged; chunk boundaries follow 2 KiB chunks rather than the encoder's writes. |
+| Q12 | Metrics address with a host name that does not resolve | Go's resolver: `metrics server: listen on <addr>: listen tcp: lookup <host> on <nameserver>: no such host` (or its timeout and server-failure wordings) | The same prefix up to `lookup <host>:`, with getaddrinfo's wording after it, e.g. `failed to lookup address information: Name does not resolve`. inet_aton's shorthands (`0`, `127.1`) read `lookup <host>: no such host`. A name that resolves binds the same address. |
 
 ## 🧩 Tips and Limitations
 
@@ -519,7 +557,7 @@ The default policy mode is `opt-in` for that reason. Only containers with
 `swarm-device-access.enable: "true"` are processed, so unrelated containers that
 happen to bind-mount something under `/dev` are not silently granted access.
 
-If every workload on the node is trusted, `-policy-mode=all` can be used to
+If every workload on the node is trusted, `--policy-mode=all` can be used to
 process all containers unless they explicitly set
 `swarm-device-access.enable: "false"`.
 
@@ -574,24 +612,27 @@ level=DEBUG setting device rule pid=1234 cgroup=/host/sys/fs/cgroup/... type=c m
 
 ### Prerequisites
 
-- Linux host. The daemon is Linux-only and uses `//go:build linux` constraints.
-- Go 1.26+
-- Docker
-- `pre-commit`, `golangci-lint`, [droast](https://github.com/immanuwell/dockerfile-roast),
+- Linux host. The daemon is Linux-only.
+- Rust, through `rustup`: `rust-toolchain.toml` pins the exact release and its components.
+- Docker, logged in to `dhi.io` (`docker login dhi.io`): the image builds from Docker Hardened
+  Images.
+- `pre-commit`, `cargo-deny`, [droast](https://github.com/immanuwell/dockerfile-roast),
   `markdownlint-cli2`, `yamllint`, `shellcheck`, `actionlint`, and `checkmake`. The pre-commit
-  hooks install these tools when needed; droast is built from source, which needs `cargo`.
+  hooks install most of these tools when needed; droast is built from source, which needs `cargo`.
 - A local `shellcheck` at the release `.github/actions/setup-shellcheck` pins: droast's required
-  ShellCheck bridge runs the one on PATH. The Dockerfile meta-test also runs a `droast` binary
-  from PATH, at the release `.github/actions/setup-droast` pins.
+  ShellCheck bridge runs the one on PATH.
+- For the static release binaries only (`make rust-release-binaries`): the zig and cargo-zigbuild
+  releases `.github/actions/setup-zigbuild` pins, on PATH.
 
 ### Common Tasks
 
 ```bash
 make help              # list all available targets
-make check             # run pre-commit + golangci-lint
-make go-build          # build the binary into ./dist/swarm-device-access
-make go-test           # run unit tests
+make check             # run every pre-commit hook on every file
+make verify            # build, format check, clippy and every test, meta-tests included
+make rust-build        # build the workspace (target/debug/swarm-device-access)
 make docker-build      # build the container image
+make test-integration  # the integration suite against the image (Docker, dhi.io login)
 ```
 
 See [`docs/testing.md`](docs/testing.md) for the CI-safe integration suite and
@@ -616,6 +657,6 @@ docker buildx build \
 
 ## 📜 License
 
-[Apache License 2.0](LICENSE). The code in `internal/cgroup/` originates from
+[Apache License 2.0](LICENSE). The code in `src/cgroup/` is ported from
 [NVIDIA's container toolkit](https://github.com/NVIDIA/k8s-device-plugin) under
 the same license.

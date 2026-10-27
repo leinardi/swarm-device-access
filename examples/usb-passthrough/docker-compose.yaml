@@ -11,7 +11,7 @@
 
 services:
   swarm-device-access:
-    image: ghcr.io/leinardi/swarm-device-access:1
+    image: ghcr.io/leinardi/swarm-device-access:2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     # Swarm rejects privileged/cgroup/pid/userns on services. The launcher runs
@@ -20,16 +20,16 @@ services:
     command:
       - launch
       # Launcher flags. Reapply device rules after systemctl daemon-reload:
-      # - -dbus
+      # - --dbus
       # Bind a host config directory read-only at /etc/swarm-device-access:
-      # - -config-dir=/etc/swarm-device-access
+      # - --config-dir=/etc/swarm-device-access
       - --
       # Daemon flags, passed to the daemon verbatim.
       # Reload the config file with: docker kill -s HUP swarm-device-access
-      # - -config=/etc/swarm-device-access/config.yaml
+      # - --config=/etc/swarm-device-access/config.yaml
       # Restrict to USB bus devices only. Nodes are /dev/bus/usb/<bus>/<device>,
       # and * does not match across "/", so the glob needs both levels:
-      # - -device-allow=/dev/bus/usb/*/*
+      # - --device-allow=/dev/bus/usb/*/*
     # Leaves time for the launcher to stop the daemon and drain its logs.
     stop_grace_period: 30s
     deploy:

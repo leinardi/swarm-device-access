@@ -1,0 +1,26 @@
+Usage: swarm-device-access [flags]
+       swarm-device-access launch [launch flags] -- [daemon flags]  (see launch -help)
+  -config string
+    	Path to a YAML config file. CLI flags override file values. Reload with SIGHUP.
+  -debug-addr string
+    	Address for the pprof debug endpoints (e.g. :6060). Empty = disabled.
+  -device-allow value
+    	Glob pattern for /dev/... paths to allow (repeatable). Empty means allow all.
+  -device-deny value
+    	Glob pattern for /dev/... paths to deny (repeatable; takes priority over -device-allow).
+  -docker-socket string
+    	Path to the Docker UNIX socket (default "/var/run/docker.sock")
+  -dry-run
+    	Log device rules that would be applied without writing to the cgroup
+  -help
+    	Display help message
+  -log-format string
+    	Either json, text or plain (default "text")
+  -log-level string
+    	Either debug, info, warn or error (default "info")
+  -log-time
+    	Include timestamp in logs
+  -metrics-addr string
+    	Address for the Prometheus metrics + health endpoints (e.g. :9090). Empty = disabled.
+  -policy-mode string
+    	Container processing mode: "opt-in" processes only containers with label swarm-device-access.enable=true; "all" processes all containers unless label swarm-device-access.enable=false. (default "opt-in")

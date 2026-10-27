@@ -1,0 +1,37 @@
+#
+# Copyright 2026 Roberto Leinardi.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Adapted from swarm-scheduler-exporter/clippy.toml at d57dcc220d29, originally MIT-licensed,
+# Copyright (c) 2026 Roberto Leinardi.
+#
+# Applies to every workspace member: clippy reads the clippy.toml of the workspace root.
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# Proper names the docs cite (a technology, a format, a tool), never an identifier that should be
+# in backticks; ".." keeps clippy's default list.
+doc-valid-idents = ["eBPF", "OpenMetrics", "ShellCheck", ".."]
+
+# The daemon reads the wall clock through the injected Clock, so the tests can drive it with
+# tokio's paused clock. Only the clock module reads it directly, through an
+# #[expect(clippy::disallowed_methods, reason = "...")]. tokio::time::Instant::now stays allowed:
+# it follows the paused clock.
+disallowed-methods = [
+    { path = "jiff::Timestamp::now", reason = "read the time from the injected Clock" },
+    { path = "jiff::Zoned::now", reason = "read the time from the injected Clock" },
+    { path = "std::time::SystemTime::now", reason = "read the time from the injected Clock" },
+    { path = "std::time::Instant::now", reason = "read the time from the injected Clock" },
+]

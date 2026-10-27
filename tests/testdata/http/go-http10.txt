@@ -1,0 +1,9 @@
+### http10  (port 18080)
+### request: GET /healthz HTTP/1.0\r\n\r\n
+HTTP/1.0 200 OK
+Date: Tue, 27 Oct 2026 15:18:56 GMT
+Content-Length: 2
+Content-Type: text/plain; charset=utf-8
+
+ok[end: <nil>]
+

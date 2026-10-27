@@ -23,10 +23,10 @@ MK_COMMON_VERSION     ?= v1
 MK_COMMON_DIR         := $(REPO_ROOT)/.mk
 
 # Shared snippets coming from make-common
-MK_COMMON_FILES       := docker.mk help.mk go.mk password.mk pre-commit.mk
+MK_COMMON_FILES       := docker.mk help.mk password.mk pre-commit.mk
 
 # Repo-local snippets that are NOT in make-common
-MK_LOCAL_FILES        := docker-run.mk integration-test.mk audit-deps.mk verify.mk
+MK_LOCAL_FILES        := docker-run.mk integration-test.mk audit-deps.mk rust.mk rust-release.mk verify.mk
 
 MK_COMMON_BOOTSTRAP_SCRIPT := $(REPO_ROOT)/scripts/bootstrap-mk-common.sh
 
@@ -41,8 +41,6 @@ MK_COMMON_BOOTSTRAP := $(shell "$(MK_COMMON_BOOTSTRAP_SCRIPT)" \
 # Project-specific config
 # -----------------------------------------------------------------------------
 BIN_NAME     ?= swarm-device-access
-GO_CMD       ?= ./cmd/swarm-device-access
-GO_PKG       ?= ./...
 DIST_DIR     ?= dist
 
 # Docker build settings
@@ -52,9 +50,6 @@ DOCKER_CONTEXT ?= .
 IMAGE_NAME   ?= $(BIN_NAME)
 IMAGE_REPO   ?= $(IMAGE_NAME)
 IMAGE_TAG    ?= $(GIT_VERSION)
-
-# Drop-in runtime defaults for `make go-run`
-ARGS ?= -log-level debug
 
 # -----------------------------------------------------------------------------
 # Include shared make logic (fetched from make-common)
@@ -74,17 +69,6 @@ mk-common-update: ## Check for remote updates of shared .mk files
 	  "$(MK_COMMON_VERSION)" \
 	  "$(MK_COMMON_DIR)" \
 	  "$(MK_COMMON_FILES)"
-
-# -----------------------------------------------------------------------------
-# Project overrides
-# -----------------------------------------------------------------------------
-# swarm-device-access is Linux-only: all files in cmd/ and most of internal/
-# have //go:build linux. Export GOOS=linux for the shared go-build target so
-# `make go-build` cross-compiles on macOS / Windows dev machines without the
-# caller setting GOOS by hand. A target-specific variable (not a second recipe)
-# avoids make's "overriding recipe" warning and a duplicate `make help` entry.
-.PHONY: go-build
-go-build: export GOOS := linux
 
 # -----------------------------------------------------------------------------
 # Adding new targets

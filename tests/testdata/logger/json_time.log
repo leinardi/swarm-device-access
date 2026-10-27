@@ -1,0 +1,54 @@
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"plain"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"with space"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"say \"hi\""}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"k=v"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"C:\\path\\x"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"line1\nline2"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"a\tb"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"a\rb"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"a\u0001b"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":""}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"ok 🚀"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"日本語"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"html <a>&amp;"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"trailing "}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":" leading"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"-dash"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"{brace}"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"[bracket]"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"/dev/dri/card0"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"/dev/dri/by-path/pci-0000:00:02.0-card"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"c 226:0 rwm"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"b 8:*"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"a=b c"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"nbsp x"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string value","value":"ls\u2028x"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"DEBUG","msg":"debug message"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"info message"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"warn message"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"ERROR","msg":"error message"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"DEBUG+1","msg":"between debug and info"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO+2","msg":"between info and warn"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN+1","msg":"between warn and error"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"ERROR+4","msg":"above error"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":""}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"message with \"quotes\" and = sign"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"message\nwith a newline"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"container processed","id":"abc","pid":4242,"devices_granted":1,"skipped":0,"errors":0,"dry_run":false}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"integers","zero":0,"negative":-1,"min":-9223372036854775808,"max":9223372036854775807,"major":226,"umax":18446744073709551615}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"floats","zero":0,"half":0.5,"big":1e+21,"small":1e-7,"third":0.3333333333333333}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"booleans","yes":true,"no":false}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"durations","zero":0,"nanos":999,"micros":1500,"millis":1234000,"second":1000000000,"backoff":30000000000,"retry_in":300000000000,"hour":3630000000000,"negative":-2000000000}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"times","at":"2026-10-25T14:03:04.567891234+01:00","utc":"2026-01-02T03:04:05Z","millis":"2026-01-02T03:04:05.12-05:00"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"device rule failed","id":"abc","err":"device identity could not be established: function not implemented"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"wrapped error","err":"open cgroup \"/sys/fs/cgroup/x\": no such file or directory"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"joined error","id":"abc","err":"device identity could not be established: /dev/dri: openat2 dri: permission denied\ndevice mount enumeration incomplete: /dev/dri/by-path: permission denied"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"nil value","err":null}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"mount excluded: no children matched allow/deny policy","path":"/dev/dri","children_seen":["card0","renderD128"],"allow_globs":["/dev/dri/*"],"deny_globs":[]}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"string lists","nil":null,"empty":[],"one":["a"],"spaced":["a b","c"],"quoted":["\"q\""],"empty_item":[""]}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"device denied by policy under one of its names","id":"abc","device":"b 8:0","denied_by":"/dev/evil/link"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"groups","rule":{"type":"c","major":1,"minor":3,"access":"rwm"},"outer":{"inner":{"deep":"value with space"}},"inlined":"x"}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"with attributes","component":"systemd","attempt":2,"retry_in":30000000000}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"WARN","msg":"with a group","watcher":{"owner":":1.42","err":"connection reset"}}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"nested groups","a":{"b":{"key":"value","g":{"n":1}}}}
+{"time":"2026-10-25T14:03:04.567891234+01:00","level":"INFO","msg":"group without attributes"}

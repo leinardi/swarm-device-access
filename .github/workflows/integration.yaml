@@ -15,16 +15,21 @@ concurrency:
 permissions: {}
 
 jobs:
-  # A pull request from another repository (a fork) gets no secrets, so it
-  # cannot log in to dhi.io to build the daemon image the enforcement tests
-  # run. The gate is where the pull request comes from, never whether the
-  # secret is set: a same-repo pull request or a push without DHI_TOKEN is a
-  # misconfiguration and fails, instead of silently dropping to the dry-run
-  # tests.
+  # The integration suite (the testenv crate) against the image built from the shipped Dockerfile,
+  # and the binary copied out of it; make test-integration builds both, pulls the pinned 1.x image
+  # the identity control and the upgrade test run, and owns the suite deadline, so CI and local runs
+  # share one source of truth. The toolchain is the exact release of rust-toolchain.toml; the Rust
+  # cache is saved only on a pull request, as in ci.yaml.
+  #
+  # The image builds from dhi.io bases, which need a login. A pull request from another repository
+  # (a fork) gets no secrets, so it cannot build the image the whole suite runs against, and the
+  # suite is not run: the job says so with a warning, and the push to master that merges it runs
+  # the suite in full. The gate is where the pull request comes from, never whether the secret is
+  # set: a same-repo pull request or a push without DHI_TOKEN is a misconfiguration and fails.
   integration:
-    name: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'integration (fork: enforcement skipped)' || 'integration' }}"
+    name: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'integration (fork: not run)' || 'integration' }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
@@ -35,13 +40,20 @@ jobs:
 
     steps:
       - name: Checkout
+        if: env.FROM_FORK != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Set up Rust
+        if: env.FROM_FORK != 'true'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          go-version-file: go.mod
-          cache: true
+          toolchain: 1.98.1
+
+      - name: Cache the Rust build
+        if: env.FROM_FORK != 'true'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.event_name == 'pull_request' }}
 
       - name: Require the dhi.io token
         if: env.FROM_FORK != 'true'
@@ -49,12 +61,10 @@ jobs:
           DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
         run: |
           if [ -z "$DHI_TOKEN" ]; then
-            echo "::error::DHI_TOKEN is not set; enforcement tests are mandatory outside fork pull requests"
+            echo "::error::DHI_TOKEN is not set; the integration suite is mandatory outside fork pull requests"
             exit 1
           fi
 
-      # The daemon image the enforcement test runs is built from dhi.io base
-      # images, which require a login.
       - name: Log in to Docker Hardened Images (dhi.io)
         if: env.FROM_FORK != 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -63,26 +73,23 @@ jobs:
           username: ${{ vars.DHI_USERNAME }}
           password: ${{ secrets.DHI_TOKEN }}
 
-      # The Make target builds the daemon binary and, with SDA_IT_ENFORCE=1,
-      # the daemon image first, and owns the go test timeout and the suite
-      # deadline, so CI and local runs share one source of truth. The
-      # enforcement flags turn every missing prerequisite into a failure, and
-      # the SKIP check below makes sure a green run really exercised BPF.
-      - name: Run integration tests
+      # The enforcement flags turn every missing prerequisite into a failure,
+      # and the SKIP check makes sure a green run really exercised BPF and the
+      # cross-language upgrade and rollback test.
+      - name: Run the integration tests
         if: env.FROM_FORK != 'true'
         env:
           SDA_IT_ENFORCE: "1"
           SDA_IT_REQUIRE_RELOAD: "1"
         run: |
           set -o pipefail
-          make go-test-integration 2>&1 | tee integration.log
+          make test-integration 2>&1 | tee integration.log
           if grep -E -- '^[[:space:]]*--- SKIP' integration.log; then
             echo "::error::integration tests were skipped; SDA_IT_ENFORCE=1 requires every test to run"
             exit 1
           fi
 
-      # Fork pull requests: the dry-run tests only; the enforcement tests
-      # skip themselves without SDA_IT_ENFORCE.
-      - name: Run integration tests (fork, enforcement skipped)
+      - name: Report that a fork pull request does not run the suite
         if: env.FROM_FORK == 'true'
-        run: make go-test-integration
+        run: |
+          echo "::warning::The integration suite was not run: it needs the image built from the dhi.io bases, and a fork pull request gets no dhi.io token. It runs on the push to master that merges this pull request."

@@ -1,18 +1,21 @@
 # Tech Stack
 
-- **Language**: Go 1.26.9 (module `github.com/leinardi/swarm-device-access`)
-- **Build**: Make wrapping `go`; shared `.mk/` snippets from `leinardi/make-common@v1`
-- **Key deps**:
-  - `github.com/cilium/ebpf v0.19.0` — BPF program attach (cgroup v2)
-  - `github.com/moby/moby/client v0.6.0` + `github.com/moby/moby/api v1.56.0` — Docker API client
-      and types
-  - `github.com/godbus/dbus/v5 v5.1.0` — systemd DBus watcher
-  - `github.com/prometheus/client_golang v1.23.2` — metrics
-  - `golang.org/x/sys v0.42.0` — unix syscalls
-  - `gopkg.in/yaml.v3 v3.0.1` — config file parsing
-- **Linter**: golangci-lint v2, default all linters; enforced via pre-commit hooks
+- **Language**: Rust 1.98.1 (exact release in `rust-toolchain.toml`), edition 2024; Cargo
+  workspace `.` (package `swarm-device-access`), `meta`, `testenv`
+- **Build**: Make wrapping `cargo`; shared `.mk/` snippets from `leinardi/make-common@v1`;
+  static musl release binaries with cargo-zigbuild and pinned zig
+- **Key crates**:
+  - `tokio`, `tokio-util` — runtime, cancellation, task tracking
+  - `hyper`, `hyper-util` — in-tree Docker Engine client and the metrics server
+  - `rustix` — syscalls (openat2, fstat, pidfd); `libc` only for raw `bpf(2)` in `bpf_sys.rs`
+  - `zbus` — systemd D-Bus watcher
+  - `clap` — flags; `saphyr-parser` — config file; `serde`/`serde_json` — Engine API types
+  - `jiff` — time; `sha2` — wrapper digest; `flate2` — gzip exposition
+  - `bollard` — integration harness only (`testenv`, feature `integration`)
+- **Linters**: clippy (pedantic + restriction lints, `-D warnings`), rustfmt, cargo-deny,
+  cargo-machete, droast, ShellCheck; enforced via pre-commit hooks
 - **Pre-commit**: `make check` (all files) / `make check-stage` (staged only)
 - **Container**: `deployments/docker/Dockerfile`; image name = `swarm-device-access`
 - **Runtime**: must run with `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`;
-  bind mounts: `/var/run/docker.sock`, `/sys → /host/sys`;
+  bind mounts: `/var/run/docker.sock`, `/sys → /host/sys`, `/dev`;
   `/run/dbus/system_bus_socket` optional (enables reload handling)

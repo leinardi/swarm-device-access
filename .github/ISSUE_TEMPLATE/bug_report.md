@@ -14,10 +14,11 @@ assignees: []
 
 ## Step 2: Describe your environment
 
-* Project version / commit SHA: `?`
-* Operating system and version: `?`
-* Runtime and version (e.g., Go): `?`
-* Any relevant tooling or dependencies and versions: `?`
+* swarm-device-access version (image tag or digest, or the `version` the daemon logs at start): `?`
+* Operating system, kernel version (`uname -r`) and cgroup version (v1 or v2): `?`
+* Docker Engine version (`docker version`), and whether the node runs in Swarm mode: `?`
+* Container runtime (runc, crun, ...) and init system (systemd or other): `?`
+* Daemon flags or config file (redact anything private): `?`
 
 ## Step 3: Describe the problem
 

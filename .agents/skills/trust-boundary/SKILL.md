@@ -5,10 +5,11 @@ description: >
   container may open, or what the daemon believes about its own configuration: mode
   and enum validation, untrusted labels, /dev-only rules, SIGHUP reload safety,
   image privilege and pinning, and the opt-in HTTP listeners. Use when editing
-  internal/config/**, internal/policy/**, the label handling and rule collection in
-  internal/processor/**, the SIGHUP reload path in cmd/swarm-device-access/config.go,
-  internal/launcher/**, deployments/** (including the Dockerfile),
-  internal/observability/http.go or examples/**, before writing the change.
+  src/config/**, src/policy/**, the label handling and rule collection in
+  src/processor/**, the CLI and SIGHUP reload path (src/cli.rs, src/cli/settings.rs,
+  src/run.rs), src/launcher/**, the HTTP server (src/server.rs, src/server/**),
+  deployments/** (including the Dockerfile) or examples/**, before writing the
+  change.
 ---
 
 # Trust Boundary — swarm-device-access
@@ -28,113 +29,149 @@ an item notes a **known gap**, the test or check was missing when the item was w
 is still missing before relying on the note, close it the next time you touch that file, and do
 not widen it in the meantime.
 
+## Invariants of the Rust code
+
+Load `rust-style-guide` beside this skill for a `.rs` file. The rules below are the 1.x rules (the
+README's *Migrating from 1.x* lists the only intended differences); the Rust code reaches the
+kernel and the Engine directly, where the 1.x Go libraries hid it, so it adds these:
+
+- **No `unsafe` outside `src/cgroup/bpf_sys.rs`.** The workspace denies `unsafe_code`, that one
+  module lifts it, and a meta-test (`meta/tests/unsafe_allowlist.rs`) pins the list. Every other
+  syscall (`openat2` with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS`, `fstat`, `readlinkat`,
+  `pidfd_open`) goes through rustix; a hand-rolled syscall elsewhere is a way around the
+  containment in §4.
+- **The daemon cannot write to Docker.** The daemon path takes only the read-only Docker trait
+  (`ping`, list, inspect, events: `GET` plus one `HEAD /_ping`), dialling only the configured
+  unix socket and reading no `DOCKER_*` variable. The write calls exist only in
+  `src/launcher/engine.rs`, which only `src/launcher/**` may name; `meta/tests/docker_boundary.rs`
+  and `meta/tests/launcher_boundary.rs` enforce both.
+- **No new capability, path or listener.** The launcher's daemon spec is pinned field by field,
+  and its create body byte for byte against the one the 1.x launcher sent (§6), and the daemon
+  opens no host path and no listener 1.x did not. `--debug-addr`/`debug-addr` with a non-empty
+  value is refused at startup and on reload (Q2): there is no pprof server to bound.
+- **Byte-identical BPF wrapper encoding.** The owned wrapper must regenerate byte for byte, as
+  1.x's did, or a program is not ours (§4's rules, `src/cgroup/owned.rs`). An encoding drift
+  either treats a foreign program as owned or makes every wrapper 1.x attached a conflict after an
+  upgrade; the fixtures and goldens under `tests/testdata` pin it.
+- **Fail closed stays fail closed.** Optional booleans and lists in the file schema keep "absent"
+  apart from an explicit empty value; the strict loader refuses what yaml.v3's did in 1.x (explicit
+  `null`, a quoted `"yes"` for a bool, merge keys, unknown keys, a second document). A `_` arm on
+  a string or integer refuses; an enum match names every variant.
+
 ---
 
 ## 1. Fail closed on empty or unknown config and mode
 
-A `switch` on a config value must have a default that denies, not one that falls through to the
-most permissive branch — and never a zero value that means "process everything".
+A match on a config value must have a default that denies, not one that falls through to the most
+permissive branch — and never a zero value that means "process everything".
 
-`policy.Global.Enabled` (`internal/policy/policy.go`) processes a container in `ModeOptIn` only
-when `swarm-device-access.enable` is `true`, in `ModeAll` unless it is `false`, and returns `false`
-in its default branch — so an empty or unknown `policy.Mode` processes nothing. The zero-value
-`config.Runtime` that `config.Store.Load` returns before `Set` has an empty mode, and is therefore
-safe for the same reason. Validation at startup refuses both values already, so that branch is
-unreachable in practice — which is exactly why it must stay: it is the second lock, for the day a
-new construction path skips validation.
+`policy::Mode` (`src/policy/mod.rs`) names exactly the two modes, and a `Global` is made only by
+`Global::new`, which parses the mode (`parse_mode`) and validates the globs, so an empty or
+unknown mode cannot reach `Global::enabled`. That function processes a container in `Mode::OptIn`
+only when `swarm-device-access.enable` is `true`, and in `Mode::All` unless it is `false`. The
+config store has no zero value either: `config::new_store` takes the validated startup `Runtime`.
+Validation at startup refuses both values already; the type is the second lock, for the day a new
+construction path skips validation. Covered by `policy::tests::enabled` and
+`policy::tests::global_rejects_an_empty_or_unknown_mode`.
 
-- [ ] Every new mode-like switch denies in its default branch.
-- [ ] A test asserts the empty value and an unknown value both deny. **Known gap (verify before
-      relying on it):** `TestEnabled`
-      (`internal/policy/policy_test.go`) covers only `ModeOptIn` and `ModeAll`, and
-      `TestGlobalValidate` covers `"invalid"` but not `""` — add both cases.
+- [ ] Every new mode-like value parses into an enum whose constructor is the only way to make
+      one, and any string or integer match on it refuses in its `_` arm.
+- [ ] A test asserts the empty value and an unknown value are both refused.
 
 ## 2. Validate every enum-like config value at load
 
 A string in YAML or on the command line is not an enum. If a value is compared anywhere against a
 fixed set, it must be rejected at load time, naming the key and the bad value.
 
-`policy.ParseMode` rejects an unknown `policy-mode`, and `policy.Global.Validate` wraps glob errors
-as `device-allow: …` / `device-deny: …` via `policy.ValidateGlobs`. `run` in
-`cmd/swarm-device-access/main.go` calls `Validate` and `config.ValidateEnums` (log-format,
-log-level, policy-mode) on the effective values after `applyFileConfig` merges the file into the
-flags, and exits `1` with `invalid config: …` on failure. `config.LoadFile`
-(`internal/config/loader.go`) is strict: it checks every known key's exact YAML shape (following
-aliases; explicit `null`, a quoted `"yes"` for a bool and `[null]` in a list are errors), refuses
-merge keys, unknown keys and a second document, and validates the enums; any failure makes the
-daemon exit `1` with `config file error: …`. Covered by `TestGlobalValidate`, `TestValidateGlobs`,
-`TestLoadFile_*` and `TestValidateEnums`.
+`policy::parse_mode` rejects an unknown `policy-mode`, and `Global::new` reports glob errors as
+`device-allow: …` / `device-deny: …` through `policy::validate_globs`. At startup `run`
+(`src/run.rs`) merges the file into the flags (`Settings::merge`, `src/cli/settings.rs`) and calls
+`Settings::validate`, which runs `config::validate_enums` (log-format, log-level, policy-mode) and
+the policy check on the effective values, and exits `1` with `invalid config: …` on failure.
+`config::load_file` (`src/config/mod.rs`) is strict: its shape pass checks every known key's exact
+YAML shape against `KEYS` (`src/config/yaml.rs`, following aliases; explicit `null`, a quoted
+`"yes"` for a bool and `[null]` in a list are errors), refuses merge keys, unknown keys and a
+second document, and validates the enums; any failure makes the daemon exit `1` with
+`config file error: …`. Covered by `policy::tests::global_validate`,
+`policy::tests::validate_globs_cases`, `config::tests::load_file_*` and
+`config::tests::validate_enums_cases`, and pinned against 1.x by `tests/config_golden.rs` and
+`tests/policy_golden.rs`.
 
-- [ ] A new enum-like key or flag is checked in `Validate` (or an equivalent load-time check) with
-      a table test covering an unknown value.
-- [ ] The error names the key, so an operator can fix it without reading Go.
-- [ ] A new file key gets an entry in `keyShapes` (`internal/config/loader.go`), so an explicit
-      `null` or a wrong type is rejected instead of decoding as "not set".
+- [ ] A new enum-like key or flag is checked in `Settings::validate` (or an equivalent load-time
+      check) with a table test covering an unknown value, and parses into a type whose
+      constructor is the only way to make one.
+- [ ] The error names the key, so an operator can fix it without reading the code.
+- [ ] A new file key gets an entry in `KEYS` (`src/config/yaml.rs`), so an explicit `null` or a
+      wrong type is rejected instead of decoding as "not set".
 
 ## 3. Labels are untrusted input
 
 Anyone who can `docker service create` or `docker run` sets `swarm-device-access.*` labels. The
-container's own labels are the **only** label input: `Processor.Reconcile`
-(`internal/processor/processor.go`) parses `Config.Labels` from the container inspect and nothing
-else. Swarm service labels (`deploy.labels:`) are ignored, and the processor never calls
-`ServiceInspect` or `Info` (neither is part of `DockerInspector`), so a decision cannot depend on
-which node runs the daemon or on whether a service inspect happened to succeed. Treat every label
-as attacker-controlled.
+container's own labels are the **only** label input: `Processor::reconcile`
+(`src/processor/reconcile.rs`, `compute_desired`) parses `Config.Labels` from the container
+inspect and nothing else. Swarm service labels (`deploy.labels:`) are ignored, and the processor
+never inspects a service or the node (the read-only Docker trait has only `ping`, list, inspect
+and events), so a decision cannot depend on which node runs the daemon or on whether a service
+inspect happened to succeed. Treat every label as attacker-controlled.
 
-- `policy.ParseContainer` rejects a non-boolean `enable` and any malformed glob in `device-allow`
-  or `device-deny`, naming the label. `Reconcile` then gives the container the **empty desired
-  set** (warns, records `invalid_labels`, revokes any earlier grant) rather than falling back to the
-  global policy — a typo in a narrowing label must never widen access to "whatever the global
-  allows", nor keep what an earlier, valid label granted.
-- Labels can only narrow: `policy.Global.DeviceAllowed` checks the global deny, the container deny,
-  the global allow and the container allow, in that order. **Deny wins over allow**, and a
-  per-container allow can never re-admit a path the global allow excludes.
+- `policy::Container::parse` rejects a non-boolean `enable` and any malformed glob in
+  `device-allow` or `device-deny`, naming the label. The processor then gives the container the
+  **empty desired set** (warns, records `invalid_labels`, revokes any earlier grant) rather than
+  falling back to the global policy — a typo in a narrowing label must never widen access to
+  "whatever the global allows", nor keep what an earlier, valid label granted.
+- Labels can only narrow: `Global::device_allowed` is `!denied && authorized`, where `denied`
+  checks the global and the container deny and `authorized` the global and the container allow.
+  **Deny wins over allow**, and a per-container allow can never re-admit a path the global allow
+  excludes.
 - An empty or all-whitespace `device-allow` label means "inherit the global allow set", not
   "allow nothing" — that is documented in the README label table; keep it that way or change both.
 
-Covered by `TestParseContainer`, `TestDeviceAllowed`, `TestExplicitlyAllowed`,
-`TestReconcile_IgnoresServiceLevelLabels` and
-`TestReconcile_WarnsOnUnknownContainerLabel`.
+Covered by `policy::tests::parse_container`, `policy::tests::device_allowed`,
+`policy::tests::explicitly_allowed`, `reconcile_ignores_service_level_labels` and
+`reconcile_warns_on_unknown_container_label` (`src/processor/reconcile/tests.rs`).
 
 - [ ] New label parsing returns an error on malformed input, and the caller applies the empty
       desired set.
 - [ ] A new label can only narrow; a test proves deny still beats allow with it set.
 - [ ] Unknown `swarm-device-access.*` keys on the container keep being reported
-      (`policy.UnknownLabels`, warned by `Reconcile`), not silently accepted.
+      (`policy::unknown_labels`, warned by the processor), not silently accepted.
 - [ ] No second label source (service, node, stack) is added back: a label that only some nodes
       can read, or that disappears when an API call fails, turns a lost narrowing label into wider
       access.
 
 ## 4. Only `/dev` mount sources become rules
 
-`collectContainerRules` (`internal/processor/processor.go`) passes a mount to
-`processor.CollectMountRules` only when `processor.IsMountSource` says its `Source` is `/dev` or
-under `/dev/`. From there every name (the source, each walked entry, each symlink) goes through one
-`evaluateCandidate` (`internal/processor/rules.go`) on file descriptors, never re-walked paths:
+`collect_container_rules` (`src/processor/rules.rs`) passes a mount to `collect_mount_rules` only
+when it is a bind mount (`is_device_mount`) whose `Source` is `/dev` or under `/dev/`
+(`is_mount_source`). From there every name (the source, each walked entry, each symlink) goes
+through one `evaluate_candidate` on file descriptors, never re-walked paths:
 
 - a lexical gate: the name must be clean and under `/dev`, so `/dev/../etc/x` is skipped
   (`outside_dev`);
-- `openat2` beneath a `/dev` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (the `devFS`
-  seam in `devfs.go`): no symlink step can leave `/dev`. An absolute link back into `/dev` is
-  followed by hand, bounded to 40 hops; any other escape is skipped (a warning only when an explicit
-  allow glob names it, as for a dangling name; the skip itself never depends on the log level). The
-  daemon refuses to start without `openat2` (`ProbeOpenat2`);
+- `openat2` beneath a `/dev` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (the `DevFs`
+  seam in `src/processor/devfs.rs`): no symlink step can leave `/dev`. An absolute link back into
+  `/dev` is followed by hand, bounded to 40 hops; any other escape is skipped (a warning only when
+  an explicit allow glob names it, as for a dangling name; the skip itself never depends on the
+  log level). The daemon refuses to start without `openat2` (`devfs::probe_openat2`);
 - `fstat` on that descriptor gives the device number, and sysfs `DEVNAME` gives the canonical name,
   so a node planted under `/dev/shm` is judged as the device it is;
-- `Denied` is checked on the alias, the resolved and the canonical name, `Authorized` on the
+- `denied` is checked on the alias, the resolved and the canonical name, `authorized` on the
   canonical and the resolved name; candidates are aggregated per device across all mounts, and one
   deny vote suppresses the device.
 
 A dangling name found while walking is skipped (a warning only when an explicit allow glob names
-it). Everything that leaves the set unknown is an entry in `MountResult.Errs` and gives the
+it). Everything that leaves the set unknown is an entry in `MountResult::errs` and gives the
 container the empty desired set (reason `incomplete_device_set`) until a retry succeeds: a missing
 mount source, an identity that cannot be established for a candidate policy would otherwise grant,
-any walk error, and a directory mount over `maxMountEntries`. A partly known set is never applied.
-Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName`, `TestCollect_*`,
-`TestProcessor_*EmptiesTheSet` and `TestRealDevFS_Openat2Containment`.
+any walk error, and a directory mount over `MAX_MOUNT_ENTRIES`. A partly known set is never
+applied. Covered by `mount_source_and_dev_relative_paths`, `evaluate_identity_judges_every_name`,
+`canonical_name_needs_one_clean_relative_devname` and the `collect_*` tests
+(`src/processor/rules/tests.rs`), the `compute_desired_empties_*` and `reconcile_*_sets_empty_set`
+tests (`src/processor/reconcile/tests.rs`) and `real_dev_fs_openat2_containment`
+(`src/processor/devfs/tests.rs`).
 
 - [ ] No new code path turns a non-`/dev` source into a rule.
-- [ ] A new resolution step goes through `evaluateCandidate`; it skips a name that names nothing
+- [ ] A new resolution step goes through `evaluate_candidate`; it skips a name that names nothing
       under `/dev`, and anything it cannot establish is an error that yields the empty desired
       set — never a fallback to path-only policy and never a silent skip.
 - [ ] Policy keeps judging the canonical identity: deny on every name, allow on the canonical and
@@ -143,72 +180,78 @@ Covered by `TestIsDeviceMountSource`, `TestEvaluateIdentity`, `TestCanonicalName
 
 ## 5. Hot reload never widens access on a parse error
 
-`watchSIGHUP` (`cmd/swarm-device-access/config.go`) calls `reloader.reload` on `SIGHUP`. It
-re-reads the file and recomputes every setting with the pure `mergeSettings(flags, cliSet, file)`
-from the flag snapshot taken right after `flag.Parse`, so a key removed from the file falls back to
-the command line or the default. Validation (`settings.validate`: enums and policy) and the dry-run
-rule (a reload may turn `dry-run` off, never on) run before anything is applied; any failure is
-logged as `config reload rejected; keeping previous config` and leaves the store, the logger and
-the in-force settings untouched. On success the logger is reconfigured and the runtime is published
-through `Processor.PublishAndReconcile`, which swaps the whole `config.Runtime` (policy and
-`dry-run`) atomically and reconciles every running container. Restart-only settings changed in the
-file are logged and ignored. Covered by `TestReload_*` and `TestMergeSettings_*`.
+`watch_sighup` (`src/cli/settings.rs`) calls `Reloader::reload` on `SIGHUP`. It re-reads the file
+and recomputes every setting with the pure `Settings::merge(defaults, cli_set, file)` from the flag
+snapshot taken right after parsing, so a key removed from the file falls back to the command line
+or the default. Validation (`Settings::validate`: enums and policy, and Q2's empty `debug-addr`)
+and the dry-run rule (a reload may turn `dry-run` off, never on) run before anything is applied;
+any failure is logged as `config reload rejected; keeping previous config` and leaves the store,
+the logger and the in-force settings untouched. On success the logger is reconfigured and the
+runtime is published through `Processor::publish_and_reconcile`, which swaps the whole
+`config::Runtime` (policy and `dry-run`) atomically and reconciles every running container; the
+store has one `Publisher` (`meta/tests/single_publisher.rs`). Restart-only settings changed in the
+file are logged and ignored (`Settings::cold_changes`). Covered by the `reload_*` and
+`merge_settings_*` tests (`src/cli/settings/tests.rs`).
 
-- [ ] Every new setting goes through `settings`/`mergeSettings`, is checked in
-      `settings.validate`, and a failure returns before `configureLogger` or `publish`.
+- [ ] Every new setting goes through `Settings::merge`, is checked in `Settings::validate`, and a
+      failure returns before the logger is reconfigured or anything is published.
 - [ ] A reload that fails leaves the previous policy and `dry-run` in force — never a zero value,
       never a partially merged one.
-- [ ] A new restart-only setting is added to `settings.coldChanges`.
+- [ ] A new restart-only setting is added to `Settings::cold_changes`.
 
 ## 6. Least privilege in the image and the deployment
 
 The daemon has to be privileged: it attaches BPF programs to other containers' cgroups and stats
 host device nodes. So the rule is not "unprivileged" but "no more than the documented set".
 
-The single source of truth for that set is `daemonSpec` (`internal/launcher/spec.go`): the Swarm
+The single source of truth for that set is `daemon_spec` (`src/launcher/spec.rs`): the Swarm
 service in the README's Docker Compose for Swarm snippet, `deployments/docker/docker-compose.yaml`
 and `examples/**` runs the image as an unprivileged `launch` task with only the Docker socket, and
 the launcher creates the daemon with `Privileged`, host cgroup, PID and user namespaces, network
 `none`, `AutoRemove`, and exactly three bind `Mounts`: the Docker socket at `/var/run/docker.sock`,
 `/sys:/host/sys` and `/dev:/dev`. `Mounts`, never `Binds`: a missing source must fail the create,
 not make Docker create an empty directory on the host. The optional extras are opt-in launch flags:
-`-dbus` (`/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket` — the daemon degrades to a
-startup warning without it), `-config-dir` (read-only at `/etc/swarm-device-access`) and
-`-host-network`. `TestDaemonSpec` pins the whole host config, so a new mount or flag shows up as a
-test change. The launcher's own inputs are checked too: `-config-dir` and `-host-docker-socket`
-must be absolute, clean paths, and it removes a `swarm-device-access` container only when its
+`--dbus` (`/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket` — the daemon degrades to a
+startup warning without it), `--config-dir` (read-only at `/etc/swarm-device-access`) and
+`--host-network`. `daemon_spec_fields` (`src/launcher/spec/tests.rs`) pins the whole host config
+and `daemon_spec_body_matches_go` the create body, so a new mount or flag shows up as a test
+change. The launcher's own inputs are checked too: `--config-dir` and `--host-docker-socket` must
+be absolute, clean paths, and it removes a `swarm-device-access` container only when its
 owning launcher is confirmed gone — never on a transient error, and never a foreign container.
 `deployments/docker/Dockerfile` builds a static binary onto `dhi.io/static` with `USER 0` and
 nothing else in the runtime stage.
 
 What goes into the image is pinned too. The BuildKit frontend is pinned by digest; the `dhi.io`
 bases by literal tag, deliberately (dhi.io republishes its tags to ship security fixes, and the
-Dockerfile says so), with the golang tag on go.mod's exact Go version so the image builds with the
-toolchain CI tests and scans. `.dockerignore` keeps the agent tooling, docs and tests out of the
-build context. `test/dockerfiles` pins all of it, and runs droast against the seven required OCI
-labels of `droast.toml`.
+Dockerfile says so), with the rust tag on rust-toolchain.toml's exact release so the image builds
+with the toolchain CI tests, and every zig, cargo-zigbuild and rust-std download checked by the
+sha256 `.mk/rust-release.mk` records. `.dockerignore` keeps the agent tooling, docs and tests out
+of the build context. `meta/tests/dockerfiles.rs` and `meta/tests/toolchain.rs` pin all of it,
+with the seven required OCI labels of `droast.toml`.
 
 - [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
-      `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is
+      `daemon_spec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is
       truly needed, the README and `AGENTS.md` runtime requirements change in the same commit.
-- [ ] The DBus mount is never made mandatory (`-dbus` stays off by default).
-- [ ] A Dockerfile change is checked with `make docker-build` and `go test ./test/dockerfiles/
-      ./test/toolchain/`; no base reference holds a variable or `latest`, and the golang tag
-      follows go.mod.
+- [ ] The DBus mount is never made mandatory (`--dbus` stays off by default).
+- [ ] A Dockerfile change is checked with `make docker-build` and
+      `cargo test --locked -p meta --test dockerfiles --test toolchain`; no base reference holds a
+      variable or `latest`, and the rust tag follows rust-toolchain.toml.
 - [ ] Nothing secret is baked into a layer: build args and `COPY` sources are not a secret store.
 
 ## 7. Listeners are opt-in and bounded before the first byte
 
-The daemon serves HTTP only when told to: `-metrics-addr` (metrics, `/healthz`, `/readyz`) and
-`-debug-addr` (pprof) are empty by default, and the launcher's daemon has network `none` unless
-`-host-network` is set. Whatever listens is reachable by anything on that network, so each server
-in `internal/observability/http.go` sets `ReadHeaderTimeout` and `ReadTimeout` before it accepts a
-connection: a client that never finishes its headers cannot hold a connection open. The handlers
-read no request body and take no input that becomes a decision.
+The daemon serves HTTP only when told to: `--metrics-addr` (metrics, `/healthz`, `/readyz`) is
+empty by default, there is no debug listener (`--debug-addr` must be empty, Q2), and the
+launcher's daemon has network `none` unless `--host-network` is set. Whatever listens is reachable
+by anything on that network, so the server (`src/server.rs`) enforces 1.x's `http.Server`
+deadlines on every connection from the accept (`src/server/timeouts.rs`: 5 s to read the request
+head, 10 s to read the request, 30 s to write, 60 s idle): a client that never finishes its
+headers cannot hold a connection open. The handlers read no request body and take no input that
+becomes a decision.
 
 - [ ] A new listener is off by default, named by its own address flag, and documented with it.
-- [ ] Every `http.Server` sets `ReadHeaderTimeout` and `ReadTimeout`; a handler that reads a body
-      caps it (`http.MaxBytesReader`) before the first read.
+- [ ] Every connection is bounded by the read-header, read, write and idle deadlines before the
+      first byte is read; a handler that reads a body caps it before the first read.
 - [ ] Nothing served changes what the daemon grants: no endpoint takes a mode, a label or a path.
 
 ---
@@ -228,11 +271,11 @@ read no request body and take no input that becomes a decision.
 After the change, run the tests named in each section you touched, then the whole suite; fix and
 re-run until green:
 
-1. `go test ./internal/policy ./internal/config ./internal/processor ./internal/launcher
-   ./cmd/swarm-device-access -run '<test names from the sections>' -v` (Linux only; on another
-   host run it in a Linux container, as AGENTS.md shows).
-2. `make go-test`.
-3. For a Dockerfile change, `make docker-build` and `go test ./test/dockerfiles/ ./test/toolchain/`.
+1. `cargo test --locked --lib <module>::tests` for the modules you touched (`policy`, `config`,
+   `processor`, `launcher`, `cli`, `server`), Linux only.
+2. `make verify`.
+3. For a Dockerfile change, `make docker-build` and
+   `cargo test --locked -p meta --test dockerfiles --test toolchain`.
 
 ## Checklist
 
@@ -243,5 +286,8 @@ re-run until green:
       empty desired set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional
-- [ ] Image inputs pinned: frontend by digest, bases by literal tag, golang on go.mod's Go
+- [ ] Image inputs pinned: frontend by digest, bases by literal tag, rust on rust-toolchain.toml's
+      release
 - [ ] Listeners off by default and bounded by timeouts; no body read without a cap
+- [ ] No `unsafe` outside `bpf_sys.rs`; no write Docker call outside `src/launcher/**`; no new
+      capability, host path or listener; the BPF wrapper encoding byte-identical to 1.x's

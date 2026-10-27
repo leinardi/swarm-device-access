@@ -1,28 +1,35 @@
 # Conventions
 
-## Build tags
+## Platform
 
-- All files under `cmd/` and most of `internal/` require `//go:build linux` (first line).
-- Cross-platform packages (`logger`, `policy`) omit the tag.
-- New code touching devices, cgroups, or `unix.*` must carry the tag.
+- Linux only: openat2, pidfds, bpf(2) and cgroups with no fallback; build and test on Linux.
+- Syscalls through rustix; `libc` and `unsafe` only in `src/cgroup/bpf_sys.rs` (meta-test pinned).
+
+## Lints and suppressions
+
+- `[workspace.lints]`: clippy pedantic plus restriction lints (`unwrap_used`, `expect_used`,
+  `print_stdout`, `print_stderr`, `wildcard_enum_match_arm`, `min_ident_chars`,
+  `disallowed_methods` for wall-clock reads, `allow_attributes`). `-D warnings` in the gates.
+- Only `#[expect(lint, reason = "...")]`; counted against `.suppressions-baseline`
+  (`scripts/check-suppressions.sh --update`, committed with the change).
+- Full rules: the `rust-style-guide` skill.
 
 ## Copyright header
 
-Every `.go` file has an Apache 2.0 copyright block. `internal/cgroup/` retains NVIDIA's
-original header — do not relicense, reformat, or alter that block.
+Every `.rs`, shell, Dockerfile, Makefile and local `.mk` file has the Apache 2.0 block.
+`src/cgroup/{api,ebpf,v1,v2}.rs` keep NVIDIA's header. Files reused from swarm-scheduler-exporter
+or swarm-rootless-docker add the provenance line from `docs/rust-port.md`, never the MIT block.
 
-## Package structure
+## Makefile
 
-- One binary: `cmd/swarm-device-access/` (package `main`).
-- Internal packages: `internal/cgroup`, `internal/logger`, `internal/policy`, `internal/systemd`.
-- Shared `.mk/` snippets fetched from `leinardi/make-common@v1` — do not commit generated `.mk/`
-  files directly.
+- Shared `.mk/{docker,help,password,pre-commit}.mk` fetched from `leinardi/make-common@v1` — never
+  hand-edit; repo-local targets in their own `.mk/<fragment>.mk` listed in `MK_LOCAL_FILES`.
 
 ## CLI flags
 
-Defined with `flag` stdlib in `flags.go`. Repeatable slice flags use `stringSliceFlag` type.
-Override-able via YAML config file (`-config`); file values apply first, then CLI flags.
-Config hot-reload on SIGHUP.
+clap in `src/cli.rs`, double-dash only (Q1). Repeatable `--device-allow`/`--device-deny`.
+YAML config file (`--config`): command line over file over default (`Settings::merge`).
+Hot reload on SIGHUP, all or nothing; restart-only keys logged and ignored.
 
 ## Policy labels
 
@@ -32,17 +39,15 @@ Container labels use prefix `swarm-device-access.`:
 - `swarm-device-access.device-allow` — comma-separated glob patterns
 - `swarm-device-access.device-deny` — comma-separated glob patterns
 
-## Logging
+## Logging and errors
 
-Use `logger.L()` for structured slog logging. Format options: `text`, `json`, `plain`.
-`-log-time=false` strips timestamps (default) — useful for systemd journal.
+- Log through a cloned `LogHandle` with `Attr` values; error key `err`; 1.x messages and levels.
+  Formats `text`, `json`, `plain`; `--log-time` controls timestamps.
+- Errors are hand-written enums whose `Display` is the 1.x text (no thiserror/anyhow).
+- `listen_events` reconnects with `MIN_BACKOFF`/`MAX_BACKOFF`; the systemd watcher retries in the
+  background when D-Bus is absent.
 
-## Error handling
+## Time
 
-`listenEvents` uses exponential backoff (`minBackoff`/`maxBackoff`) on stream errors, not
-`log.Fatal`. Systemd DBus watcher degrades gracefully when socket is absent.
-
-## golangci-lint
-
-v2, all linters enabled. `//nolint:gochecknoinits` is acceptable only for `flag` `init()`
-registration. Violations block commits via pre-commit.
+Inject `Arc<dyn Clock>`; only `src/clock.rs` reads the wall clock. Tests use `TokioClock`
+on a paused runtime or `FakeClock`.

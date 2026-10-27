@@ -1,0 +1,192 @@
+#
+# Copyright 2026 Roberto Leinardi.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Adapted from swarm-scheduler-exporter/Cargo.toml at d57dcc220d29, originally MIT-licensed,
+# Copyright (c) 2026 Roberto Leinardi. The Rust port of swarm-device-access (docs/rust-port.md),
+# which replaced the Go code in 2.0.
+
+[workspace]
+# Listed explicitly, never as a glob: meta/tests/workspace_lints.rs checks each member's manifest.
+members = [".", "meta", "testenv"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+# One exact Rust release, the one rust-toolchain.toml pins.
+rust-version = "1.98.1"
+license = "Apache-2.0"
+authors = ["Roberto Leinardi"]
+repository = "https://github.com/leinardi/swarm-device-access"
+
+# The lint set lives here once. Every member opts in with `[lints] workspace = true` (a member does
+# not inherit it otherwise, and the meta crate asserts that each one does), and every clippy run is
+# workspace-wide.
+[workspace.lints.rust]
+# deny, not forbid: one audited module, src/cgroup/bpf_sys.rs, has to lift it for the raw bpf(2)
+# calls, and only #[expect] can lift a denied lint (forbid cannot be lifted at all). The meta crate
+# pins that list (meta/tests/unsafe_allowlist.rs).
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Only `#[expect(lint, reason = "...")]` may silence a lint: it fails once the lint stops firing,
+# and the reason is mandatory. Every one is counted by scripts/check-suppressions.sh.
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+# No panics outside tests; clippy.toml allows both in tests.
+unwrap_used = "deny"
+expect_used = "deny"
+# Output goes through the logger, or an explicit writeln! to a handle.
+print_stdout = "deny"
+print_stderr = "deny"
+# A match on an enum names every variant, so a new variant is a compile-time decision everywhere.
+wildcard_enum_match_arm = "deny"
+# Descriptive names; clippy's default allow-list applies.
+min_ident_chars = "deny"
+# The wall-clock ban in clippy.toml is only enforced if the lint is.
+disallowed_methods = "deny"
+
+[package]
+name = "swarm-device-access"
+version = "0.0.0"
+description = "Injects cgroup device rules into Docker Swarm containers that bind-mount /dev paths"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The flags (Q1). No color: help and errors are plain text, as Go's were.
+clap = { version = "4.6.7", default-features = false, features = [
+    "std",
+    "derive",
+    "help",
+    "usage",
+    "error-context",
+    "suggestions",
+] }
+# gzip for /metrics, as promhttp offers it; the pure-Rust backend, so no C zlib.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+# Zone data (TZif parsing) and civil time only: the zone is resolved and the times are formatted
+# in-tree, the way Go does (src/go_compat), so none of jiff's tzdb or system features is on.
+jiff = { version = "0.2.38", default-features = false, features = ["std"] }
+# The config file's YAML events; tag resolution, the shape checks and the strict decode are
+# ported from yaml.v3 in-tree (src/config/yaml), so no YAML value model or serde is used.
+saphyr-parser = { version = "0.3.2", default-features = false }
+# The Docker client (src/docker): HTTP/1 only, on unix-socket connections it dials and pools
+# itself. The metrics and health endpoints (src/server): hyper's HTTP/1 server with hyper-util's
+# graceful drain.
+hyper = { version = "1.12.0", default-features = false, features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1.21", default-features = false, features = [
+    "tokio",
+    "http1",
+    "server",
+    "server-graceful",
+] }
+# The metrics listener, bound as Go's net.Listen binds it (SO_REUSEADDR, the dual-stack wildcard,
+# the kernel's backlog).
+socket2 = { version = "0.6.5", features = ["all"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
+# The Engine API's JSON: the typed answers the daemon reads and the error bodies.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# The cgroup directory descriptor and the openat, fstat and open calls on it, getrandom for the
+# wrapper nonce, openat2 beneath /dev, the pidfd and its poll, and an interface's index for a
+# zoned metrics address, without unsafe.
+rustix = { version = "1.1.6", default-features = false, features = [
+    "std",
+    "fs",
+    "rand",
+    "system",
+    "process",
+    "event",
+    "net",
+] }
+# The raw bpf(2) syscall, in src/cgroup/bpf_sys.rs only.
+libc = "0.2.191"
+# The digest of the original program in the device filter wrapper's header, as Go's crypto/sha256.
+sha2 = { version = "0.10.9", default-features = false }
+# The systemd reload watcher's system bus connection, on the tokio runtime only: no default
+# runtime, proxies or object server, and so no async-io or blocking thread pool.
+zbus = { version = "6.1.0", default-features = false, features = ["tokio"] }
+# The poll of the watcher's signal streams; zbus's own Stream trait.
+futures-core = { version = "0.3.34", default-features = false }
+# CancellationToken, Go's context cancellation, and the TaskTracker that awaits the processor's
+# blocking transactions.
+tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
+# The timer TokioClock follows, the unix socket, the tasks and the lock of the Docker client,
+# select! for the systemd watcher, the launcher's stdout and stderr, the multi-threaded runtime
+# main builds, and the SIGINT, SIGTERM and SIGHUP watches.
+tokio = { version = "1.54.1", default-features = false, features = [
+    "time",
+    "net",
+    "rt",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "io-util",
+    "io-std",
+    "macros",
+] }
+
+[dev-dependencies]
+# The paused clock (start_paused) needs the test runtime.
+tokio = { version = "1.54.1", default-features = false, features = [
+    "time",
+    "rt",
+    "macros",
+    "test-util",
+    "net",
+    "io-util",
+    "sync",
+] }
+
+[features]
+# Builds the tests that load BPF programs into the running kernel (tests/bpf_privileged.rs). They
+# need CAP_BPF and CAP_SYS_ADMIN, attach nothing, and run only on throwaway hosts:
+# cargo test --features privileged-tests --test bpf_privileged, as root.
+privileged-tests = []
+
+[[test]]
+name = "bpf_privileged"
+required-features = ["privileged-tests"]
+
+[lints]
+workspace = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+# abort, not unwind (swarm-scheduler-exporter unwinds for its catch_unwind, which this daemon does
+# not have): the Go daemon has no recover, so a panic crashes the process and Swarm or the launcher
+# restarts it. A task panic under unwind would leave a daemon that looks alive and does nothing.
+panic = "abort"
+
+# The meta-tests scan the whole tree with regexes; unoptimised, regex compilation and matching
+# dominate their run time. Only the regex crates are optimised in dev and test builds, which costs
+# a few seconds on a clean build and nothing on an incremental one; the workspace's own code stays
+# at opt-level 0 for debugging.
+[profile.dev.package.regex]
+opt-level = 3
+
+[profile.dev.package.regex-automata]
+opt-level = 3
+
+[profile.dev.package.regex-syntax]
+opt-level = 3

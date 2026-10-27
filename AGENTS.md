@@ -2,48 +2,55 @@
 
 ## What this is
 
-A small **Linux-only** daemon (`//go:build linux` on every Go file under `cmd/` and most of
-`internal/`) that injects cgroup BPF device-allow rules into containers that bind-mount `/dev/...`
-paths. Solves the Docker-Swarm gap where `devices:` / `device_cgroup_rules:` are silently ignored.
+A small **Linux-only** daemon that injects cgroup BPF device-allow rules into containers that
+bind-mount `/dev/...` paths. Solves the Docker-Swarm gap where `devices:` / `device_cgroup_rules:`
+are silently ignored.
+
+Since 2.0 it is written in Rust (the Go 1.x code was removed at the cutover): a Cargo workspace
+with the root package (the `swarm-device-access` library and binary), `meta` (repository
+meta-tests) and `testenv` (the integration harness). It calls Linux interfaces (`openat2`, pidfds,
+`bpf(2)`, cgroup v1 and v2) with no fallback for other systems, so it builds and its tests run on
+Linux only. [`docs/rust-port.md`](docs/rust-port.md) is the permanent record of its design, its
+crates and the provenance of every reused component. The 1.x behaviour it keeps, and the numbered
+differences from it (Q1 and later), are listed in the README's
+[Migrating from 1.x](README.md#-migrating-from-1x).
 
 ## Common commands
 
-Build / test / vet — uses Make wrappers around `go`:
+Build / test / lint — uses Make wrappers around `cargo`:
 
 ```bash
-make go-build      # cross-compiles to Linux into ./dist/ (works from macOS/Win)
-make go-test       # CGO_ENABLED=1 go test -race ./...
-make go-vet
-make go-vet-integration  # go vet -tags=integration over test/integration (no Docker needed)
-make go-lint       # golangci-lint v2, all linters, at the pre-commit pin
-make verify-go     # go-build, go-test, go-vet, go-vet-integration, go-lint
-make go-tidy       # go mod tidy + go mod verify
-make audit-deps    # govulncheck -test + banned-module check (network required); also runs in CI and as a pre-commit hook on go.mod/go.sum changes
+make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test (meta-tests included)
+make verify        # verify-rust: every check a change has to pass
+make rust-build    # cargo build --workspace --all-targets --all-features --locked, with the version stamps
+make rust-test     # cargo test --workspace --locked (meta-tests included)
+make rust-clippy   # cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+make rust-fmt      # cargo fmt --all
+make rust-fmt-check  # cargo fmt --all --check
+make rust-deny     # cargo deny --workspace check (network required)
+make audit-deps    # cargo deny --workspace check advisories (network required)
+make rust-release-binaries  # static musl amd64 and arm64 release binaries and checksums.txt into dist/ (pinned zig and cargo-zigbuild on PATH)
 make check         # pre-commit on all files: the authoritative local gate, as CI's pre-commit-all
 make check-stage   # pre-commit on staging area only
 make pre-commit-install  # install the pre-commit and commit-msg hooks
-make docker-build
+make docker-build  # the image, from deployments/docker/Dockerfile (needs a docker login dhi.io)
 make docker-run    # runs image locally with required host bind mounts
+make help          # every target with its one-line description
 ```
 
-Integration tests (need a live Docker daemon; see [`docs/testing.md`](docs/testing.md)):
+Integration tests (need a live Docker daemon and a `docker login dhi.io`; see
+[`docs/testing.md`](docs/testing.md)):
 
 ```bash
-make go-test-integration                   # dry-run tests
-make go-test-integration SDA_IT_ENFORCE=1  # plus the real-enforcement test: attaches BPF, runs systemctl daemon-reload; throwaway hosts only
-make sweep-test-leaks                      # remove containers left behind by killed runs
+make test-integration                   # the testenv suite against the image built from the Dockerfile and its binary; dry-run tests
+make test-integration SDA_IT_ENFORCE=1  # plus the enforcement tests and the Go-to-Rust upgrade gate (pinned 1.x image; sudo -n); throwaway hosts only
+make sweep-test-leaks                   # remove containers and images left behind by killed runs
 ```
 
 Single test:
 
 ```bash
-go test ./internal/systemd -run TestIsReloadCompleted -v
-```
-
-Tests are `//go:build linux`. On macOS/Windows hosts, run them inside the linux image:
-
-```bash
-docker run --rm -v $PWD:/work -w /work golang:1.26 go test ./...
+cargo test --locked --lib systemd::tests
 ```
 
 The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on first run. To
@@ -55,152 +62,188 @@ builds it from source at its pinned rev, which needs a Rust toolchain (`cargo`) 
 required ShellCheck bridge runs the `shellcheck` on PATH, so install ShellCheck locally at the
 release `.github/actions/setup-shellcheck` pins (CI installs it with that action).
 
-The meta-tests under `test/` (all untagged, no Docker) guard the tooling itself: `test/toolchain`
-(the Go line, the droast and ShellCheck pins, flags that make a gate pass on nothing, Docker kept
-out of untagged tests), `test/dockerfiles`, `test/docs` (relative links), `test/suppressions` and
-`test/licenseheaders` (the two check scripts), with the helpers in
-`test/internal/{gitenv,toolgate}`. `make go-test` runs them; the Dockerfile label test needs a
-`droast` binary on PATH (the release `.github/actions/setup-droast` pins; the hook's own build is
-not on PATH) and `shellcheck`. `SDA_REQUIRE_TOOLS=1 go test ./test/...` turns a missing droast or
-shellcheck into a failure instead of a skip, as CI's `repo-gates` job does.
+The static Rust builds (`make rust-release-binaries`) link with zig through cargo-zigbuild and
+refuse any release on PATH but the ones `.github/actions/setup-zigbuild` pins. `.mk/rust-release.mk`
+records the zig, cargo-zigbuild and `rust-std` pins; the Dockerfile's build stage carries copies,
+which `meta/tests/toolchain.rs` keeps equal.
+
+The meta crate's tests (`meta/tests`, run by `make rust-test`) guard the tooling itself: the pins,
+the Dockerfile, the CI gates, flags that make a gate pass on nothing, Docker kept out of the plain
+tests, relative links, and the two check scripts, plus the Rust boundaries. They need only git and
+bash, never skip, and carry a negative control each. The `docs-links` hook runs
+`cargo test --locked -p meta --test docs`.
 
 ### Generated or vendored: never hand-edit
 
-- `.mk/{docker,help,go,password,pre-commit}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
+- `.mk/{docker,help,password,pre-commit}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
   make-common (under its MIT license) and refreshed with `make mk-common-update`; a change is
   ported upstream.
-- `internal/cgroup/{api,ebpf,v1,v2}.go` are not vendored, but keep NVIDIA's copyright header
+- `src/cgroup/{api,ebpf,v1,v2}.rs` are not vendored, but keep NVIDIA's copyright header
   (see *Conventions worth knowing*).
 
 ## Architecture
 
 See [`docs/architecture.md`](docs/architecture.md) for the sequence diagram, BPF program structure,
-package layout, and troubleshooting guide.
+module layout, and troubleshooting guide.
 
-Four layers, all under `cmd/swarm-device-access` + `internal/`:
+Four layers, all under `src/`:
 
-**1. Entrypoint and config (`cmd/swarm-device-access/`, `internal/config/`, `internal/policy/`)**
+**1. Entrypoint and config (`src/main.rs`, `src/run.rs`, `src/cli.rs`, `src/cli/settings.rs`,
+`src/config/`, `src/policy/`)**
 
-`main.go` parses flags, merges them with the config file (`config.go`: `flagSettings`,
-`mergeSettings`, `validate`), refuses to start without `openat2` (`processor.ProbeOpenat2`), creates
-the `config.Store`/`Publisher`, and wires the processor and `daemon.Run`. `SIGHUP` re-reads the file
-(`reloader.reload`) and publishes through `Processor.PublishAndReconcile`. `internal/config` is the
-strict YAML loader and the generation-numbered runtime store; `internal/policy` holds mode, label
-parsing and the glob predicates (`Denied`, `Authorized`).
+`main.rs` builds the tokio runtime by hand (two workers) and runs `run::run_with`, which dispatches
+a leading `launch` to the launcher, otherwise parses the flags (`cli::parse`, double-dash only,
+Q1), merges them with the config file (`Settings::merge`, `Settings::validate`), refuses to start
+without `openat2` (`devfs::probe_openat2`), raises `RLIMIT_MEMLOCK`, creates the
+`config::Store`/`Publisher`, and wires the Docker client, the metrics server, the processor and
+`daemon::run`. One shutdown budget (`SHUTDOWN_BUDGET`) runs from the first `SIGINT` or `SIGTERM`.
+`SIGHUP` re-reads the file (`Reloader::reload`, `watch_sighup`) and publishes through
+`Processor::publish_and_reconcile`. `src/config` is the strict YAML loader and the
+generation-numbered runtime store; `src/policy` holds the mode, label parsing and the glob
+predicates (`Global::denied`, `Global::authorized`).
 
-**2. Event loop and coordinator (`internal/daemon/`)**
+**2. Event loop and coordinator (`src/daemon/`)**
 
-`Run` subscribes to Docker events (`start`, `unpause`, `die`, `destroy`) **before** the first pass,
-starts the coordinator, requests the startup pass, starts the systemd reload watcher, then consumes
-events (`listenEvents` → `consumeEvents`, reconnecting with `minBackoff`/`maxBackoff` backoff). The
-coordinator (`coordinator.go`) is the single owner of reconciliation passes: startup, `SIGHUP` and
-systemd reloads only request one; it retries failed containers with backoff, reserves each container
-so concurrent work coalesces, sweeps the lifecycle history, and owns the
-`processed map[string]time.Time` dedup (entries expire after `processedTTL`) that skips start events
-an enumeration already covered. Every reconcile goes through `processOne` for metrics and logging.
+`daemon::run` subscribes to Docker events (`start`, `unpause`, `die`, `destroy`) **before** the
+first pass, starts the coordinator, requests the startup pass, starts the systemd reload watcher
+(`systemd::supervise`) on its own task, then consumes events (`listen_events` →
+`consume_events` in `events.rs`, reconnecting with `MIN_BACKOFF`/`MAX_BACKOFF` backoff). The
+`Coordinator` (`coordinator.rs`) is the single owner of reconciliation passes: startup, `SIGHUP`
+and systemd reloads only request one; it retries failed containers with backoff, reserves each
+container so concurrent work coalesces, sweeps the lifecycle history, and owns the `processed`
+dedup (entries expire after `PROCESSED_TTL`) that skips start events an enumeration already
+covered. Every reconcile goes through `process_one` for metrics and logging.
 
-**3. Reconcile (`internal/processor/`)**
+**3. Reconcile (`src/processor/`)**
 
-`Processor.Reconcile(id)` is the one idempotent path: inspect, compute the complete desired set
-(`computeDesired`: policy, then `CollectMountRules` per `/dev` mount, which resolves each name
-beneath `/dev` with `openat2`, identifies it by `fstat` and sysfs `DEVNAME`, and aggregates per
-device), then apply it (`applyPinned`: pidfd pin, `/proc/<pid>/cgroup`, `cgroup.OpenCgroup`,
-re-verify, `SetDeviceRules`). Anything uncertain yields the empty set. `Terminate` and `Sweep`
-revoke and release ended runs (`lifecycle.go`).
+`Processor::reconcile(id)` (`reconcile.rs`) is the one idempotent path: inspect, compute the
+complete desired set (`compute_desired`: policy, then `collect_mount_rules` (`rules.rs`) per `/dev`
+mount, which resolves each name beneath `/dev` with `openat2` (`devfs.rs`), identifies it by
+`fstat` and sysfs `DEVNAME`, and aggregates per device), then apply it (`apply_pinned`: pidfd pin
+(`pin.rs`), `/proc/<pid>/cgroup`, `CgroupHandle::open`, re-verify, `set_device_rules`). The cgroup
+and BPF mutation runs as one blocking transaction under the processor lock, awaited to completion
+even when its caller is dropped. Anything uncertain yields the empty set. `terminate` and `sweep`
+revoke and release ended runs (`lifecycle.rs`).
 
-**4. Cgroup (`internal/cgroup/`)**
+**4. Cgroup (`src/cgroup/`)**
 
-`api.go` defines the `Interface` (`GetDeviceCGroupMountPath`, `GetDeviceCGroupRootPath`,
-`SetDeviceRules(handle, rules)`) and the `New(version, ledger, cache)` factory; `handle.go` holds
-the directory-fd `CgroupHandle`. `v1.go`/`v1set.go`/`ledger.go` write `devices.allow` and
-`devices.deny` and track the daemon's own exceptions. `v2.go`, `v2plan.go`, `v2ops.go`, `owned.go`
-and `ebpf.go` wrap the runtime's `BPF_CGROUP_DEVICE` filter in an owned block and swap it in with
-`BPF_F_ALLOW_MULTI` (or `BPF_F_REPLACE`). **Parts of this code are preserved from NVIDIA (Apache
-2.0) — touch with care.**
+`api.rs` defines `DeviceRule`, the `Interface` trait (`set_device_rules(handle, rules)`), the
+`new(version, ledger, cache, log)` factory and the `/proc` cgroup parsing; `handle.rs` holds the
+directory-fd `CgroupHandle`. `v1.rs`/`v1set.rs`/`ledger.rs` write `devices.allow` and
+`devices.deny` and track the daemon's own exceptions. `v2.rs`, `v2plan.rs`, `v2ops.rs`, `owned.rs`,
+`ebpf.rs` and `asm.rs` wrap the runtime's `BPF_CGROUP_DEVICE` filter in an owned block and swap it
+in with `BPF_F_ALLOW_MULTI` (or `BPF_F_REPLACE`); `bpf_sys.rs` issues the raw `bpf(2)` commands and
+is the only module allowed `unsafe`. **Parts of this code are ported from NVIDIA (Apache 2.0) —
+touch with care.**
 
-**Launcher (`cmd/swarm-device-access/launch.go`, `internal/launcher/`)**
+**Launcher (`src/launcher/`)**
 
-`run()` dispatches `launch` before `flag.Parse()` to `runLaunch`, which has its own flag set; the
-arguments after `--` go to the daemon verbatim. The Swarm service runs the image unprivileged in
-this mode. `launcher.Run` finds its own container in `/proc/self/mountinfo`, takes its `sha256:`
-image ID, removes a stale `swarm-device-access` daemon only when its owning launcher is confirmed
-gone (or it came from the old `sh` wrapper), then creates the daemon from `daemonSpec`, attaches,
-registers `ContainerWait(removed)`, starts it and supervises it. Stops go by container ID and share
-one 20 s shutdown budget.
+`run::run_with` dispatches a leading `launch` to the launcher, which has its own flag set
+(`cli::parse_launch`); the arguments after `--` go to the daemon verbatim. The Swarm service runs
+the image unprivileged in this mode. The launcher finds its own container in
+`/proc/self/mountinfo` (`self_id.rs`), takes its `sha256:` image ID, removes a stale
+`swarm-device-access` daemon only when its owning launcher is confirmed gone, or it came from the
+old `sh` wrapper (`stale.rs`), then creates the daemon from `daemon_spec` (`spec.rs`), attaches,
+registers the wait for `removed`, starts it and supervises it. Its Engine calls are the project's
+only Docker writes (`engine.rs`). Stops go by container ID and share one 20 s shutdown budget.
 
-**Glue (`internal/logger/`, `internal/systemd/`, `internal/observability/`)**
+**Glue (`src/docker/`, `src/logger/`, `src/systemd.rs`, `src/metrics/`, `src/server.rs`,
+`src/go_compat/`, `src/clock.rs`)**
 
-- `logger` — slog wrapper with `text`/`json`/`plain` handlers, `-log-time` strips timestamps via a
-  `ReplaceAttr`. `L()` lazy-inits a default INFO text handler so packages can log without explicit
-  wiring.
-- `systemd` — DBus `Reloading` signal watcher. Triggers re-apply on the **completion** edge only
-  (signal body `active=false`). The start edge (`true`) is mid-reload and races the cgroup wipe.
-  Gracefully degrades when DBus is unreachable.
-- `observability` — Prometheus `Recorder` (nil-safe), `/healthz`, `/readyz` and pprof servers.
+- `docker` — the daemon's read-only Engine client on hyper (ping, list, inspect, events: `GET`
+  plus one `HEAD /_ping`), over the configured unix socket only.
+- `logger` — slog's `text` and `json` handlers and the project's `plain` handler, byte for byte;
+  components log through a cloned `LogHandle`, which a reconfigure swaps behind the shared cell.
+  `--log-time` controls the timestamp.
+- `systemd` — D-Bus `Reloading` signal watcher (zbus). Triggers re-apply on the **completion** edge
+  only (signal body `active=false`). The start edge (`true`) is mid-reload and races the cgroup
+  wipe. Degrades to retrying in the background when D-Bus is unreachable.
+- `metrics`, `server` — the Prometheus `Recorder` (with a no-op form) and the `/metrics`,
+  `/healthz` and `/readyz` server. There is no pprof server (Q2).
+- `go_compat` — the Go standard library's formatting and parsing the 1.x log, error and flag text
+  depends on; `clock` — the one wall-clock read, behind the injected `Clock`.
 
 ## Runtime requirements
 
 The daemon **must** run with `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`,
 and bind mounts for `/var/run/docker.sock`, `/sys → /host/sys` and `/dev`. That privileged set lives
-in one place, `daemonSpec` (`internal/launcher/spec.go`), which the launcher uses to create the
-daemon; the Swarm service itself (`launch`) needs only the Docker socket. The
-`hostRootPath = "/host"` constant in `main.go` is the inside-container view of the host root; cgroup
-paths (and sysfs, when mounted there) are joined against it. The DBus socket mount is optional —
-enables reload handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`;
-the container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run`
+in one place, `daemon_spec` (`src/launcher/spec.rs`), which the launcher uses to create the daemon;
+the Swarm service itself (`launch`) needs only the Docker socket. The `HOST_ROOT_PATH = "/host"`
+constant in `src/run.rs` is the inside-container view of the host root; cgroup paths (and sysfs,
+when mounted there) are joined against it. The DBus socket mount is optional — enables reload
+handling. Mount as `-v /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket`; the
+container-side path must be under `/var/run/` because `dhi.io/static` has no `/var/run → /run`
 symlink.
 
 ## Conventions worth knowing
 
-- Every file under `cmd/` and most of `internal/` has `//go:build linux`. New code that touches
-  devices, cgroups, or `unix.*` should keep that tag. Cross-platform helpers (e.g. logger) do not
-  need it.
-- Version strings (`version`, `commit`, `date`) live in `cmd/swarm-device-access/version.go` and are
-  filled by `-ldflags -X main.version=...` from `GO_LDFLAGS` in `.mk/go.mk`.
-- `internal/cgroup/` retains NVIDIA's original copyright header (Apache 2.0). Don't relicense or
-  reformat that block.
-- The README is the source of truth for the user-facing story; keep flag tables and the
-  docker-compose snippet in sync if you change flags or mounts.
-- Every Go and shell source, Dockerfile, the Makefile and the repo-local `.mk` fragments carry the
-  Apache-2.0 header (the IntelliJ `Apache-2.0` copyright profile), with the year of the file's
-  first commit, after any shebang, build constraint or Dockerfile parser directive.
-  `scripts/check-license-headers.sh` (the `check-license-headers` hook) checks the whole tree;
-  NVIDIA's four files keep NVIDIA's header, and make-common's files are exempt.
+- The crate is Linux-only (see *What this is*). Syscalls go through rustix; `libc` and `unsafe` are
+  confined to `src/cgroup/bpf_sys.rs`, which a meta-test pins.
+- Version strings (`VERSION`, `COMMIT`, `DATE`) live in `src/version.rs` and are read at compile
+  time from `SWARM_DEVICE_ACCESS_VERSION`, `SWARM_DEVICE_ACCESS_COMMIT` and
+  `SWARM_DEVICE_ACCESS_DATE`, which `RUST_VERSION_ENV` in `.mk/rust.mk` sets from git and the clock
+  (`make rust-build`, `make rust-release-binaries`) and the Dockerfile sets from its `VERSION`,
+  `COMMIT` and `DATE` build arguments; unset, they read `dev`, `none` and `unknown`.
+- `src/cgroup/{api,ebpf,v1,v2}.rs` retain NVIDIA's original copyright header (Apache 2.0). Don't
+  relicense or reformat that block.
+- The README is the source of truth for the user-facing story; keep the flag tables
+  (`src/cli.rs`), the config keys (`src/config`), the label table (`src/policy`) and the
+  docker-compose snippet in sync if you change flags, keys, labels or mounts.
+- Log messages, attribute keys and levels, error texts, exit codes, metric families and Engine
+  requests are the 1.x contract. A difference that cannot be avoided gets a numbered Q entry in the
+  README's Migrating from 1.x table in the same commit; any other difference is a defect.
+- Every Rust and shell source, Dockerfile, the Makefile and the repo-local `.mk` fragments carry the
+  Apache-2.0 header (the IntelliJ `Apache-2.0` copyright profile), with the year of the file's first
+  commit, after any shebang or Dockerfile parser directive. `scripts/check-license-headers.sh` (the
+  `check-license-headers` hook) checks the whole tree; `src/cgroup/{api,ebpf,v1,v2}.rs` keep
+  NVIDIA's header, and make-common's files and Rust fixtures under `testdata/` are exempt. A Rust
+  file reused from swarm-scheduler-exporter or swarm-rootless-docker adds the provenance comment of
+  [`docs/rust-port.md`](docs/rust-port.md) below the header, complete, and never the MIT block.
 - The image's `dhi.io` bases are pinned by tag, not by digest, on purpose (the Dockerfile says
-  why); the BuildKit frontend is pinned by digest, and the golang tag names go.mod's exact Go
-  version. Dependabot takes only patch releases of golang: a new Go minor moves go.mod and the tag
-  together, by hand.
+  why); the BuildKit frontend is pinned by digest, and the rust tag names rust-toolchain.toml's
+  exact release. Dependabot ignores the rust image: a new Rust release moves rust-toolchain.toml,
+  the tag, `RUST_VERSION` and the `rust-std` digests together, by hand.
 
 ## Project skills
 
 Skills live in `.agents/skills/` (symlinked as `.claude/skills`). Load them before the work, not
 after review:
 
-- `go-style-guide` — before any `.go` edit.
-- `trust-boundary` — before touching `internal/config`, `internal/policy`, label parsing or rule
-  collection in `internal/processor`, `internal/launcher`, `deployments/docker/Dockerfile` or
-  anything else under `deployments/**`.
+- `rust-style-guide` — before any `.rs` edit, and before editing a Cargo manifest, `clippy.toml`,
+  `rustfmt.toml`, `rust-toolchain.toml` or `deny.toml`. It must be loaded before the Rust edit,
+  not after clippy fails.
+- `trust-boundary` — before touching `src/config`, `src/policy`, label parsing or rule collection
+  in `src/processor`, the CLI and `SIGHUP` reload path (`src/cli.rs`, `src/cli/settings.rs`,
+  `src/run.rs`), `src/launcher`, the HTTP server (`src/server.rs`, `src/server/`),
+  `deployments/docker/Dockerfile` or anything else under `deployments/**`, or `examples/**`.
 - `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
+
+`rust-style-guide` and `adversarial-review` point at [`docs/rust-port.md`](docs/rust-port.md) as
+the reuse ledger, with the crates, the design decisions and the provenance of every component
+reused from swarm-scheduler-exporter or swarm-rootless-docker. Check the ledger, and update its row
+in the same commit, when a reused component changes or an upstream fix is taken.
 
 ## Quality rules not enforced by tooling
 
-- **Reuse before writing.** Check `go-style-guide` §18 for an existing helper (`logger.L`,
-  `processor.IsMountSource`, `sleepCtx`, the backoff constants, the nil-safe
-  `observability.Recorder`) before adding one.
+- **Reuse before writing.** Check `rust-style-guide` §7 and the reuse ledger in
+  [`docs/rust-port.md`](docs/rust-port.md) for an existing helper or component (the `LogHandle`,
+  `processor::rules::is_mount_source`, the injected `Clock`, the backoff constants, the `Recorder`
+  and its no-op form, `go_compat`, `test_support`) before adding one.
 - **Fail closed.** An empty, unknown or malformed mode, config value or label denies or skips — it
   never falls back to wider device access.
 - **Deletion smell.** Removing a user-visible surface (flag, key, label, metric, documented
   behavior) and flipping its test to assert absence needs a line in `README.md` or `docs/**` that
   retires it; a commit message is not enough.
-- **Suppressions show their work.** A new `//nolint`, `# shellcheck disable=` or
-  `# droast ignore=` explains why the fix does not apply here, not which rule fired; droast also
-  requires the reason in the directive (`reason="..."`).
+- **Suppressions show their work.** A new `#[expect(...)]`, `# shellcheck disable=` or
+  `# droast ignore=` explains why the fix does not apply here, not which rule fired; `#[expect]`
+  carries it in `reason = "..."` and droast in `reason="..."`.
 
 ## Suppressions are ratcheted
 
 Every in-file suppression is counted per rule against `.suppressions-baseline` by the
-`check-suppressions` pre-commit hook (`scripts/check-suppressions.sh`): `//nolint:<linter>`,
-`# shellcheck disable=`, `# droast ignore=` and `# droast global ignore=`.
+`check-suppressions` pre-commit hook (`scripts/check-suppressions.sh`): each lint of a Rust
+`#[expect(...)]` or `#[allow(...)]` (not one wrapped in `cfg_attr`; `#[allow]` is denied by the
+workspace lints anyway), `# shellcheck disable=`, `# droast ignore=` and `# droast global ignore=`.
 
 Adding one is allowed, but never silently: the hook refuses a commit that adds a suppression line
 without changing the baseline in the same commit, including a swap or a moved file that leaves the
@@ -215,18 +258,20 @@ Run before considering an edit done. `make check` applies to every row.
 
 | You edited | Run |
 | --- | --- |
-| `**/*.go` | `make verify-go`, then `make check-stage` |
-| `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
-| `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
-| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/` (droast runs in `make check`), `make docker-build` |
-| `.golangci.yaml` | `make go-lint` |
-| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/` |
-| `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/` |
-| `test/**` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `make go-lint` |
-| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, droast and ShellCheck pins, vacuous flags) |
-| `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `go test ./test/toolchain/`, `make help` |
-| `scripts/hooks/gofmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.go` file in Claude Code |
-| `README.md`, `docs/**/*.md`, other Markdown | `go test -count=1 ./test/docs/`; prose wraps at 100 columns (markdownlint in `make check`) |
+| `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify` (load `rust-style-guide` first), then `make check-stage` |
+| `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
+| `tests/testdata/**` (the Go golden captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, Go golden captures): never regenerate one by hand |
+| a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify`, `make rust-deny` (network) |
+| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
+| `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
+| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `cargo test --locked -p meta --test suppressions` |
+| `scripts/check-license-headers.sh` | `cargo test --locked -p meta --test license_headers` |
+| `.github/scripts/**` | `bash .github/scripts/binary-attestation-status.test.sh`, shellcheck (in `make check`) |
+| `meta/**` | `make verify` (load `rust-style-guide` first) |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, platforms, vacuous flags, required gates and skipped hooks) |
+| `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
+| `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
+| `README.md`, `docs/**/*.md`, other Markdown | `cargo test --locked -p meta --test docs` (the `docs-links` hook); prose wraps at 100 columns (markdownlint in `make check`) |
 | `.agents/skills/**` | the Markdown row |
 
 ## Commit messages

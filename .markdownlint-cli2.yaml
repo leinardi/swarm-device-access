@@ -14,7 +14,7 @@ config:
     headings: false
   ul-indent:
     indent: 2
-  # Code blocks keep their own indentation (Makefile and Go examples use tabs).
+  # Code blocks keep their own indentation (Makefile examples use tabs).
   no-hard-tabs:
     code_blocks: false
   no-duplicate-heading:

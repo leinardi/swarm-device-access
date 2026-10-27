@@ -1,0 +1,57 @@
+level=INFO string value value=plain
+level=INFO string value value="with space"
+level=INFO string value value="say \"hi\""
+level=INFO string value value=k=v
+level=INFO string value value=C:\path\x
+level=INFO string value value=line1
+line2
+level=INFO string value value="a	b"
+level=INFO string value value=ab
+level=INFO string value value=ab
+level=INFO string value value=
+level=INFO string value value="ok 🚀"
+level=INFO string value value=日本語
+level=INFO string value value="html <a>&amp;"
+level=INFO string value value="trailing "
+level=INFO string value value=" leading"
+level=INFO string value value=-dash
+level=INFO string value value={brace}
+level=INFO string value value=[bracket]
+level=INFO string value value=/dev/dri/card0
+level=INFO string value value=/dev/dri/by-path/pci-0000:00:02.0-card
+level=INFO string value value="c 226:0 rwm"
+level=INFO string value value="b 8:*"
+level=INFO string value value="a=b c"
+level=INFO string value value=nbsp x
+level=INFO string value value=ls x
+level=DEBUG debug message
+level=INFO info message
+level=WARN warn message
+level=ERROR error message
+level=ERROR between debug and info
+level=ERROR between info and warn
+level=ERROR between warn and error
+level=ERROR above error
+level=INFO
+level=INFO message with "quotes" and = sign
+level=INFO message
+with a newline
+level=INFO container processed id=abc pid=4242 devices_granted=1 skipped=0 errors=0 dry_run=false
+level=INFO integers zero=0 negative=-1 min=-9223372036854775808 max=9223372036854775807 major=226 umax=18446744073709551615
+level=INFO floats zero=0 half=0.5 big=1e+21 small=1e-07 third=0.3333333333333333
+level=WARN booleans yes=true no=false
+level=WARN durations zero=0s nanos=999ns micros=1.5µs millis=1.234ms second=1s backoff=30s retry_in=5m0s hour=1h0m30s negative=-2s
+level=INFO times at=2026-10-25T14:03:04.567891234+01:00 utc=2026-01-02T03:04:05Z millis=2026-01-02T03:04:05.12-05:00
+level=WARN device rule failed id=abc err=device identity could not be established: function not implemented
+level=WARN wrapped error err=open cgroup "/sys/fs/cgroup/x": no such file or directory
+level=WARN joined error id=abc err=device identity could not be established: /dev/dri: openat2 dri: permission denied
+device mount enumeration incomplete: /dev/dri/by-path: permission denied
+level=INFO nil value err=<nil>
+level=WARN mount excluded: no children matched allow/deny policy path=/dev/dri children_seen=[card0 renderD128] allow_globs=[/dev/dri/*] deny_globs=[]
+level=INFO string lists nil=[] empty=[] one=[a] spaced=[a b c] quoted=["q"] empty_item=[]
+level=INFO device denied by policy under one of its names id=abc device=b 8:0 denied_by=/dev/evil/link
+level=INFO groups rule={rule.type=c rule.major=1 rule.minor=3 rule.access=rwm} outer={outer.inner={outer.inner.deep="value with space"}}
+level=INFO with attributes component=systemd attempt=2 retry_in=30s
+level=WARN with a group watcher.owner=:1.42 watcher.err=connection reset
+level=INFO nested groups a.b.key=value a.b.g={a.b.g.n=1}
+level=INFO group without attributes

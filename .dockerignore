@@ -3,21 +3,32 @@
 .gitignore
 .gitattributes
 
-# CI, docs, tests and agent tooling: none of it is an input of the image
+# CI, docs, tests and agent tooling: none of it is an input of the image. The meta and testenv
+# crates stay: they are workspace members, and cargo reads every member's manifest before it builds
+# the one binary. tests is only the root package's test targets, which cargo build does not need;
+# bpf_privileged.rs stays, because Cargo.toml declares it and cargo refuses a declared target whose
+# file is missing.
 .github
 .claude
 .agents
 .serena
 docs
 examples
-test
 tests
+!tests/bpf_privileged.rs
 *.md
 
-# Local artifacts
+# Local artifacts: a host target directory would be copied in and then hidden by the build's
+# target cache mount
 dist
-coverage.out
-coverage.html
+target
+
+# Local secrets: the build copies the whole context (COPY .), so an environment file must never
+# reach it.
+.env
+**/.env
+.env.*
+**/.env.*
 
 # Editor/IDE
 .idea
