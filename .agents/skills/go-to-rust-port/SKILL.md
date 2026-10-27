@@ -150,6 +150,21 @@ Prometheus exporter).
   ignored. clap derive drops a trailing period from help and uses the struct doc as `about` →
   `help = "…"`, `about = None`. (flag source, help snapshot)
 
+### BPF instructions and fmt verbs
+
+- cilium/ebpf's `asm` does not round-trip bytes: decoding turns a `Div`/`Mod` with offset 1 and a
+  `Mov` with offset 8, 16 or 32 into wider opcodes (offset 0), encoding writes every other ALU op
+  with offset 0, a decoded atomic carries `imm << 8` in its opcode yet encodes its original
+  immediate, a helper call's ID is checked for a platform tag in bits 28-30 on both sides, and a
+  `ld_imm64` takes two slots → model its 32-bit `OpCode` and capture every opcode byte with
+  register, offset and immediate variants (decode, `%v`, re-encode, gate) from a Go test before
+  writing any of it. Its symbol resolution is only "the next block's first instruction" for a
+  device filter → resolve offsets while laying out, no labels. (2,333 rows, cilium v0.22.0)
+- `%x` on a `fmt.Stringer` hex-encodes its `String()`; `%s` on a type whose `Format` answers only
+  `v` prints `{UNRECOGNIZED: s}`; `%v` of a rune prints its number → take error texts from a Go
+  run, not from the format string. `fmt.Sscanf("%d.%d")` skips spaces (Unicode ones too, but not a
+  newline) before each number, takes a sign, needs no input after the last verb. (go program)
+
 ## 3. Ecosystem map
 
 - **HTTP client, simple:** reqwest's rustls backend builds `aws-lc-sys` (C) → ureq 3 with

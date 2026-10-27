@@ -20,11 +20,13 @@ package cgroup
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cilium/ebpf/asm"
@@ -499,3 +501,103 @@ func errText(err error) *string {
 
 	return &text
 }
+
+// TestGoldenAsm writes tests/testdata/devfilter/asm.tsv: how the daemon's decoding
+// (fromCanonical), its canonical re-encoding (canonicalBytes), cilium's instruction text and the
+// gate treat one instruction, for every opcode byte with register, offset and immediate variants
+// chosen to reach each branch, DWord loads with each kind of second half, and truncated input.
+// Columns: the raw bytes, then either "decode error" and its text, or "ok", the instruction's
+// text, the canonical bytes (or "encode error: " and its text) and the gate verdict ("-" for
+// none).
+func TestGoldenAsm(t *testing.T) {
+	type fields struct {
+		regs     byte
+		offset   int16
+		constant int32
+	}
+
+	variants := []fields{
+		{0x21, 0, 0},
+		{0x00, 1, 1},
+		{0x1a, 8, -1},
+		{0x00, 16, 0x10000000},
+		{0x01, 32, 7},
+		{0x10, -5, 5},
+		{0x00, 2, 0x0fffffff},
+		{0xff, -1, 0x1ff},
+		{0x00, 0, -1},
+	}
+
+	var out strings.Builder
+
+	out.WriteString("raw\tresult\ttext\tcanonical\tgate\n")
+
+	row := func(raw []byte) {
+		insts, err := fromCanonical(raw)
+		if err != nil {
+			fmt.Fprintf(&out, "%x\tdecode error\t%s\t-\t-\n", raw, err)
+
+			return
+		}
+
+		text := make([]string, 0, len(insts))
+		for _, ins := range insts {
+			text = append(text, fmt.Sprint(ins))
+		}
+
+		var canonical string
+
+		encoded, encodeErr := canonicalBytes(insts)
+		if encodeErr != nil {
+			canonical = "encode error: " + encodeErr.Error()
+		} else {
+			canonical = hex.EncodeToString(encoded)
+		}
+
+		gate := "-"
+
+		gateErr := checkWrappable(insts, knownMeta())
+		if gateErr != nil {
+			gate = gateErr.Error()
+		}
+
+		fmt.Fprintf(&out, "%x\tok\t%s\t%s\t%s\n", raw, strings.Join(text, "; "), canonical, gate)
+	}
+
+	for opcode := range 256 {
+		for _, variant := range variants {
+			raw := make([]byte, instructionBytes)
+			raw[0] = byte(opcode)
+			raw[1] = variant.regs
+			binary.LittleEndian.PutUint16(raw[2:4], uint16(variant.offset))
+			binary.LittleEndian.PutUint32(raw[4:8], uint32(variant.constant))
+
+			if byte(opcode) != dwordLoadOpcode {
+				row(raw)
+
+				continue
+			}
+
+			for _, second := range [][2]uint32{{0, 0}, {0, 0xdeadbeef}, {1, 0}} {
+				wide := append([]byte{}, raw...)
+				wide = binary.LittleEndian.AppendUint32(wide, second[0])
+				wide = binary.LittleEndian.AppendUint32(wide, second[1])
+				row(wide)
+			}
+
+			row(raw)
+		}
+	}
+
+	row([]byte{0xb4, 0x00, 0x00})
+	row([]byte{0xb4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x95})
+
+	goldencapture.Check(t, devfilterDir+"/asm.tsv", []byte(out.String()))
+}
+
+const (
+	// instructionBytes is the size of one raw instruction.
+	instructionBytes = 8
+	// dwordLoadOpcode is LdImmDW, the one instruction that takes two slots.
+	dwordLoadOpcode = 0x18
+)

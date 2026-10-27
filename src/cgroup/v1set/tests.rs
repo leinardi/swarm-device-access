@@ -24,6 +24,7 @@ use super::*;
 use crate::cgroup::api::Interface as _;
 use crate::cgroup::handle::Identity;
 use crate::cgroup::ledger::Ledger;
+use crate::cgroup::testing::rule;
 use crate::test_support::TempDir;
 
 /// Stands in for the kernel behind a cgroup v1 directory made of temporary files. Reads and writes
@@ -199,16 +200,6 @@ fn format_entry(entry: ListEntry) -> String {
         number(entry.minor),
         access_string(entry.access)
     )
-}
-
-fn rule(kind: &str, major: i64, minor: i64, access: &str) -> DeviceRule {
-    DeviceRule {
-        allow: true,
-        kind: kind.to_owned(),
-        major: Some(major),
-        minor: Some(minor),
-        access: access.to_owned(),
-    }
 }
 
 fn bit(kind: u8, major: i64, minor: i64, access: u8) -> DevBit {

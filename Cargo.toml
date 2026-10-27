@@ -87,8 +87,11 @@ bytes = "1.12.1"
 # The Engine API's JSON: the typed answers the daemon reads and the error bodies.
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-# The cgroup directory descriptor and the openat, fstat and open calls on it, without unsafe.
-rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
+# The cgroup directory descriptor and the openat, fstat and open calls on it, and getrandom for
+# the wrapper nonce, without unsafe.
+rustix = { version = "1.1.5", default-features = false, features = ["std", "fs", "rand"] }
+# The digest of the original program in the device filter wrapper's header, as Go's crypto/sha256.
+sha2 = { version = "0.10.9", default-features = false }
 # The timer TokioClock follows, and the unix socket, the tasks and the lock of the Docker client.
 # Later phases add the runtime and the signals.
 tokio = { version = "1.54.1", default-features = false, features = [
