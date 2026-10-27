@@ -61,7 +61,8 @@ throwaway or trusted host, such as a CI runner or a disposable VM.
 
 Every container the suite creates carries the `swarm-device-access-it.envid`
 label. Each run prints a one-line cleanup command for its own containers; after
-a killed run, `make sweep-test-leaks` removes the leftovers of every run.
+a killed run, `make sweep-test-leaks` removes the leftovers of every run, the
+Rust suite's included.
 
 The native privileged checklist below is now partly automated. The enforcement
 test covers step 3 (an opted-in container with a real `/dev/...` bind mount gets
@@ -69,6 +70,44 @@ its rule), checks the outcome of step 4 by opening the device rather than
 inspecting the program with `bpftool`, and covers step 7 (the rule is
 re-applied after `systemctl daemon-reload`). Run the checklist by hand for the
 remaining steps, and for these on hosts the test does not cover.
+
+## Rust integration suite
+
+The Rust port of the suite lives in the `testenv` crate, behind its `integration` feature, and runs
+beside the Go suite against the same host Docker daemon until the cutover
+([`docs/rust-port.md`](rust-port.md)):
+
+```bash
+make rust-test-integration                              # every ported test
+make rust-test-integration RUN='^TestDaemon_DryRun_'    # Go's -run semantics
+```
+
+The target builds the static host-architecture musl binary (`cargo build --release --target
+<arch>-unknown-linux-musl`, one architecture, no release packaging) and a throwaway `FROM scratch`
+image of it, `swarm-device-access:rust-integration`, whose Dockerfile goes to `docker build` on
+stdin. It exports them as `SDA_RUST_TEST_BINARY` and `SDA_RUST_TEST_IMAGE`, variables of the Rust
+suite's own: it never reads `SDA_TEST_BINARY` or `SDA_TEST_IMAGE` for them, which name the Go
+build. It also runs `go-build`, for the negative control below.
+
+- **Identity check.** Before any test, the runner runs the binary and the image with `-help`. Go's
+  `flag` package prints its usage and exits 0; the Rust daemon refuses a single-dash long flag
+  with exit 2 and `error: single-dash long flags are not supported: '-help'; use '--help'`. Any
+  other answer, an unset variable or an unreachable Docker daemon fails the run; none of them
+  skips it. `TestIdentity_RefusesGoImage` is the check's negative control: it builds a scratch
+  image of the static Go binary (`SDA_TEST_BINARY`) and requires the check to refuse it.
+- **Tests.** The dry-run tests of `daemon_test.go` and `TestLauncher_RunsDaemonFromItsOwnImage`,
+  under their Go names. The binary runs as a host process with `--dry-run` and the double-dash
+  flags the Rust daemon takes; the launcher test runs the image and, as in Go, only with
+  `SDA_IT_ENFORCE=1`. The enforcement tests of `enforce_test.go` are not ported yet.
+- **Run filter.** `RUN` goes to the runner's `--run` with Go's `-run` semantics (a regular
+  expression per `/`-separated level), and a pattern that selects no test fails the run, where Go
+  would pass with "no tests to run".
+- **Deadline and cleanup.** `SDA_IT_SUITE_TIMEOUT` (default 4m) bounds the run, and SIGINT or
+  SIGTERM ends it the same way, so the cleanups still run. Everything the suite creates carries the
+  `swarm-device-access-it.envid` label plus its owner, start time and PID namespace; a run removes
+  the leftovers of earlier runs only once they are older than an hour (`SDA_IT_STALE_AFTER`) and
+  their owner process is gone from this host. `make sweep-test-leaks` removes the leftovers of
+  every run of either suite, whatever their age.
 
 ## Dry-Run Coverage
 

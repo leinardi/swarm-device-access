@@ -42,7 +42,8 @@ Integration tests (need a live Docker daemon; see [`docs/testing.md`](docs/testi
 ```bash
 make go-test-integration                   # dry-run tests
 make go-test-integration SDA_IT_ENFORCE=1  # plus the real-enforcement test: attaches BPF, runs systemctl daemon-reload; throwaway hosts only
-make sweep-test-leaks                      # remove containers left behind by killed runs
+make rust-test-integration                 # the Rust suite (testenv) against the Rust binary and scratch image
+make sweep-test-leaks                      # remove containers and images left behind by killed runs
 ```
 
 Single test:
@@ -250,6 +251,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `**/*.go` | `make verify-go`, then `make check-stage` |
 | `internal/{logger,policy,config,observability}/**`, a `golden_capture_test.go` | `make golden-check` (in `verify-go`); a deliberate change is recaptured with `make golden-update` and its diff reviewed |
 | `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
+| `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make rust-test-integration` (Docker) beside `make go-test-integration`; `SDA_IT_ENFORCE=1` only on a throwaway host |
 | `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify-rust` (load `rust-style-guide` first), then `make check-stage` |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify-rust`, `make rust-deny` (network) |

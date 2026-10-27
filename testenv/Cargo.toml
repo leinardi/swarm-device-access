@@ -30,8 +30,68 @@ publish = false
 [lints]
 workspace = true
 
-# The integration suite and the harness code it needs (bollard, the host Docker daemon) sit behind
-# this feature, so a plain `cargo test --workspace` needs no Docker. Build and clippy take
-# --all-features, so that code is still compiled and linted.
+# integration is Go's integration build tag: it compiles the modules that talk to the host Docker
+# daemon (the client, the sweep, the image runs) and the suite. Without it, only the run filter,
+# the sweep rules, the redacting logger and the image identity rule build, and their tests run in
+# a plain cargo test, which needs no Docker. Build and clippy take --all-features, so the gated
+# code is still compiled and linted.
 [features]
-integration = []
+integration = [
+    "dep:bollard",
+    "dep:futures-util",
+    "dep:rustix",
+    "dep:tokio",
+    "dep:tokio-util",
+]
+
+[dependencies]
+# The daemon's slog-compatible logger, the wall clock, Go's time.ParseDuration and
+# Duration.String, strconv.Quote and errors.Join, and the label and launcher constants the suite
+# checks. The dependency only goes this way: the daemon package names testenv in no table (the
+# docker_boundary meta-test checks its sources), so nothing here reaches the shipped binary.
+swarm-device-access = { path = ".." }
+# The sweep's started label, read as RFC 3339.
+jiff = { version = "0.2.38", default-features = false, features = ["std"] }
+# The run filter: Go's -run patterns are regular expressions.
+regex = "1.13.1"
+# The Docker SDK, for the harness only, which creates and removes containers and images on
+# purpose. An optional normal dependency, not a dev-dependency: the suite reaches it through this
+# library's API, and a dev-dependency is not available to library code. Only the unix socket
+# (pipe): the harness drives the local host daemon, so neither TCP nor TLS is built.
+bollard = { version = "=0.21.1", default-features = false, features = ["pipe"], optional = true }
+futures-util = { version = "0.3.34", default-features = false, features = [
+    "std",
+], optional = true }
+# kill(pid, 0) for the sweep's liveness check, without unsafe code; the daemon child's signals.
+rustix = { version = "1.1.6", default-features = false, features = [
+    "std",
+    "process",
+], optional = true }
+tokio = { version = "1.54.1", default-features = false, features = [
+    "rt",
+    "time",
+], optional = true }
+# CancellationToken, Go's context: the suite deadline cancels every Docker call.
+tokio-util = { version = "0.7.20", default-features = false, optional = true }
+
+# The suite's own needs, beside the library's: the daemon child processes and the docker build of
+# the negative control's image, the signal that cancels the suite, the metrics request, and the
+# daemon's JSON log records.
+[dev-dependencies]
+tokio = { version = "1.54.1", default-features = false, features = [
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt",
+    "signal",
+    "sync",
+    "time",
+] }
+serde_json = "1.0.154"
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+harness = false
+required-features = ["integration"]

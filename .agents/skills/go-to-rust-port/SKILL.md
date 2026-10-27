@@ -207,6 +207,18 @@ Prometheus exporter).
   `lookup_host` refuses `%` → port `parseHost`'s checks, build the `SocketAddrV6` with its scope
   (sysfs `ifindex`, else the zone as a number, else 0), and strip the zone from `Host`. (Go 1.26
   probe against a fake Engine on `[::1]`)
+- **bollard in a harness:** `wait_container` yields `Err(DockerContainerWaitError { code })` for
+  any non-zero exit, so `docker run`'s "exit 2" reads as a failed wait → treat that variant as the
+  exit and take the code from it (or inspect `State.ExitCode`). Its request futures are large
+  enough (about 18 KB for a create) that clippy's `large_futures` fires in every async caller →
+  box the call once, in the harness's one call helper, not at each site. (bollard 0.21.1, clippy
+  1.98; swarm-device-access testenv)
+- **Telling a Go build from a Rust one:** a test suite that runs "the image under test" can be
+  handed the Go image by a shared variable and pass, since the Rust daemon reproduces Go's logs →
+  give the Rust suite its own variable and prove identity first with an answer the two builds
+  must differ on (Q1: `-help` exits 0 with Go's usage, 2 with the Rust refusal), failing, never
+  skipping, on a mismatch; keep a negative control that builds the Go image and requires the
+  refusal. (swarm-device-access testenv, Go v1.0.3+ captured `-help`)
 - **D-Bus (godbus):** zbus 6 with `default-features = false, features = ["tokio"]` pulls no
   async-io, smol or blocking crate, and its system bus address order is godbus's
   (`DBUS_SYSTEM_BUS_ADDRESS`, else `/var/run/dbus/system_bus_socket`).
@@ -384,6 +396,14 @@ Prometheus exporter).
 - **Static builds:** cargo-zigbuild builds static musl for amd64 and arm64 from one platform; it
   publishes no aarch64 musl asset (an arm64 build host takes `aarch64-unknown-linux-gnu` in a
   glibc stage). Alpine's rust links dynamically; `+crt-static` needs `--target`. (failed builds)
+  For a host-architecture test binary only, plain `cargo build --release --target
+  <arch>-unknown-linux-musl` on a glibc host with the rustup target is enough: it links
+  static-pie with the target's self-contained musl CRT, no linker setting or zig. Check static by
+  the absence of `PT_INTERP`, not by `file`'s wording. (Rust 1.98.1, x86_64)
+- A Go meta-test that walks the working tree with `filepath.WalkDir` (rather than `git ls-files`)
+  also walks cargo's `target/`, so a generated `Dockerfile` there (a throwaway test image) fails
+  "the shipped Dockerfile is the only one" → feed such a Dockerfile to `docker build --file -` on
+  stdin and keep only the context on disk. (swarm-device-access `test/dockerfiles`)
 - `dhi.io/rust` has no rustup; its `-debian*-dev` variant takes a target from
   `rust-std-<exact version>-<triple>.tar.xz` and `install.sh --prefix=/usr/local`. Its tag carries
   its own patch, so a copied `rust-toolchain.toml` can build the release binaries with another

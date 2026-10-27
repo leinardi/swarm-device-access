@@ -23,11 +23,10 @@
 //! turns the feature on. The Rust side of `TestUntaggedTestsAvoidDocker`, whose Go build-tag
 //! reading stays Go-only until the cutover.
 //!
-//! testenv is still a stub until the Rust integration suite lands: its lib.rs declares no
-//! module and its manifest no test target. So where SSE requires an ungated module and a test
-//! target named `integration`, this port checks every testenv source outside a gated module and
-//! every test target the manifest declares, and anchors on what exists today (the feature, the
-//! scanned sources), so none of the checks passes on nothing.
+//! Where SSE scans the ungated modules lib.rs declares, this port scans every testenv source
+//! outside a gated module, lib.rs included, and checks every test target the manifest declares;
+//! as in SSE, the suite itself must be a test target named `integration` that requires the
+//! feature, so none of the checks passes on nothing.
 
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -110,8 +109,9 @@ fn read_all(paths: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// What is wrong with the harness manifest: the feature must exist, enable nothing a plain build
-/// would not have, and every `[[test]]` target must require exactly it.
+/// What is wrong with the harness manifest: the feature must exist and be off by default, the
+/// suite must be a test target named `integration`, and every `[[test]]` target must require
+/// exactly the feature.
 fn manifest_problems(manifest: &str) -> Vec<String> {
     let manifest: Table = match manifest.parse() {
         Ok(manifest) => manifest,
@@ -142,6 +142,14 @@ fn manifest_problems(manifest: &str) -> Vec<String> {
         .and_then(toml::Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let suite = targets
+        .iter()
+        .any(|target| target.get("name").and_then(toml::Value::as_str) == Some(FEATURE));
+    if !suite {
+        problems.push(format!(
+            "{HARNESS_MANIFEST} declares no test target named {FEATURE}"
+        ));
+    }
     for target in &targets {
         let name = target
             .get("name")
@@ -305,6 +313,10 @@ fn separation_rules_are_recognized() {
         (
             "on by default",
             "[features]\ndefault = [\x22integration\x22]\nintegration = []\n".to_owned(),
+        ),
+        (
+            "no integration test target",
+            "[features]\nintegration = []\n".to_owned(),
         ),
         (
             "a test target without the feature",
