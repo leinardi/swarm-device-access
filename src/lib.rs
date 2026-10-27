@@ -21,3 +21,7 @@
 //! The port lands module by module beside the Go daemon, which keeps shipping until the cutover;
 //! `docs/rust-port.md` records the design, the intended differences from 1.x and where each module
 //! comes from.
+
+pub mod clock;
+pub mod go_compat;
+pub mod logger;

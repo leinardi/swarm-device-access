@@ -107,6 +107,14 @@ Prometheus exporter).
 - A per-test tracing `set_default` is thread-local and races the global callsite-interest cache
   → `current_thread` runtime, a global catch-all subscriber installed once, then
   `rebuild_interest_cache()`. Or inject the logger's sink and skip tracing. (3 of 40 runs lost)
+- A nil `[]string` and an empty one log alike in text (`[]`) but not in JSON (`null` against
+  `[]`), and a `Vec` cannot tell them apart → a separate nil value kind. A `fmt.Stringer` goes
+  through `json.Marshal` (its underlying type decides the shape), not slog's string escaper. (go
+  program)
+- Two Go projects' handlers with the same name and the same author can differ: one plain handler
+  escapes and quotes every value, the other writes messages, keys, errors and lists raw (a newline
+  splits the record) → reuse the sibling port, but diff it against this repo's Go goldens before
+  trusting it, and compare golden files whole, not line by line. (golden diff)
 
 ### CLI
 

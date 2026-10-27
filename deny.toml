@@ -46,6 +46,9 @@ allow = [
     # winnow (MIT only), under the meta crate's toml dev-dependency; memchr and aho-corasick
     # (Unlicense OR MIT), under its regex dev-dependency. Dev-only: see above.
     "MIT",
+    # unicode-ident ((MIT OR Apache-2.0) AND Unicode-3.0), under proc-macro2 and syn, which
+    # tokio-macros needs for the tests' #[tokio::test].
+    "Unicode-3.0",
 ]
 confidence-threshold = 0.9
 
