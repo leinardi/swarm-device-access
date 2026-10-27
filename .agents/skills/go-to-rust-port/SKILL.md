@@ -204,6 +204,15 @@ Prometheus exporter).
   prefixes the error name, where godbus printed the message alone → map `MethodError`, `FDO` and
   `DBus` to the description. Compare the two clients on a private `dbus-daemon` with `dbus-monitor`
   rather than by reading code. (zbus 6.1.0, godbus v5)
+- **Syscalls (golang.org/x/sys/unix):** rustix's `Signal` wraps a non-zero value, so Go's
+  `PidfdSendSignal(fd, 0, nil, 0)` liveness check cannot be written → poll the pidfd for
+  `POLLIN` (the process exited), and record that a zombie now counts as gone. `Pid::from_raw`
+  asserts a non-negative value (a panic in a debug build) where Go hands `-1` to the kernel and
+  gets `EINVAL` → filter `> 0` first and return the errno Go's call got. `filepath.WalkDir`
+  sorts each directory and visits an unreadable one a second time with the error, after the
+  entries read before it; the walkdir crate does neither by default → port it, and let the fake
+  walk a real temporary directory through the port, as Go's fake did. (rustix 1.1.6, scratch Go
+  tests)
 - **Docker over a unix socket:** moby's defaults there are not its TCP ones: no gzip, no
   response-header timeout, `Host: api.moby.localhost`, the socket path as the escaped host in
   error URLs, and the `User-Agent` `moby-client/<version> <GOOS>/<GOARCH>` (Go's arch names);

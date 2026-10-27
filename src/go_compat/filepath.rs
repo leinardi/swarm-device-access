@@ -242,6 +242,21 @@ pub fn base(path: &str) -> &str {
     trimmed.rsplit_once('/').map_or(trimmed, |(_, last)| last)
 }
 
+/// `filepath.Join`: the non-empty elements joined with separators and cleaned; empty when every
+/// element is.
+#[must_use]
+pub fn join(elements: &[&str]) -> String {
+    let joined: Vec<&str> = elements
+        .iter()
+        .copied()
+        .filter(|element| !element.is_empty())
+        .collect();
+    if joined.is_empty() {
+        return String::new();
+    }
+    clean(&joined.join("/"))
+}
+
 /// `filepath.Clean`: the shortest path naming the same file by lexical processing: repeated
 /// separators collapse, `.` elements go, a `..` element removes the element before it (and is
 /// dropped at the root), a trailing separator goes, and an empty result is `.`.
@@ -371,6 +386,25 @@ mod tests {
             ("/dev/sda/", "/dev/sda"),
         ] {
             assert_eq!(clean(input), want, "{input:?}");
+        }
+    }
+
+    /// Go's `filepath.Join`, checked against the Go function.
+    #[test]
+    fn join_skips_empty_elements_and_cleans() {
+        let cases: [(&[&str], &str); 6] = [
+            (&[], ""),
+            (&["", ""], ""),
+            (&["/dev", "dri"], "/dev/dri"),
+            (&["/dev", "", "dri/../sda"], "/dev/sda"),
+            (&["dri", "card0"], "dri/card0"),
+            (
+                &["/sys", "dev", "char", "1:3", "uevent"],
+                "/sys/dev/char/1:3/uevent",
+            ),
+        ];
+        for (elements, want) in cases {
+            assert_eq!(join(elements), want, "{elements:?}");
         }
     }
 }

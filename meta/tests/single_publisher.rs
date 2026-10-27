@@ -19,9 +19,10 @@
 //! be named only under `src/processor/`, by a call, a path or a method reference alike, and there
 //! exactly once.
 //!
-//! Until the processor is ported (`docs/rust-port.md`), nothing may name it at all; from the
-//! commit that adds `src/processor/`, exactly one reference there is required, as in Go, which
-//! guards the scan itself. The checks are functions of the text, each also run on input built to
+//! Until the processor's reconcile is ported (`docs/rust-port.md`), nothing may name it at all;
+//! from the commit that defines `publish_and_reconcile` under `src/processor/`, exactly one
+//! reference there is required, as in Go, which guards the scan itself. The device discovery
+//! under `src/processor/` lands a phase earlier and publishes nothing. The checks are functions of the text, each also run on input built to
 //! break it.
 
 use meta::repo;
@@ -29,6 +30,9 @@ use regex::Regex;
 
 /// Where the one publication lives.
 const PROCESSOR: &str = "src/processor/";
+
+/// The processor entry point that publishes; once it exists, the one reference is required.
+const PUBLISHER: &str = "fn publish_and_reconcile(";
 
 /// Where `publish` is defined; the scan must read it.
 const DEFINITION: &str = "src/config/mod.rs";
@@ -191,7 +195,11 @@ fn only_the_processor_publishes() {
         offenders.is_empty(),
         "the config is published outside the processor: {offenders:?}"
     );
-    let want = usize::from(present.iter().any(|path| path.starts_with(PROCESSOR)));
+    let want = usize::from(
+        present
+            .iter()
+            .any(|path| path.starts_with(PROCESSOR) && repo::read(path).contains(PUBLISHER)),
+    );
     assert_eq!(
         allowed, want,
         "references to publish under {PROCESSOR}: {allowed}, want {want}"
