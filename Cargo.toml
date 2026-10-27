@@ -177,3 +177,16 @@ strip = true
 # not have): the Go daemon has no recover, so a panic crashes the process and Swarm or the launcher
 # restarts it. A task panic under unwind would leave a daemon that looks alive and does nothing.
 panic = "abort"
+
+# The meta-tests scan the whole tree with regexes; unoptimised, regex compilation and matching
+# dominate their run time. Only the regex crates are optimised in dev and test builds, which costs
+# a few seconds on a clean build and nothing on an incremental one; the workspace's own code stays
+# at opt-level 0 for debugging.
+[profile.dev.package.regex]
+opt-level = 3
+
+[profile.dev.package.regex-automata]
+opt-level = 3
+
+[profile.dev.package.regex-syntax]
+opt-level = 3

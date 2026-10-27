@@ -55,10 +55,13 @@ fn is_test_code(path: &str) -> bool {
 /// and character literals are blanked first, so neither a comment nor a `//` inside a string
 /// hides or fakes a reference.
 fn references(text: &str) -> Vec<usize> {
+    // Compiled once per file, not per line: a debug-build regex compile costs far more than
+    // matching every line of the file.
+    let reference = reference();
     code_only(text)
         .lines()
         .enumerate()
-        .filter(|(_, line)| reference().is_match(line))
+        .filter(|(_, line)| reference.is_match(line))
         .map(|(index, _)| index + 1)
         .collect()
 }
