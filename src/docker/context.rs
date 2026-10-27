@@ -101,6 +101,13 @@ impl CallContext {
         self.token.cancel();
     }
 
+    /// A token cancelled with the context (not when its deadline passes), for a task that takes
+    /// a [`CancellationToken`]. Cancelling the token does not cancel the context.
+    #[must_use]
+    pub fn cancellation(&self) -> CancellationToken {
+        self.token.child_token()
+    }
+
     /// Go's `ctx.Err()`: why the context is done, if it is, by what happened first.
     #[must_use]
     pub fn err(&self) -> Option<ContextError> {

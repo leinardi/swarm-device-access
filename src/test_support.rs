@@ -18,7 +18,10 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! Helpers the unit tests share: a temporary directory, the files under `tests/testdata`, log
-//! capture through the logger's injectable sink, and a bounded [`eventually`].
+//! capture through the logger's injectable sink, a bounded [`eventually`], and a fake Docker
+//! ([`fake_docker`]).
+
+pub(crate) mod fake_docker;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

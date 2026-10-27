@@ -228,6 +228,12 @@ impl<I: Inspector> Processor<I> {
         }
     }
 
+    /// The generation of the config in force: the one a pass is requested under.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.store.generation()
+    }
+
     /// The lifecycle history of container runs.
     #[must_use]
     pub fn lifecycles(&self) -> &Arc<Lifecycles> {

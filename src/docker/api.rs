@@ -72,6 +72,34 @@ pub trait DockerApi: Send + Sync {
     ) -> impl Future<Output = Result<Self::Events, Error>> + Send;
 }
 
+/// A shared client is a client: the daemon hands one to the coordinator and the event loop.
+impl<Api: DockerApi + ?Sized> DockerApi for std::sync::Arc<Api> {
+    type Events = Api::Events;
+
+    fn ping(&self) -> impl Future<Output = Result<(), Error>> + Send {
+        Api::ping(self)
+    }
+
+    fn container_list(&self) -> impl Future<Output = Result<Vec<ContainerSummary>, Error>> + Send {
+        Api::container_list(self)
+    }
+
+    fn container_inspect(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = Result<ContainerInspect, Error>> + Send {
+        Api::container_inspect(self, id)
+    }
+
+    fn events(
+        &self,
+        since: Timestamp,
+        filters: &Filters,
+    ) -> impl Future<Output = Result<Self::Events, Error>> + Send {
+        Api::events(self, since, filters)
+    }
+}
+
 /// An open event stream.
 pub trait EventStream: Send {
     /// The next event, or how the stream ended; after an error the stream is over.

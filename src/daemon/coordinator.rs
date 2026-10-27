@@ -921,4 +921,6 @@ async fn sleep_until(deadline: Option<Instant>) {
 }
 
 #[cfg(test)]
+pub(super) mod testing;
+#[cfg(test)]
 mod tests;

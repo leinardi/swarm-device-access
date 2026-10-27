@@ -303,6 +303,10 @@ Prometheus exporter).
   on a tracked task of its own that releases the key itself, and have the caller await its
   handle; shutdown waits for the tracker. (coordinator mutation test: an inline hold fails both
   regression tests)
+- moby's `Events` returns once the request has been answered or has failed, and reports a
+  failed request on the stream's error channel, so Go logs "subscribed" and then a stream error;
+  a Rust `events()` that fails the call itself skips the first line → keep the refusal as the
+  stream's first item. (moby v0.6.0 `Events` source)
 - Go's one-slot wake channel with a non-blocking send (`select { case ch <- x: default: }`) is
   `Notify::notify_one`: its single stored permit is the slot. (coordinator port)
 - Under `start_paused`, a running `spawn_blocking` task stops the clock from auto-advancing
