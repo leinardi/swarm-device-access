@@ -161,6 +161,15 @@ Prometheus exporter).
   `lookup_host` refuses `%` → port `parseHost`'s checks, build the `SocketAddrV6` with its scope
   (sysfs `ifindex`, else the zone as a number, else 0), and strip the zone from `Host`. (Go 1.26
   probe against a fake Engine on `[::1]`)
+- **Docker over a unix socket:** moby's defaults there are not its TCP ones: no gzip, no
+  response-header timeout, `Host: api.moby.localhost`, the socket path as the escaped host in
+  error URLs, and the `User-Agent` `moby-client/<version> <GOOS>/<GOARCH>` (Go's arch names);
+  `ContainerList` with no options sends no query at all (running containers only). moby's
+  `ensureReaderClosed` drains up to 512 bytes of every response it does not decode, the ping's
+  `GET` fallback included → drain it too, or hyper drops the connection and the replayed wire
+  shows a connection the Go client never opened. Record the Go client's wire through a proxy and
+  replay it to the Rust client, connection numbers included: per-request unit tests do not see
+  connection reuse. (moby v0.6.0; `tests/testdata/engine_wire`)
 - **Event streams:** every real close of Docker's chunked stream is a cut without the
   terminating chunk (HAProxy timeout, stopped daemon), surfaced by hyper as a body `Err` with
   `is_incomplete_message() == false` → classify "the body returned Err" vs "ended", decode with

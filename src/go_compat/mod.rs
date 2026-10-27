@@ -33,7 +33,8 @@
 //! - [`errno`] gives an `io::Error` Go's `syscall.Errno` text;
 //! - [`filepath`] ports `filepath.Match` and `filepath.Clean` (new here);
 //! - [`parse_float`] ports `strconv.ParseFloat`, for the q values of an `Accept` header;
-//! - [`sort`] ports `sort.Sort`, whose order goautoneg's comparison depends on.
+//! - [`sort`] ports `sort.Sort`, whose order goautoneg's comparison depends on;
+//! - [`http_status`] ports `http.StatusText`, for moby's error wording.
 //!
 //! Only the modules the ported code uses are here; swarm-scheduler-exporter's others join when a
 //! phase needs them (`docs/rust-port.md`, the reuse ledger).
@@ -42,6 +43,7 @@ pub mod duration;
 pub mod errno;
 pub mod filepath;
 pub mod float;
+pub mod http_status;
 pub mod local_zone;
 pub mod parse_bool;
 pub mod parse_float;
