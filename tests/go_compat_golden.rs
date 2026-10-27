@@ -26,14 +26,17 @@
 //!   bits shifted into an `int64` and its `Duration.String`, for the first 2,000 of S4's 20,000
 //!   random values;
 //! - `time/go-layouts.tsv` (its S7): unix seconds, nanoseconds, the zone offset, `RFC3339Nano` and
-//!   `2006-01-02T15:04:05.000Z07:00`, for 70 instant and zone pairs.
+//!   `2006-01-02T15:04:05.000Z07:00`, for 70 instant and zone pairs;
+//! - `strings/go-strings.tsv` (go1.26.10): every pair of 50 words `strings.EqualFold` calls
+//!   equal, their `strings.ToLower`, and `strings.TrimSpace` of 10 texts, strings as the hex of
+//!   their bytes (`-` for empty).
 
 use std::fs;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 use jiff::tz::Offset;
-use swarm_device_access::go_compat::{duration, float, time_layout};
+use swarm_device_access::go_compat::{duration, float, strings, time_layout};
 
 fn testdata(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -131,4 +134,65 @@ fn time_layouts_match_go_on_the_s7_corpus() {
     }
     expect_all("time/go-layouts.tsv", &mismatches, checked);
     assert_eq!(checked, 70);
+}
+
+fn unhex(hex: &str) -> String {
+    if hex == "-" {
+        return String::new();
+    }
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&hex[index..index + 2], 16)
+                .unwrap_or_else(|error| panic!("{hex}: {error}"))
+        })
+        .collect();
+    String::from_utf8(bytes).unwrap_or_else(|error| panic!("{hex}: {error}"))
+}
+
+#[test]
+fn strings_match_go_on_its_unicode_15_tables() {
+    let data = testdata("strings/go-strings.tsv");
+    let lines: Vec<Vec<&str>> = data
+        .lines()
+        .map(|line| line.split('\t').collect())
+        .collect();
+    let words: Vec<String> = lines
+        .iter()
+        .filter(|fields| fields[0] == "lower")
+        .map(|fields| unhex(fields[1]))
+        .collect();
+    let folds: std::collections::BTreeSet<(String, String)> = lines
+        .iter()
+        .filter(|fields| fields[0] == "fold")
+        .map(|fields| (unhex(fields[1]), unhex(fields[2])))
+        .collect();
+    let mut mismatches = Vec::new();
+    let mut checked = 0;
+    for left in &words {
+        for right in &words {
+            let want = folds.contains(&(left.clone(), right.clone()));
+            if strings::equal_fold(left, right) != want {
+                mismatches.push(format!("EqualFold({left:?}, {right:?}): Go {want}"));
+            }
+            checked += 1;
+        }
+    }
+    for fields in &lines {
+        let (input, want) = (unhex(fields[1]), unhex(fields[2]));
+        let got = match fields[0] {
+            "lower" => strings::to_lower(&input),
+            "trim" => strings::trim_space(&input).to_owned(),
+            _ => continue,
+        };
+        if got != want {
+            mismatches.push(format!(
+                "{}({input:?}): Go {want:?} Rust {got:?}",
+                fields[0]
+            ));
+        }
+        checked += 1;
+    }
+    expect_all("strings/go-strings.tsv", &mismatches, checked);
+    assert_eq!((words.len(), folds.len()), (50, 124));
 }

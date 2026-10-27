@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use jiff::tz::TimeZone;
 
 use crate::clock::Clock;
-use crate::go_compat::{local_zone, time_layout};
+use crate::go_compat::{local_zone, strings, time_layout};
 
 use plain_handler::PlainHandler;
 use slog_handler::SlogHandler;
@@ -100,7 +100,7 @@ pub enum Format {
 /// settings are validated against the accepted names before they reach the logger.
 #[must_use]
 pub fn parse_level(value: &str) -> Level {
-    match go_to_lower(value).as_str() {
+    match strings::to_lower(value).as_str() {
         "debug" => Level::DEBUG,
         "warn" | "warning" => Level::WARN,
         "error" | "fatal" | "panic" => Level::ERROR,
@@ -112,29 +112,12 @@ pub fn parse_level(value: &str) -> Level {
 /// The format switch of Go's `newHandler`: `json` or `plain` in any case; anything else is text.
 #[must_use]
 pub fn parse_format(value: &str) -> Format {
-    match go_to_lower(value).as_str() {
+    match strings::to_lower(value).as_str() {
         "json" => Format::Json,
         "plain" => Format::Plain,
         // "text" and any other value: Go's default.
         _ => Format::Text,
     }
-}
-
-/// Go's `strings.ToLower`, which maps each character to one character: it differs from Rust's
-/// `to_lowercase` on U+0130 (`İ`), which Go lowers to a plain `i` and Rust to `i` plus a
-/// combining dot, so `İNFO` is a level in Go.
-fn go_to_lower(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(|character| {
-            let lower: Vec<char> = if character == '\u{130}' {
-                vec!['i']
-            } else {
-                character.to_lowercase().collect()
-            };
-            lower
-        })
-        .collect()
 }
 
 /// Where the record time comes from.

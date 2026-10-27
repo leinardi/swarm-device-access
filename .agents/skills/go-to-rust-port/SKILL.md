@@ -79,6 +79,11 @@ Prometheus exporter).
   `sort.Sort` (insertion up to 12, then pdqsort with its seeded `breakPatterns`). (237 inputs)
 - No crate parses Go durations (`1h2m3.5s`, `.5s`, `1µs`, Go's error texts) → port
   `time.ParseDuration` with the `time` package's own `quote`. (49 inputs identical)
+- `filepath.Match` negates a class with `^` only (`[!a]` is a class of `!` and `a`), works on
+  bytes (a `*` skip can land inside a character, which `?` then reads as U+FFFD), reports a bad
+  pattern even after the name has failed to match, and refuses `[]a]`-style leading `]`; glob
+  crates (`glob`, `globset`) differ on all of these → port `match.go` and `Clean` line for line.
+  (go program)
 
 ### JSON and YAML
 
