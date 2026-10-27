@@ -19,13 +19,13 @@
 //! The integration suite (`harness = false`): the Rust port of `test/integration`, against the
 //! host Docker daemon. It runs the Rust daemon binary (`SDA_RUST_TEST_BINARY`) as a host process
 //! in dry-run, and the Rust daemon image (`SDA_RUST_TEST_IMAGE`) in launcher mode; both are
-//! required, and neither is ever the Go build the Go suite reads from `SDA_TEST_BINARY` and
-//! `SDA_TEST_IMAGE`.
+//! required. `make test-integration` builds the image from the shipped Dockerfile and copies the
+//! binary out of it, so the host process runs the image's own static bytes.
 //!
 //! Before any test, the runner proves the binary and the image are Rust: each must answer `-help`
 //! as the Rust daemon does (exit 2 and the single-dash refusal, Q1), where Go prints its usage
-//! and exits 0. A mismatch, a missing variable or an unreachable Docker daemon fails the run; none
-//! of them skips it. Then it sweeps the abandoned runs of earlier crashed suites.
+//! and exits 0, and the binary must be static. A mismatch, a missing variable or an unreachable
+//! Docker daemon fails the run; none of them skips it. Then it sweeps the abandoned runs of earlier crashed suites.
 //!
 //! The real-enforcement tests, and the cross-language upgrade gate, which also runs the Go daemon
 //! image (`SDA_GO_TEST_IMAGE`, proven Go by the same identity flag), run only with
@@ -67,7 +67,7 @@ use testenv::host::{
     check_image_identity, cleanup, cleanup_command, default_sweep_rules, host_client, run_labels,
     sweep, with_timeout,
 };
-use testenv::identity::{IDENTITY_FLAG, check_identity};
+use testenv::identity::{IDENTITY_FLAG, check_identity, is_static_elf};
 use testenv::redact::RedactingLogger;
 use testenv::run_filter::RunFilter;
 use testenv::sweep_rules::current_owner;
@@ -316,10 +316,7 @@ fn suite_context(timeout: Duration) -> Result<Context, String> {
 fn required(key: &str) -> Result<String, String> {
     let value = std::env::var(key).unwrap_or_default();
     if value.is_empty() {
-        return Err(format!(
-            "{key} must be set (make rust-test-integration sets it); the Rust suite never falls \
-             back to the Go suite's SDA_TEST_BINARY or SDA_TEST_IMAGE"
-        ));
+        return Err(format!("{key} must be set (make test-integration sets it)"));
     }
     Ok(value)
 }
@@ -358,6 +355,13 @@ async fn set_up(ctx: &Context, timeout: Duration, filter: RunFilter) -> Result<(
     let image = required(ENV_IMAGE)?;
     if !PathBuf::from(&binary).is_file() {
         return Err(format!("{ENV_BINARY}={binary} is not a file"));
+    }
+    let bytes =
+        std::fs::read(&binary).map_err(|error| format!("read {ENV_BINARY}={binary}: {error}"))?;
+    if !is_static_elf(&bytes).map_err(|error| format!("{ENV_BINARY}={binary}: {error}"))? {
+        return Err(format!(
+            "{ENV_BINARY}={binary} is dynamic; the binary the image ships is static"
+        ));
     }
 
     let env_id = generate_env_id().map_err(|error| error.to_string())?;

@@ -29,11 +29,11 @@
 # path must be /var/run/dbus/system_bus_socket (not /run/dbus/...).
 #
 # Override DOCKER_RUN_ARGS to pass extra daemon flags:
-#   make docker-run DOCKER_RUN_ARGS="-log-level debug -log-time"
+#   make docker-run DOCKER_RUN_ARGS="--log-level debug --log-time"
 
 DOCKER_SOCKET ?= /var/run/docker.sock
 DBUS_SOCKET   ?= /run/dbus/system_bus_socket
-DOCKER_RUN_ARGS ?= -log-level info -log-time
+DOCKER_RUN_ARGS ?= --log-level info --log-time
 
 .PHONY: docker-run
 docker-run: ## Run the image locally with host cgroup/pid namespaces and required bind mounts

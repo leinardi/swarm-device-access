@@ -2,62 +2,46 @@
 
 ## What this is
 
-A small **Linux-only** daemon (`//go:build linux` on every Go file under `cmd/` and most of
-`internal/`) that injects cgroup BPF device-allow rules into containers that bind-mount `/dev/...`
-paths. Solves the Docker-Swarm gap where `devices:` / `device_cgroup_rules:` are silently ignored.
+A small **Linux-only** daemon that injects cgroup BPF device-allow rules into containers that
+bind-mount `/dev/...` paths. Solves the Docker-Swarm gap where `devices:` / `device_cgroup_rules:`
+are silently ignored.
 
-A Rust port is in progress beside the Go code, which keeps shipping until the cutover: a Cargo
-workspace with the root package, `meta` (repository meta-tests) and `testenv` (the integration
-harness). [`docs/rust-port.md`](docs/rust-port.md) records its design and provenance.
+Since 2.0 it is written in Rust (the Go 1.x code was removed at the cutover): a Cargo workspace
+with the root package, `meta` (repository meta-tests) and `testenv` (the integration harness).
+[`docs/rust-port.md`](docs/rust-port.md) records its design and provenance. Some sections below
+still describe the Go layout and are rewritten in a later phase of the port.
 
 ## Common commands
 
-Build / test / vet — uses Make wrappers around `go` and `cargo`:
+Build / test / lint — uses Make wrappers around `cargo`:
 
 ```bash
-make go-build      # cross-compiles to Linux into ./dist/ (works from macOS/Win)
-make go-test       # CGO_ENABLED=1 go test -race ./...
-make go-vet
-make go-vet-integration  # go vet -tags=integration over test/integration (no Docker needed)
-make go-lint       # golangci-lint v2, all linters, at the pre-commit pin
-make verify-go     # go-build, go-test, go-vet, go-vet-integration, go-lint, golden-check
-make golden-check  # the Go golden captures under tests/testdata still match the Go code (goldencapture tag)
-make golden-update # rewrite them after a reviewed Go change (docs/rust-port.md, Go golden captures)
-make wire-capture  # recapture tests/testdata/engine_wire from the Go binary (needs Docker; wirecapture tag)
 make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test (meta-tests included)
-make verify        # verify-go, then verify-rust: both while the Go and Rust code live side by side
+make verify        # verify-rust: every check a change has to pass
 make rust-fmt      # cargo fmt --all
 make rust-deny     # cargo deny --workspace check (network required)
-make rust-release-binaries  # static musl amd64 and arm64 binaries into dist/rust/ (pinned zig and cargo-zigbuild on PATH; not shipped yet)
-make go-tidy       # go mod tidy + go mod verify
-make audit-deps    # govulncheck -test + banned-module check (network required); also runs in CI and as a pre-commit hook on go.mod/go.sum changes
+make audit-deps    # cargo deny --workspace check advisories (network required)
+make rust-release-binaries  # static musl amd64 and arm64 release binaries and checksums.txt into dist/ (pinned zig and cargo-zigbuild on PATH)
 make check         # pre-commit on all files: the authoritative local gate, as CI's pre-commit-all
 make check-stage   # pre-commit on staging area only
 make pre-commit-install  # install the pre-commit and commit-msg hooks
-make docker-build
+make docker-build  # the image, from deployments/docker/Dockerfile (needs a docker login dhi.io)
 make docker-run    # runs image locally with required host bind mounts
 ```
 
-Integration tests (need a live Docker daemon; see [`docs/testing.md`](docs/testing.md)):
+Integration tests (need a live Docker daemon and a `docker login dhi.io`; see
+[`docs/testing.md`](docs/testing.md)):
 
 ```bash
-make go-test-integration                   # dry-run tests
-make go-test-integration SDA_IT_ENFORCE=1  # plus the real-enforcement test: attaches BPF, runs systemctl daemon-reload; throwaway hosts only
-make rust-test-integration                 # the Rust suite (testenv) against the Rust binary and scratch image
-make rust-test-integration SDA_IT_ENFORCE=1  # plus its enforcement tests and the Go-to-Rust upgrade gate (builds the Go image; sudo -n); throwaway hosts only
-make sweep-test-leaks                      # remove containers and images left behind by killed runs
+make test-integration                   # the testenv suite against the image built from the Dockerfile and its binary; dry-run tests
+make test-integration SDA_IT_ENFORCE=1  # plus the enforcement tests and the Go-to-Rust upgrade gate (pinned 1.x image; sudo -n); throwaway hosts only
+make sweep-test-leaks                   # remove containers and images left behind by killed runs
 ```
 
 Single test:
 
 ```bash
-go test ./internal/systemd -run TestIsReloadCompleted -v
-```
-
-Tests are `//go:build linux`. On macOS/Windows hosts, run them inside the linux image:
-
-```bash
-docker run --rm -v $PWD:/work -w /work golang:1.26 go test ./...
+cargo test --locked --lib systemd::tests
 ```
 
 The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on first run. To
@@ -69,31 +53,23 @@ builds it from source at its pinned rev, which needs a Rust toolchain (`cargo`) 
 required ShellCheck bridge runs the `shellcheck` on PATH, so install ShellCheck locally at the
 release `.github/actions/setup-shellcheck` pins (CI installs it with that action).
 
-The static Rust builds (`make rust-release-binaries`, and `make rust-integration-image` under
-`make rust-test-integration`) link with zig through cargo-zigbuild and refuse any release on PATH
-but the ones `.github/actions/setup-zigbuild` pins (`.mk/rust-release.mk` records them, with the
-`rust-std` digests the Rust image will take).
+The static Rust builds (`make rust-release-binaries`) link with zig through cargo-zigbuild and
+refuse any release on PATH but the ones `.github/actions/setup-zigbuild` pins. `.mk/rust-release.mk`
+records the zig, cargo-zigbuild and `rust-std` pins; the Dockerfile's build stage carries copies,
+which `meta/tests/toolchain.rs` keeps equal.
 
-The meta-tests under `test/` (all untagged, no Docker) guard the tooling itself: `test/toolchain`
-(the Go line, the droast and ShellCheck pins, flags that make a gate pass on nothing, Docker kept
-out of untagged tests), `test/dockerfiles`, `test/docs` (relative links), `test/suppressions` and
-`test/licenseheaders` (the two check scripts), with the helpers in
-`test/internal/{gitenv,toolgate}`. `make go-test` runs them; the Dockerfile label test needs a
-`droast` binary on PATH (the release `.github/actions/setup-droast` pins; the hook's own build is
-not on PATH) and `shellcheck`. `SDA_REQUIRE_TOOLS=1 go test ./test/...` turns a missing droast or
-shellcheck into a failure instead of a skip, as CI's `repo-gates` job does.
-
-The meta crate's tests (`meta/tests`, run by `make rust-test`) check the same rules on the Rust
-side, plus the Rust boundaries; they need only git and bash, never skip, and carry a negative
-control each. The `docs-links` hook runs `cargo test --locked -p meta --test docs`. Both sets stay
-until the cutover.
+The meta crate's tests (`meta/tests`, run by `make rust-test`) guard the tooling itself: the pins,
+the Dockerfile, the CI gates, flags that make a gate pass on nothing, Docker kept out of the plain
+tests, relative links, and the two check scripts, plus the Rust boundaries. They need only git and
+bash, never skip, and carry a negative control each. The `docs-links` hook runs
+`cargo test --locked -p meta --test docs`.
 
 ### Generated or vendored: never hand-edit
 
-- `.mk/{docker,help,go,password,pre-commit}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
+- `.mk/{docker,help,password,pre-commit}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
   make-common (under its MIT license) and refreshed with `make mk-common-update`; a change is
   ported upstream.
-- `internal/cgroup/{api,ebpf,v1,v2}.go` are not vendored, but keep NVIDIA's copyright header
+- `src/cgroup/{api,ebpf,v1,v2}.rs` are not vendored, but keep NVIDIA's copyright header
   (see *Conventions worth knowing*).
 
 ## Architecture
@@ -194,9 +170,9 @@ symlink.
   reused from swarm-scheduler-exporter or swarm-rootless-docker adds the provenance comment of
   [`docs/rust-port.md`](docs/rust-port.md) below the header, complete, and never the MIT block.
 - The image's `dhi.io` bases are pinned by tag, not by digest, on purpose (the Dockerfile says
-  why); the BuildKit frontend is pinned by digest, and the golang tag names go.mod's exact Go
-  version. Dependabot takes only patch releases of golang: a new Go minor moves go.mod and the tag
-  together, by hand.
+  why); the BuildKit frontend is pinned by digest, and the rust tag names rust-toolchain.toml's
+  exact release. Dependabot ignores the rust image: a new Rust release moves rust-toolchain.toml,
+  the tag, `RUST_VERSION` and the `rust-std` digests together, by hand.
 
 ## Project skills
 
@@ -255,25 +231,20 @@ Run before considering an edit done. `make check` applies to every row.
 
 | You edited | Run |
 | --- | --- |
-| `**/*.go` | `make verify-go`, then `make check-stage` |
-| `internal/{logger,policy,config,observability}/**`, a `golden_capture_test.go` | `make golden-check` (in `verify-go`); a deliberate change is recaptured with `make golden-update` and its diff reviewed |
-| `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**` | also `make go-test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
-| `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make rust-test-integration` (Docker) beside `make go-test-integration`; `SDA_IT_ENFORCE=1` only on a throwaway host |
-| `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
-| `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify-rust` (load `rust-style-guide` first), then `make check-stage` |
-| a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify-rust`, `make rust-deny` (network) |
-| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/`, `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
+| `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify` (load `rust-style-guide` first), then `make check-stage` |
+| `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
+| `tests/testdata/**` (the Go golden captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, Go golden captures): never regenerate one by hand |
+| a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify`, `make rust-deny` (network) |
+| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
-| `.golangci.yaml` | `make go-lint` |
-| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/`, `cargo test --locked -p meta --test suppressions` |
-| `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/`, `cargo test --locked -p meta --test license_headers` |
-| `test/**` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `make go-lint` |
-| `meta/**` | `make verify-rust` (load `rust-style-guide` first) |
-| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, Rust release, droast and ShellCheck pins, vacuous flags, required gates and skipped hooks), `cargo test --locked -p meta` |
-| `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `go test ./test/toolchain/`, `cargo test --locked -p meta`, `make help` |
-| `scripts/hooks/gofmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.go` file in Claude Code |
+| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `cargo test --locked -p meta --test suppressions` |
+| `scripts/check-license-headers.sh` | `cargo test --locked -p meta --test license_headers` |
+| `.github/scripts/**` | `bash .github/scripts/binary-attestation-status.test.sh`, shellcheck (in `make check`) |
+| `meta/**` | `make verify` (load `rust-style-guide` first) |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, platforms, vacuous flags, required gates and skipped hooks) |
+| `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
-| `README.md`, `docs/**/*.md`, other Markdown | `cargo test --locked -p meta --test docs` (the `docs-links` hook), `go test -count=1 ./test/docs/`; prose wraps at 100 columns (markdownlint in `make check`) |
+| `README.md`, `docs/**/*.md`, other Markdown | `cargo test --locked -p meta --test docs` (the `docs-links` hook); prose wraps at 100 columns (markdownlint in `make check`) |
 | `.agents/skills/**` | the Markdown row |
 
 ## Commit messages

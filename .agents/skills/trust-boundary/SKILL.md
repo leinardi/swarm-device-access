@@ -227,18 +227,19 @@ nothing else in the runtime stage.
 
 What goes into the image is pinned too. The BuildKit frontend is pinned by digest; the `dhi.io`
 bases by literal tag, deliberately (dhi.io republishes its tags to ship security fixes, and the
-Dockerfile says so), with the golang tag on go.mod's exact Go version so the image builds with the
-toolchain CI tests and scans. `.dockerignore` keeps the agent tooling, docs and tests out of the
-build context. `test/dockerfiles` pins all of it, and runs droast against the seven required OCI
-labels of `droast.toml`.
+Dockerfile says so), with the rust tag on rust-toolchain.toml's exact release so the image builds
+with the toolchain CI tests, and every zig, cargo-zigbuild and rust-std download checked by the
+sha256 `.mk/rust-release.mk` records. `.dockerignore` keeps the agent tooling, docs and tests out
+of the build context. `meta/tests/dockerfiles.rs` and `meta/tests/toolchain.rs` pin all of it,
+with the seven required OCI labels of `droast.toml`.
 
 - [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
       `daemonSpec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is
       truly needed, the README and `AGENTS.md` runtime requirements change in the same commit.
 - [ ] The DBus mount is never made mandatory (`-dbus` stays off by default).
-- [ ] A Dockerfile change is checked with `make docker-build` and `go test ./test/dockerfiles/
-      ./test/toolchain/`; no base reference holds a variable or `latest`, and the golang tag
-      follows go.mod.
+- [ ] A Dockerfile change is checked with `make docker-build` and
+      `cargo test --locked -p meta --test dockerfiles --test toolchain`; no base reference holds a
+      variable or `latest`, and the rust tag follows rust-toolchain.toml.
 - [ ] Nothing secret is baked into a layer: build args and `COPY` sources are not a secret store.
 
 ## 7. Listeners are opt-in and bounded before the first byte
@@ -273,11 +274,11 @@ read no request body and take no input that becomes a decision.
 After the change, run the tests named in each section you touched, then the whole suite; fix and
 re-run until green:
 
-1. `go test ./internal/policy ./internal/config ./internal/processor ./internal/launcher
-   ./cmd/swarm-device-access -run '<test names from the sections>' -v` (Linux only; on another
-   host run it in a Linux container, as AGENTS.md shows).
-2. `make go-test`.
-3. For a Dockerfile change, `make docker-build` and `go test ./test/dockerfiles/ ./test/toolchain/`.
+1. `cargo test --locked --lib <module>::tests` for the modules you touched (`policy`, `config`,
+   `processor`, `launcher`, `cli`), Linux only.
+2. `make verify`.
+3. For a Dockerfile change, `make docker-build` and
+   `cargo test --locked -p meta --test dockerfiles --test toolchain`.
 
 ## Checklist
 
@@ -288,7 +289,8 @@ re-run until green:
       empty desired set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
 - [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional
-- [ ] Image inputs pinned: frontend by digest, bases by literal tag, golang on go.mod's Go
+- [ ] Image inputs pinned: frontend by digest, bases by literal tag, rust on rust-toolchain.toml's
+      release
 - [ ] Listeners off by default and bounded by timeouts; no body read without a cap
 - [ ] Rust: no `unsafe` outside `bpf_sys.rs`; no write Docker call outside `src/launcher/**`; no
       new capability, host path or listener; the BPF wrapper encoding byte-identical to Go's

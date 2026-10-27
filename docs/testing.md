@@ -1,127 +1,103 @@
 # Testing
 
-This project has two test levels: unit tests (`make go-test`) and the
-integration suite under `test/integration`, which runs against a live Docker
-daemon.
+This project has two test levels: the unit, golden and meta-tests of the Cargo workspace
+(`make rust-test`, part of `make verify`) and the integration suite in the `testenv` crate, behind
+its `integration` feature, which runs against a live Docker daemon.
 
-The integration suite has two parts:
+The integration suite has three parts:
 
-- **Dry-run tests** (`daemon_test.go`) run the daemon binary as an unprivileged
-  host process with `-dry-run`. They verify the event, inspect, policy, cgroup
-  path resolution and device discovery pipeline without attaching BPF programs,
-  and are safe on any host with Docker.
-- **The enforcement test** (`enforce_test.go`) runs the daemon image for real.
-  It checks that an opted-in container can open a bind-mounted device only
-  after the daemon attached its BPF program, that an unlabelled container still
-  cannot, and that the rule comes back after `systemctl daemon-reload`. It is
-  guarded by `SDA_IT_ENFORCE=1` and skips without it.
+- **Dry-run tests** run the daemon binary as an unprivileged host process with `--dry-run`. They
+  verify the event, inspect, policy, cgroup path resolution and device discovery pipeline without
+  attaching BPF programs, and are safe on any host with Docker.
+- **The enforcement tests** run the daemon image for real. They check that an opted-in container
+  can open a bind-mounted device only after the daemon attached its BPF program, that an
+  unlabelled container still cannot, and that the rule comes back after `systemctl daemon-reload`.
+  `TestLauncher_RunsDaemonFromItsOwnImage` runs the image in launch mode. They are guarded by
+  `SDA_IT_ENFORCE=1` and skip without it.
+- **The upgrade and rollback gate** (`TestUpgrade_GoToRustAndBack`, also behind
+  `SDA_IT_ENFORCE=1`) runs the last 1.x Go daemon and the Rust daemon on one container, described
+  below.
 
-`make go-test-integration` is the single way to run either part. It builds the
-binary (and, with `SDA_IT_ENFORCE=1`, the daemon image as
-`swarm-device-access:integration`), and owns the `go test` timeout and the
-suite deadline:
+`make test-integration` is the single way to run the suite. It builds the image from the shipped
+`deployments/docker/Dockerfile` with `make docker-build` under the fixed tag
+`swarm-device-access:integration`, copies the binary out of that image, pulls the pinned 1.x
+image, and owns the suite deadline. The build pulls the `dhi.io` bases, so it needs a
+`docker login dhi.io`:
 
 ```bash
-make go-test-integration                                        # dry-run tests only
-make go-test-integration SDA_IT_ENFORCE=1                       # plus the enforcement test
-make go-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
+make test-integration                                        # dry-run tests only
+make test-integration RUN='^TestDaemon_DryRun_'              # Go's -run semantics
+make test-integration SDA_IT_ENFORCE=1                       # plus the enforcement tests and the gate
+make test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
 ```
 
-The GitHub integration workflow runs the guarded enforcement test on every push
-and on every pull request from this repository, with both variables set:
+The GitHub integration workflow runs the guarded suite on every push and on every pull request
+from this repository, with both variables set:
 
-- `SDA_IT_ENFORCE=1` is the guard. With it set, a missing prerequisite fails the
-  run instead of skipping it, and the workflow also fails the job if any test
-  reports `SKIP`, so a green run always means BPF was exercised.
-- `SDA_IT_REQUIRE_RELOAD=1` makes reload coverage mandatory. The reload subtest
-  first proves that `daemon-reload` wipes the device program on this host;
-  without the variable, a host where that cannot be proven skips only that
-  subtest.
+- `SDA_IT_ENFORCE=1` is the guard. With it set, a missing prerequisite fails the run instead of
+  skipping it, and the workflow also fails the job if any test reports `SKIP`, so a green run
+  always means BPF was exercised.
+- `SDA_IT_REQUIRE_RELOAD=1` makes reload coverage mandatory. The reload subtest first proves that
+  `daemon-reload` wipes the device program on this host; without the variable, a host where that
+  cannot be proven skips only that subtest.
 
-Pull requests from another repository (a fork) are the exception: GitHub gives
-them no secrets, so they cannot log in to `dhi.io` to build the daemon image.
-For them the job is named `integration (fork: enforcement skipped)` and runs
-only the dry-run tests. The gate is where the pull request comes from, not
-whether the secret is set: on a same-repository pull request or a push, a
-missing `DHI_TOKEN` fails the job. A push to a branch of a contributor's fork
-therefore fails that check, since the fork has no `DHI_TOKEN`. The release
-workflow runs the same enforced suite.
+Pull requests from another repository (a fork) are the exception: GitHub gives them no secrets, so
+they cannot log in to `dhi.io` to build the image every test runs against. For them the job is
+named `integration (fork: not run)`, runs nothing and says so with a warning; the push to master
+that merges the pull request runs the suite in full. The gate is where the pull request comes from,
+not whether the secret is set: on a same-repository pull request or a push, a missing `DHI_TOKEN`
+fails the job. A push to a branch of a contributor's fork therefore fails that check, since the
+fork has no `DHI_TOKEN`. The release workflow runs the same enforced suite.
 
-Prerequisites for the enforcement test:
+Prerequisites for the enforcement tests:
 
 - cgroup v2;
 - systemd as init, with its DBus socket at `/run/dbus/system_bus_socket`;
-- passwordless `sudo` for `sudo -n systemctl daemon-reload` (reload subtest);
+- passwordless `sudo` for `sudo -n systemctl daemon-reload` (reload subtest) and for the gate's
+  `sudo -n <binary> --dump-device-programs <pid>`;
 - the device node `/dev/loop-control`, or `/dev/loop0` as a fallback;
 - a Docker login to `dhi.io`, whose base images the daemon image is built from.
 
-**Safety.** The enforcement test attaches BPF programs to its own test
-containers and runs `systemctl daemon-reload` on the host. Only run it on a
-throwaway or trusted host, such as a CI runner or a disposable VM.
+**Safety.** The enforcement tests attach BPF programs to their own test containers and run
+`systemctl daemon-reload` on the host. Only run them on a throwaway or trusted host, such as a CI
+runner or a disposable VM.
 
-Every container the suite creates carries the `swarm-device-access-it.envid`
-label. Each run prints a one-line cleanup command for its own containers; after
-a killed run, `make sweep-test-leaks` removes the leftovers of every run, the
-Rust suite's included.
+Every container the suite creates carries the `swarm-device-access-it.envid` label. Each run
+prints a one-line cleanup command for its own containers; after a killed run,
+`make sweep-test-leaks` removes the leftovers of every run.
 
-The native privileged checklist below is now partly automated. The enforcement
-test covers step 3 (an opted-in container with a real `/dev/...` bind mount gets
-its rule), checks the outcome of step 4 by opening the device rather than
-inspecting the program with `bpftool`, and covers step 7 (the rule is
-re-applied after `systemctl daemon-reload`). Run the checklist by hand for the
-remaining steps, and for these on hosts the test does not cover.
+The native privileged checklist below is now partly automated. The enforcement tests cover step
+3 (an opted-in container with a real `/dev/...` bind mount gets its rule), check the outcome of
+step 4 by opening the device rather than inspecting the program with `bpftool`, and cover step 7
+(the rule is re-applied after `systemctl daemon-reload`). Run the checklist by hand for the
+remaining steps, and for these on hosts the tests do not cover.
 
-## Rust integration suite
+## How the suite runs
 
-The Rust port of the suite lives in the `testenv` crate, behind its `integration` feature, and runs
-beside the Go suite against the same host Docker daemon until the cutover
-([`docs/rust-port.md`](rust-port.md)):
-
-```bash
-make rust-test-integration                              # every ported test
-make rust-test-integration RUN='^TestDaemon_DryRun_'    # Go's -run semantics
-```
-
-The target builds the static host-architecture musl binary with the release binaries' one build
-(`cargo zigbuild --release --target <arch>-unknown-linux-musl`, with the version stamps and the
-build paths remapped; `.mk/rust-release.mk`), so it needs the zig and cargo-zigbuild releases
-`.github/actions/setup-zigbuild` pins on `PATH` and refuses any other. It then builds a throwaway
-`FROM scratch` image of the binary, `swarm-device-access:rust-integration`, whose Dockerfile goes
-to `docker build` on stdin. It exports them as `SDA_RUST_TEST_BINARY` and `SDA_RUST_TEST_IMAGE`,
-variables of the Rust suite's own: it never reads `SDA_TEST_BINARY` or `SDA_TEST_IMAGE` for them,
-which name the Go build. It also runs `go-build`, for the negative control below.
-
-- **Identity check.** Before any test, the runner runs the binary and the image with `-help`. Go's
-  `flag` package prints its usage and exits 0; the Rust daemon refuses a single-dash long flag
-  with exit 2 and `error: single-dash long flags are not supported: '-help'; use '--help'`. Any
-  other answer, an unset variable or an unreachable Docker daemon fails the run; none of them
-  skips it. `TestIdentity_RefusesGoImage` is the check's negative control: it builds a scratch
-  image of the static Go binary (`SDA_TEST_BINARY`) and requires the check to refuse it.
-- **Tests.** The dry-run tests of `daemon_test.go`, the enforcement tests of `enforce_test.go`
-  and `TestLauncher_RunsDaemonFromItsOwnImage`, under their Go names. The binary runs as a host
-  process with `--dry-run` and the double-dash flags the Rust daemon takes; the enforcement and
-  launcher tests run the Rust image and, as in Go, only with `SDA_IT_ENFORCE=1`, which also turns
-  every missing prerequisite into a failure. `SDA_IT_REQUIRE_RELOAD=1` makes the reload subtest
-  fail, instead of skip, on a host where `systemctl daemon-reload` does not wipe the device
-  program. Throwaway or trusted hosts only, as for the Go suite:
-
-  ```bash
-  make rust-test-integration SDA_IT_ENFORCE=1 SDA_IT_REQUIRE_RELOAD=1
-  ```
-
-- **Upgrade and rollback gate.** `TestUpgrade_GoToRustAndBack`, new to the Rust suite and also
-  behind `SDA_IT_ENFORCE=1`, runs both daemons on one labelled container whose cgroup survives
-  every step: the Go daemon grants the device, the Rust daemon with `--device-deny` for it revokes
-  the Go-attached wrapper, the Rust daemon with the original policy grants it again, and the Go
-  daemon with the narrower policy revokes the Rust-attached wrapper. After each step it probes the
-  device from inside the container and reads the BPF programs attached to the container's cgroup:
-  after a grant exactly one owned wrapper per runtime original and no stale wrapper, after a
-  revocation no owned wrapper and each runtime original attached bare exactly once. The programs
-  are read as root by the suite's own binary (`sudo -n <binary> --dump-device-programs <pid>`)
-  and classified with the daemon's own code. The Go daemon is `SDA_GO_TEST_IMAGE`, by default
-  `swarm-device-access:integration`, which the target builds with `integration-image` when
-  `SDA_IT_ENFORCE=1`; it must answer `-help` as the Go daemon (exit 0 and its usage), the identity
-  check inverted, so neither build can stand in for the other.
+- **Identity check.** Before any test, the runner runs the binary and the image with `-help`. The
+  1.x Go daemon's `flag` package prints its usage and exits 0; the Rust daemon refuses a
+  single-dash long flag with exit 2 and
+  `error: single-dash long flags are not supported: '-help'; use '--help'`. The binary must also
+  be a static ELF. Any other answer, an unset variable or an unreachable Docker daemon fails the
+  run; none of them skips it. `TestIdentity_RefusesGoImage` is the check's negative control: it
+  requires the check to refuse the pinned 1.x image (`SDA_GO_TEST_IMAGE`), after proving that
+  image answers `-help` as the Go daemon.
+- **Tests.** The dry-run, enforcement and launcher tests keep the names of the 1.x Go tests they
+  were ported from. The binary runs as a host process with `--dry-run` and the double-dash flags;
+  the enforcement and launcher tests run the image.
+- **Upgrade and rollback gate.** `TestUpgrade_GoToRustAndBack` runs both daemons on one labelled
+  container whose cgroup survives every step: the Go daemon grants the device, the Rust daemon
+  with `--device-deny` for it revokes the Go-attached wrapper, the Rust daemon with the original
+  policy grants it again, and the Go daemon with the narrower policy revokes the Rust-attached
+  wrapper. After each step it probes the device from inside the container and reads the BPF
+  programs attached to the container's cgroup: after a grant exactly one owned wrapper per runtime
+  original and no stale wrapper, after a revocation no owned wrapper and each runtime original
+  attached bare exactly once. The programs are read as root by the suite's own binary
+  (`sudo -n <binary> --dump-device-programs <pid>`) and classified with the daemon's own code. The
+  Go daemon is `SDA_GO_TEST_IMAGE`, the last published 1.x image pinned by digest in
+  `.mk/integration-test.mk`, which `make test-integration` pulls (`make go-test-image`); it must
+  answer `-help` as the Go daemon (exit 0 and its usage), the identity check inverted, so neither
+  build can stand in for the other.
 - **Run filter.** `RUN` goes to the runner's `--run` with Go's `-run` semantics (a regular
   expression per `/`-separated level), and a pattern that selects no test fails the run, where Go
   would pass with "no tests to run".
@@ -130,7 +106,7 @@ which name the Go build. It also runs `go-build`, for the negative control below
   `swarm-device-access-it.envid` label plus its owner, start time and PID namespace; a run removes
   the leftovers of earlier runs only once they are older than an hour (`SDA_IT_STALE_AFTER`) and
   their owner process is gone from this host. `make sweep-test-leaks` removes the leftovers of
-  every run of either suite, whatever their age.
+  every run, whatever their age.
 
 ## Dry-Run Coverage
 
@@ -142,7 +118,7 @@ The dry-run tests cover:
 - Host cgroup path resolution for private Docker cgroup namespaces.
 - `/dev/...` bind mount detection.
 - Dry-run device rule generation for `/dev/null`.
-- `-policy-mode=opt-in` filtering: containers without `swarm-device-access.enable=true` are skipped.
+- `--policy-mode=opt-in` filtering: containers without `swarm-device-access.enable=true` are skipped.
 - Per-container `swarm-device-access.enable` label opt-in.
 
 ## Rust `bpf(2)` test
@@ -168,7 +144,7 @@ or deployment behavior:
 
    ```bash
    make docker-build
-   make docker-run DOCKER_RUN_ARGS="-log-level debug"
+   make docker-run DOCKER_RUN_ARGS="--log-level debug"
    ```
 
 2. Verify the container has the required runtime wiring:
@@ -191,7 +167,7 @@ or deployment behavior:
 5. Test directory walking with a directory such as `/dev/bus/usb` when such
    devices are present.
 
-6. Test `-device-allow` and `-device-deny` with a dry-run daemon first, then with
+6. Test `--device-allow` and `--device-deny` with a dry-run daemon first, then with
    the privileged daemon.
 
 7. If `/run/dbus/system_bus_socket` is mounted and systemd is available, run
@@ -204,6 +180,5 @@ or deployment behavior:
    without the anchors the filter also matches the launcher task's container).
    `TestLauncher_RunsDaemonFromItsOwnImage` covers the same case outside Swarm.
 
-9. Verify observability by starting with `-metrics-addr 127.0.0.1:9090` and
-   `-debug-addr 127.0.0.1:6060`, then checking `/healthz`, `/readyz`, `/metrics`, and
-   `/debug/pprof/`.
+9. Verify observability by starting with `--metrics-addr 127.0.0.1:9090`, then checking
+   `/healthz`, `/readyz` and `/metrics`.

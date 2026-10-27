@@ -92,10 +92,8 @@ A meta-test under `test/` guards a claim nothing else checks: the Go line and th
 ShellCheck pins, the Dockerfile's stages and labels, the relative links, the suppression and
 license-header checks, Docker staying out of untagged tests. Try to make the guarded thing go
 wrong and see whether the test still notices. A test that passes because its input is empty, its
-rule never ran or its tool was skipped (droast or shellcheck without `SDA_REQUIRE_TOOLS=1`) is a
-false pass, and so is
-one whose scratch repository runs git without `gitenv.Isolated()`, which under the commit hook
-acts on the real index.
+rule never ran or its tool was skipped is a false pass, and so is one whose scratch repository
+runs git without `meta::gitenv::isolate`, which under the commit hook acts on the real index.
 
 No skill matches (bash, Makefile, `.mk/**`, plain YAML, Markdown, workflows)? Fall back to the
 passes in §4 plus the invariants in §3. **Same rigor** — an unmatched language is not a lighter
@@ -279,30 +277,28 @@ implements, and so is a default in the docs that differs from the code.
 
 ## 6. Verify before you trust (don't hand-wave the gates)
 
-Static reading misses things. Use focused tests while investigating (`go test
-./internal/<pkg> -run <Name>`), then run the gates the change owes and treat a failure it
-caused as a confirmed finding with the output attached:
+Static reading misses things. Use focused tests while investigating
+(`cargo test --locked --lib <module>::tests::<name>`), then run the gates the change owes and treat
+a failure it caused as a confirmed finding with the output attached:
 
 | Diff touched | Run |
 | --- | --- |
-| any `**/*.go` | `make go-build`, `make go-vet`, `make go-test` (race detector on), then `make check` |
-| any `**/*.rs`, a Cargo manifest or lock, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `make verify` (the Go and the Rust verification while Go exists; `verify-rust` is build, fmt check, clippy with `-D warnings` and tests), `make rust-deny` when a manifest or `Cargo.lock` changed (network required), then `make check` |
-| `internal/daemon/**`, `internal/processor/**`, `internal/cgroup/**`, `internal/launcher/**`, and their Rust ports under `src/` | also `make go-test-integration` (needs Docker and privileges) — it runs `make go-build` first, then `go test -tags=integration ./test/integration/...`; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload`. Once the Rust `testenv` suite exists, run it too, and check that it proved the image under test is Rust before any test ran |
-| `go.mod` / `go.sum` | `make go-tidy` and `make audit-deps` (govulncheck plus the banned-module check; network required) |
-| `deployments/docker/Dockerfile` | droast via `make check`, `go test ./test/dockerfiles/ ./test/toolchain/`, plus `make docker-build` |
-| `test/**`, `scripts/check-*.sh`, `.github/**`, `.pre-commit-config.yaml` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `pre-commit run actionlint --all-files` |
+| any `**/*.rs`, a Cargo manifest or lock, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `make verify` (build, fmt check, clippy with `-D warnings` and tests, the meta-tests included), `make rust-deny` when a manifest or `Cargo.lock` changed (network required), then `make check` |
+| `src/daemon/**`, `src/processor/**`, `src/cgroup/**`, `src/launcher/**`, `testenv/**` | also `make test-integration` (needs Docker and a `dhi.io` login) — it builds the image from the Dockerfile, copies its binary out and pulls the pinned 1.x image; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload`. Check that it proved the binary and the image under test are Rust before any test ran |
+| `deployments/docker/Dockerfile` | droast via `make check`, `cargo test --locked -p meta --test dockerfiles --test toolchain`, plus `make docker-build` |
+| `meta/**`, `scripts/check-*.sh`, `.github/**`, `.pre-commit-config.yaml` | `cargo test --locked -p meta`, `pre-commit run actionlint --all-files` |
 | anything else | `make check` (pre-commit on all files) |
 
-The integration suite drives the binary in `dist/` (or `$SDA_TEST_BINARY`), not the package
-under test. Running the raw `go test -tags=integration ./test/integration/...` without a fresh
-`make go-build` either tests a stale binary or skips every test (`t.Skipf` when the binary is
-missing) and still exits 0.
+The integration suite drives the binary and the image `make test-integration` builds
+(`SDA_RUST_TEST_BINARY`, `SDA_RUST_TEST_IMAGE`), not the code under review: running the raw
+`cargo test -p testenv --features integration` without a fresh `make integration-image` tests a
+stale image.
 
-golangci-lint may not be on `PATH`; run it through pre-commit. Several hooks rewrite files
-(prettier, markdownlint, the golangci formatters): check `git status` afterwards and report a
+Several hooks rewrite files (prettier, markdownlint, rustfmt through `cargo fmt` when run by hand):
+check `git status` afterwards and report a
 rewrite as a finding instead of reviewing the rewritten tree. A skipped test is not a pass —
 check the `-v` output for `SKIP`. If a gate is impractical here (no Docker, no privileges for
-the integration suite, no network for govulncheck), say so explicitly and mark that risk
+the integration suite, no network for cargo-deny), say so explicitly and mark that risk
 unverified rather than implying it passed.
 
 ## 7. Report

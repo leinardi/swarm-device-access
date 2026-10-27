@@ -49,11 +49,10 @@ pub const ENV_ENFORCE: &str = "SDA_IT_ENFORCE";
 /// The variable that makes the reload subtest fail, instead of skip, on a host where `systemctl
 /// daemon-reload` does not wipe the device programs: the Go suite's `envRequireReload`.
 pub const ENV_REQUIRE_RELOAD: &str = "SDA_IT_REQUIRE_RELOAD";
-/// The Go daemon image of the cross-language upgrade test, never the image under test.
+/// The Go daemon image of the cross-language upgrade test and of the identity check's negative
+/// control: the last published 1.x release, pinned by digest (`make test-integration` sets it and
+/// pulls it). Never the image under test.
 pub const ENV_GO_TEST_IMAGE: &str = "SDA_GO_TEST_IMAGE";
-/// [`ENV_GO_TEST_IMAGE`] when it is unset or empty: the Go Dockerfile's build, as `make
-/// integration-image` tags it (the Go suite's `defaultTestImage`).
-pub const DEFAULT_GO_TEST_IMAGE: &str = "swarm-device-access:integration";
 /// The argument that makes the suite's binary print [`dump_device_programs`] for a pid and exit,
 /// instead of running tests.
 pub const DUMP_FLAG: &str = "--dump-device-programs";
@@ -64,14 +63,12 @@ pub fn flag_set(value: Option<&str>) -> bool {
     value == Some("1")
 }
 
-/// The Go image the upgrade test runs: [`ENV_GO_TEST_IMAGE`]'s value, or
-/// [`DEFAULT_GO_TEST_IMAGE`] when it is unset or empty.
+/// The Go image the upgrade test and the identity control run: [`ENV_GO_TEST_IMAGE`]'s value, or
+/// `None` when it is unset or empty. There is no default: the tag the integration image is built
+/// under names the Rust image now, so a default could only ever name the wrong daemon.
 #[must_use]
-pub fn go_test_image(value: Option<&str>) -> String {
-    value
-        .filter(|image| !image.is_empty())
-        .unwrap_or(DEFAULT_GO_TEST_IMAGE)
-        .to_owned()
+pub fn go_test_image(value: Option<&str>) -> Option<String> {
+    value.filter(|image| !image.is_empty()).map(str::to_owned)
 }
 
 /// How a test stops when the host cannot run it.

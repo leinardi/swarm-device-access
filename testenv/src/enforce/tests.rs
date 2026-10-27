@@ -112,10 +112,10 @@ fn an_unsupported_reload_fails_only_when_required() {
 }
 
 #[test]
-fn the_go_image_defaults_to_the_go_dockerfile_build() {
-    assert_eq!(go_test_image(None), "swarm-device-access:integration");
-    assert_eq!(go_test_image(Some("")), "swarm-device-access:integration");
-    assert_eq!(go_test_image(Some("sda:go")), "sda:go");
+fn the_go_image_has_no_default() {
+    assert_eq!(go_test_image(None), None);
+    assert_eq!(go_test_image(Some("")), None);
+    assert_eq!(go_test_image(Some("sda:go")).as_deref(), Some("sda:go"));
 }
 
 /// Each build gets its own spelling: Go's single dash, which the Rust daemon refuses, and Rust's

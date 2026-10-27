@@ -18,9 +18,8 @@ permissions: {}
 
 jobs:
   # The authoritative lint gate: every pre-commit hook over every file. Skipped here, each because a
-  # dedicated job below runs it: go-test-repo-mod (the test job, with -race), audit-deps-go (the
-  # audit-deps job, on every run rather than only on go.mod changes), and cargo-test and cargo-deny
-  # (the rust job; cargo-deny needs the network).
+  # dedicated job below runs it: cargo-test and cargo-deny (the rust job; cargo-deny needs the
+  # network).
   pre-commit-all:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -31,15 +30,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The golangci-lint, checkmake and Go test hooks build and run with this Go.
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # For the cargo-fmt, cargo-clippy and cargo-machete hooks. The Rust cache is saved only on a
-      # pull request: on a push it would write the master cache scope a release job restores.
+      # For the cargo-fmt, cargo-clippy and cargo-machete hooks and the language: system hooks that
+      # run cargo (docs links). The Rust cache is saved only on a pull request: on a push it would
+      # write the master cache scope a release job restores.
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
@@ -72,11 +65,11 @@ jobs:
 
       - name: Run every pre-commit hook on every file
         env:
-          SKIP: go-test-repo-mod,audit-deps-go,cargo-test,cargo-deny
+          SKIP: cargo-test,cargo-deny
         run: pre-commit run --all-files --show-diff-on-failure
 
       # pre-commit fails a hook that modifies a tracked file, which covers the auto-fixing hooks
-      # (markdownlint fix, prettier, dclint, golangci-lint fmt); this also fails on a file a hook
+      # (markdownlint fix, prettier, dclint fix); this also fails on a file a hook
       # creates, which its diff check does not see, so no fix can pass silently.
       - name: Fail if a hook modified a file
         run: |
@@ -124,13 +117,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The golangci-lint hooks build with this Go.
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
       # droast's ShellCheck bridge runs the shellcheck on PATH: the pinned one, not the runner's.
       - name: Set up ShellCheck
         uses: ./.github/actions/setup-shellcheck
@@ -151,60 +137,6 @@ jobs:
             check-added-large-files
             dclint
             droast
-            golangci-lint-config-verify
-            golangci-lint-fmt
-            golangci-lint-full
-
-  # A dedicated job rather than an entry in the pre-commit-hooks list above: reviewdog runs hooks
-  # only on the files a PR changes, and the audit-deps-go hook only fires on go.mod/go.sum, so new
-  # code reaching an already-vulnerable API, or a transitively reintroduced banned module, would
-  # never be scanned there.
-  audit-deps:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Audit Go dependencies
-        run: make audit-deps
-
-  # The same steps as the release workflow's test job, so a pull request
-  # cannot merge with a failing vet or unit test and only find out at release.
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Vet
-        run: make go-vet
-
-      - name: Run the test suite
-        run: make go-test
-
-      # The goldens the Rust port is checked against must still be what the Go code produces.
-      - name: Check the Go golden captures
-        run: make golden-check
 
   markdownlint:
     # Reports inline PR review comments over a diff range; a manual dispatch has
@@ -305,11 +237,11 @@ jobs:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
 
-  # The meta-tests under test/, with the tools they drive: a missing droast or shellcheck fails
-  # here (SDA_REQUIRE_TOOLS=1) instead of skipping, as it does in the test job, which has neither.
-  repo-gates:
+  # The release workflow's scripts, tested with a stub gh: no network, no token. Adapted from
+  # swarm-scheduler-exporter's ci.yaml at d57dcc220d29 (MIT, same author).
+  release-scripts:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     permissions:
       contents: read
 
@@ -317,30 +249,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # The Dockerfile tests run droast, whose ShellCheck bridge runs the shellcheck on PATH: the
-      # pinned one, not the runner's.
-      - name: Set up droast
-        uses: ./.github/actions/setup-droast
-
-      - name: Set up ShellCheck
-        uses: ./.github/actions/setup-shellcheck
-
-      - name: Run the repository meta-tests
-        env:
-          SDA_REQUIRE_TOOLS: "1"
-        run: go test -count=1 ./test/...
+      - name: Test binary-attestation-status.sh
+        run: bash .github/scripts/binary-attestation-status.test.sh
 
   # The Rust workspace, adapted from swarm-scheduler-exporter's ci.yaml at d57dcc220d29 (MIT, same
-  # author): the same workspace-wide commands as make verify-rust and the pre-commit hooks, plus
-  # cargo-deny (advisories, licences, bans and sources; the advisory database needs the network).
-  # The toolchain is the exact release of rust-toolchain.toml. The cache is saved only on a pull
-  # request, as in pre-commit-all.
+  # author): the same workspace-wide commands as make verify and the pre-commit hooks, the
+  # meta-tests included, plus cargo-deny (advisories, licences, bans and sources; the advisory
+  # database needs the network). The toolchain is the exact release of rust-toolchain.toml. The
+  # cache is saved only on a pull request, as in pre-commit-all.
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -380,12 +296,12 @@ jobs:
           arguments: --workspace
           command: check
 
-  # The static musl binaries of the Rust daemon for both release platforms, built the way a release
-  # will build them: make rust-release-binaries (cargo-zigbuild with the pinned zig, the version
+  # The static musl binaries of the daemon for both release platforms, built the way the release
+  # builds them: make rust-release-binaries (cargo-zigbuild with the pinned zig, the version
   # stamps, the checkout and cargo home remapped), adapted from swarm-scheduler-exporter's release
-  # build step at d57dcc220d29 (MIT, same author). Nothing is uploaded or published: the Go release
-  # still ships. The toolchain is the exact release of rust-toolchain.toml with both musl targets;
-  # the cache is saved only on a pull request, as in pre-commit-all.
+  # build step at d57dcc220d29 (MIT, same author). Nothing is uploaded or published. The toolchain
+  # is the exact release of rust-toolchain.toml with both musl targets; the cache is saved only on
+  # a pull request, as in pre-commit-all.
   rust-static:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -418,7 +334,7 @@ jobs:
       - name: Check the binaries are static and carry no build path
         run: |
           set -euo pipefail
-          for binary in dist/rust/swarm-device-access-linux-amd64 dist/rust/swarm-device-access-linux-arm64; do
+          for binary in dist/swarm-device-access-linux-amd64 dist/swarm-device-access-linux-arm64; do
             readelf -lW "${binary}" > "${RUNNER_TEMP}/headers"
             if grep -q INTERP "${RUNNER_TEMP}/headers"; then
               echo "::error::${binary} has a program interpreter; it is not static"
@@ -430,7 +346,7 @@ jobs:
               exit 1
             fi
           done
-          cat dist/rust/checksums.txt
+          cat dist/checksums.txt
 
   # The one required check that stands for the rest: GitHub counts a skipped required job as
   # passing, so this job always runs and decides. On a pull request every needed job must succeed;
@@ -442,10 +358,8 @@ jobs:
     if: always()
     needs:
       - pre-commit-all
-      - audit-deps
-      - test
       - conventional-commits
-      - repo-gates
+      - release-scripts
       - rust
       - rust-static
     runs-on: ubuntu-latest

@@ -16,21 +16,18 @@
 // Adapted from swarm-scheduler-exporter/meta/tests/toolchain.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! The repository's tooling pins: the Go line of go.mod in the image's golang tag and every
-//! setup-go step; one exact Rust release across rust-toolchain.toml, the workspace's
-//! `rust-version` and every CI toolchain step; one zig and one cargo-zigbuild between the
-//! setup-zigbuild action and the release fragment, and the fragment's musl standard libraries at
-//! that exact Rust release; one droast and one ShellCheck between the hooks and the CI actions;
-//! the whole-tree hooks running once; and no meta-test that skips on a missing tool. The Rust side
-//! of `test/toolchain/pins_test.go` and of `TestToolGateListIsClosed`, which stay until the
-//! cutover; `ci_gates.rs` and `vacuous_flags.rs` port the rest of that package.
+//! The repository's tooling pins: one exact Rust release across rust-toolchain.toml, the
+//! workspace's `rust-version`, the image's dhi.io/rust tag and `RUST_VERSION`, and every CI
+//! toolchain step; one zig and one cargo-zigbuild between the setup-zigbuild action, the release
+//! fragment and the Dockerfile, and the musl standard libraries of the fragment and the Dockerfile
+//! at that exact Rust release; one exact Trivy for the release scan; one ShellCheck between the
+//! hook and the CI action; the whole-tree hooks running once; and no meta-test that skips on a
+//! missing tool. `ci_gates.rs` and `vacuous_flags.rs` check the rest of the gates.
 //!
-//! Not ported: `TestUntaggedTestsAvoidDocker` and its negative control read Go build tags and
-//! imports through `go/ast`, which only the Go tests have; `integration_targets.rs` is the Rust
-//! side of the same rule. SSE checks its zig, cargo-zigbuild and rust-std pins against its
-//! Dockerfile; here the Dockerfile still builds Go, so they are checked against
-//! `.mk/rust-release.mk`, the record the Rust image will take. SSE's Trivy pin and its Rust line in
-//! the image come with the Rust image and release, which this repository does not have yet.
+//! `.mk/rust-release.mk` is the one record of the zig, cargo-zigbuild and rust-std pins: the
+//! action and the Dockerfile's build stage carry copies, and every copy is checked against it.
+//! SSE checks the Dockerfile against the action alone and keeps no such record. Every rule has its
+//! negative control.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -39,7 +36,6 @@ use meta::repo;
 use regex::Regex;
 use serde_yaml_ng::Value;
 
-const SETUP_GO: &str = "actions/setup-go";
 const RUST_TOOLCHAIN_ACTION: &str = "dtolnay/rust-toolchain";
 const DOCKERFILE: &str = "deployments/docker/Dockerfile";
 const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
@@ -54,10 +50,10 @@ static RUST_CHANNEL: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?m)^channel = 
 static RUST_VERSION: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?m)^rust-version = "([^"]*)"$"#));
 /// A Rust release with its patch: 1.98.1, never 1.98 or stable.
 static EXACT_RUST: LazyLock<Regex> = LazyLock::new(|| regex(r"^\d+\.\d+\.\d+$"));
-/// go.mod's go line, with its patch version.
-static GO_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| regex(r"(?m)^go (\d+\.\d+\.\d+)$"));
-/// The version part of a dhi.io/golang tag: 1.26.9 in 1.26.9-alpine3.23-dev.
-static GOLANG_IMAGE: LazyLock<Regex> = LazyLock::new(|| regex(r"dhi\.io/golang:([^-@\s]+)-"));
+/// The exact Rust release of the image's build stage: 1.98.1 in dhi.io/rust:1.98.1-debian13-dev.
+static RUST_IMAGE: LazyLock<Regex> = LazyLock::new(|| regex(r"dhi\.io/rust:(\d+\.\d+\.\d+)-"));
+/// The release the build stage's musl standard libraries are downloaded for.
+static RUST_VERSION_ARG: LazyLock<Regex> = LazyLock::new(|| regex(r"(?m)^ARG RUST_VERSION=(\S+)$"));
 
 /// One step, in a workflow or a composite action, that uses an action.
 #[derive(Debug)]
@@ -146,33 +142,6 @@ fn github_steps() -> Vec<ActionStep> {
         .collect()
 }
 
-/// The Go rules: no step writes a go-version, and every setup-go step reads
-/// `go-version-file: go.mod`.
-fn go_step_problems(steps: &[ActionStep]) -> Vec<String> {
-    let mut problems = Vec::new();
-    for step in steps {
-        if let Some(version) = step
-            .with
-            .get("go-version")
-            .filter(|version| !version.is_empty())
-        {
-            problems.push(format!(
-                "{}: {} gets go-version {version:?}; the Go line comes from go.mod",
-                step.file, step.action
-            ));
-        }
-        if step.action == SETUP_GO
-            && step.with.get("go-version-file").map(String::as_str) != Some("go.mod")
-        {
-            problems.push(format!(
-                "{}: setup-go must read go-version-file: go.mod",
-                step.file
-            ));
-        }
-    }
-    problems
-}
-
 /// The Rust rule: every toolchain step installs exactly `want`.
 fn rust_step_problems(steps: &[ActionStep], want: &str) -> Vec<String> {
     steps
@@ -191,96 +160,34 @@ fn rust_step_problems(steps: &[ActionStep], want: &str) -> Vec<String> {
         .collect()
 }
 
-/// Go: `TestGoLineIsOneValue`. The go directive in go.mod is the Go every build uses: each build
-/// stage of the Dockerfile names that exact version in its golang tag, so the image builds with
-/// the Go CI tests and scans, and every setup-go step reads go.mod instead of writing a version of
-/// its own.
-#[test]
-fn go_line_is_one_value() {
-    let go_mod = repo::read("go.mod");
-    let want = GO_DIRECTIVE
-        .captures(&go_mod)
-        .map(|captures| captures[1].to_owned())
-        .expect("go.mod has a go directive with a patch version (go X.Y.Z)");
-
-    let dockerfile = repo::read(DOCKERFILE);
-    let tags: Vec<&str> = GOLANG_IMAGE
-        .captures_iter(&dockerfile)
-        .filter_map(|captures| captures.get(1).map(|tag| tag.as_str()))
-        .collect();
+/// What is wrong with the image's Rust against `want`, the release of rust-toolchain.toml: the
+/// build stage's dhi.io/rust tag and its `RUST_VERSION`, the release its musl standard libraries
+/// are downloaded for, must each name it.
+fn image_rust_problems(dockerfile: &str, want: &str) -> Vec<String> {
     let mut problems = Vec::new();
-    if tags.is_empty() {
-        problems.push(format!("{DOCKERFILE} builds on no dhi.io/golang image"));
-    }
-    for tag in tags {
-        if tag != want {
-            problems.push(format!(
-                "{DOCKERFILE} builds on golang {tag}, but go.mod says go {want}"
-            ));
+    for (what, pattern) in [
+        ("the dhi.io/rust tag", &*RUST_IMAGE),
+        ("ARG RUST_VERSION", &*RUST_VERSION_ARG),
+    ] {
+        let found: Vec<&str> = pattern
+            .captures_iter(dockerfile)
+            .filter_map(|captures| captures.get(1).map(|version| version.as_str()))
+            .collect();
+        match found.as_slice() {
+            [version] if *version == want => {}
+            [] => problems.push(format!("{DOCKERFILE} writes no exact release in {what}")),
+            found => problems.push(format!(
+                "{DOCKERFILE} names {found:?} in {what}, but rust-toolchain.toml says {want}"
+            )),
         }
     }
-    problems.extend(go_step_problems(&github_steps()));
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
-}
-
-/// Go: `TestGoStepRules`, the negative control of the setup-go rules.
-#[test]
-fn go_step_rules() {
-    let steps = parse_action_steps(
-        "sample.yaml",
-        r#"jobs:
-  ok:
-    steps:
-      - uses: actions/setup-go@0123456789abcdef0123456789abcdef01234567 # v7.0.0
-        with:
-          go-version-file: go.mod
-  bad:
-    steps:
-      - uses: actions/setup-go@0123456789abcdef0123456789abcdef01234567
-        with:
-          go-version: "1.26"
-      - uses: actions/setup-go@0123456789abcdef0123456789abcdef01234567
-      - uses: actions/setup-go@0123456789abcdef0123456789abcdef01234567
-        with:
-          go-version-file: .go-version
-      - uses: some/other-action@0123456789abcdef0123456789abcdef01234567
-        with:
-          go-version: "1.27"
-"#,
-    );
-    // The first unpinned step writes a version and reads no file: two problems. The two after it
-    // read no go.mod, and the other action writes a version.
-    let problems = go_step_problems(&steps);
-    assert_eq!(problems.len(), 5, "{problems:#?}");
-}
-
-/// Go: `TestGoDirectiveReading`. The go.mod and image-tag readings the Go line rests on.
-#[test]
-fn go_directive_reading() {
-    let directive = GO_DIRECTIVE
-        .captures("module x\n\ngo 1.26.9\n")
-        .map(|captures| captures[1].to_owned());
-    assert_eq!(directive.as_deref(), Some("1.26.9"));
-    assert!(
-        !GO_DIRECTIVE.is_match("module x\n\ngo 1.26\n"),
-        "a go directive without a patch version was accepted"
-    );
-
-    let tag = GOLANG_IMAGE
-        .captures("FROM dhi.io/golang:1.26.9-alpine3.23-dev AS deps")
-        .map(|captures| captures[1].to_owned());
-    assert_eq!(tag.as_deref(), Some("1.26.9"));
-    // The floating tag reads as 1, which no go directive equals.
-    let floating = GOLANG_IMAGE
-        .captures("FROM dhi.io/golang:1-alpine3.23-dev")
-        .map(|captures| captures[1].to_owned());
-    assert_eq!(floating.as_deref(), Some("1"));
+    problems
 }
 
 /// Go: `TestRustLineIsOneRelease`. One exact Rust release, patch included, is shared by
-/// rust-toolchain.toml's channel, the workspace's rust-version and every CI toolchain step, so the
-/// toolchain a developer, a hook and CI build with is one compiler. (SSE pins only the line in
-/// `rust-version`; this workspace pins the release there too.)
+/// rust-toolchain.toml's channel, the workspace's rust-version, the image's build stage and every
+/// CI toolchain step, so the toolchain a developer, a hook, CI and the image build with is one
+/// compiler. (SSE pins only the line in `rust-version`; this workspace pins the release there too.)
 #[test]
 fn rust_line_is_one_release() {
     let toolchain = repo::read("rust-toolchain.toml");
@@ -300,6 +207,7 @@ fn rust_line_is_one_release() {
         )),
         None => problems.push("the root Cargo.toml sets no rust-version".to_owned()),
     }
+    problems.extend(image_rust_problems(&repo::read(DOCKERFILE), &want));
 
     let steps = github_steps();
     if !steps
@@ -343,6 +251,34 @@ fn rust_step_rules() {
     assert_eq!(steps.len(), 5, "{steps:?}");
     let problems = rust_step_problems(&steps, "1.98.1");
     assert_eq!(problems.len(), 4, "{problems:#?}");
+}
+
+/// SSE's `image_toolchain_patch_is_the_standard_library_version`, the negative control of the
+/// image's Rust: another release in the tag or in `RUST_VERSION`, a floating tag, and a missing
+/// argument are each refused.
+#[test]
+fn image_rust_rules() {
+    let good = "FROM --platform=$BUILDPLATFORM dhi.io/rust:1.98.1-debian13-dev AS build\n\
+                ARG RUST_VERSION=1.98.1\n";
+    assert_eq!(image_rust_problems(good, "1.98.1"), Vec::<String>::new());
+    for (name, sample) in [
+        ("another tag", good.replace("rust:1.98.1-", "rust:1.98.0-")),
+        (
+            "another standard library",
+            good.replace("RUST_VERSION=1.98.1", "RUST_VERSION=1.98.0"),
+        ),
+        ("a floating tag", good.replace("rust:1.98.1-", "rust:1-")),
+        (
+            "no RUST_VERSION",
+            good.replace("ARG RUST_VERSION=1.98.1\n", ""),
+        ),
+    ] {
+        assert_eq!(
+            image_rust_problems(&sample, "1.98.1").len(),
+            1,
+            "{name} was not refused once"
+        );
+    }
 }
 
 /// Go: `TestRustLineReading`. The readings the Rust line rests on: a channel or a release without
@@ -395,10 +331,6 @@ const SHELLCHECK_HOOK: &str =
     r"repo: https://github\.com/shellcheck-py/shellcheck-py\s+rev:\s*(v\d+\.\d+\.\d+)";
 const SHELLCHECK_ACTION: &str = ".github/actions/setup-shellcheck/action.yaml";
 const SHELLCHECK_PIN: &str = r#"SHELLCHECK_VERSION:\s*["']?(v[\d.]+)"#;
-const DROAST_HOOK: &str =
-    r#"repo: https://github\.com/immanuwell/dockerfile-roast\s+rev:\s*["']?([\d.]+)"#;
-const DROAST_ACTION: &str = ".github/actions/setup-droast/action.yaml";
-const DROAST_PIN: &str = r#"DROAST_VERSION:\s*["']?([\d.]+)"#;
 
 const SETUP_ZIGBUILD: &str = ".github/actions/setup-zigbuild/action.yaml";
 const RUST_RELEASE_FRAGMENT: &str = ".mk/rust-release.mk";
@@ -560,6 +492,129 @@ fn zigbuild_pin_rules() {
         ),
     ] {
         let problems = zigbuild_problems(&action, &fragment);
+        assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
+    }
+}
+
+/// The Dockerfile's copies of the release fragment's pins, as (what, Dockerfile pattern, fragment
+/// pattern): each version, and the digest of every archive the build stage downloads.
+const DOCKERFILE_PINS: [(&str, &str, &str); 9] = [
+    (
+        "zig",
+        r"(?m)^ARG ZIG_VERSION=(\S+)$",
+        r"(?m)^RUST_RELEASE_ZIG_VERSION := (\S+)$",
+    ),
+    (
+        "zig x86_64 sha256",
+        r"amd64\) zig_arch=x86_64; zig_sha256=(\S+) ;;",
+        r"(?m)^RUST_RELEASE_ZIG_SHA256_x86_64 := (\S+)$",
+    ),
+    (
+        "zig aarch64 sha256",
+        r"arm64\) zig_arch=aarch64; zig_sha256=(\S+) ;;",
+        r"(?m)^RUST_RELEASE_ZIG_SHA256_aarch64 := (\S+)$",
+    ),
+    (
+        "cargo-zigbuild",
+        r"(?m)^ARG CARGO_ZIGBUILD_VERSION=(\S+)$",
+        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_VERSION := (\S+)$",
+    ),
+    (
+        "cargo-zigbuild x86_64 sha256",
+        r"amd64\) zigbuild_asset=x86_64-unknown-linux-musl; zigbuild_sha256=(\S+) ;;",
+        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := (\S+)$",
+    ),
+    (
+        "cargo-zigbuild aarch64 sha256",
+        r"arm64\) zigbuild_asset=aarch64-unknown-linux-gnu; zigbuild_sha256=(\S+) ;;",
+        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_aarch64-unknown-linux-gnu := (\S+)$",
+    ),
+    (
+        "rust-std",
+        r"(?m)^ARG RUST_VERSION=(\S+)$",
+        r"(?m)^RUST_RELEASE_RUST_STD_VERSION := (\S+)$",
+    ),
+    (
+        "rust-std x86_64 sha256",
+        r"amd64\) triple=x86_64-unknown-linux-musl; std_sha256=(\S+) ;;",
+        r"(?m)^RUST_RELEASE_RUST_STD_SHA256_x86_64-unknown-linux-musl := (\S+)$",
+    ),
+    (
+        "rust-std aarch64 sha256",
+        r"arm64\) triple=aarch64-unknown-linux-musl; std_sha256=(\S+) ;;",
+        r"(?m)^RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := (\S+)$",
+    ),
+];
+
+/// Every pin the Dockerfile does not copy from the fragment, or copies with another value.
+fn dockerfile_pin_problems(dockerfile: &str, fragment: &str) -> Vec<String> {
+    DOCKERFILE_PINS
+        .iter()
+        .flat_map(|(what, dockerfile_pattern, fragment_pattern)| {
+            one_value_problems(
+                what,
+                &[
+                    PinSource {
+                        file: DOCKERFILE,
+                        content: dockerfile,
+                        pattern: dockerfile_pattern,
+                    },
+                    PinSource {
+                        file: RUST_RELEASE_FRAGMENT,
+                        content: fragment,
+                        pattern: fragment_pattern,
+                    },
+                ],
+            )
+        })
+        .collect()
+}
+
+/// SSE's `zig_is_one_version` and `cargo_zigbuild_is_one_version` for the image, against the
+/// fragment's record: the image's build stage downloads the zig, cargo-zigbuild and rust-std
+/// archives the fragment pins, by the same digests, so the image and the release binaries are
+/// built by one toolchain.
+#[test]
+fn dockerfile_pins_are_the_fragments() {
+    let problems =
+        dockerfile_pin_problems(&repo::read(DOCKERFILE), &repo::read(RUST_RELEASE_FRAGMENT));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control: a moved version or digest in the Dockerfile, and a pin the Dockerfile
+/// does not write, are each one problem.
+#[test]
+fn dockerfile_pin_rules() {
+    let dockerfile = repo::read(DOCKERFILE);
+    let fragment = repo::read(RUST_RELEASE_FRAGMENT);
+    assert_eq!(
+        dockerfile_pin_problems(&dockerfile, &fragment),
+        Vec::<String>::new()
+    );
+    let arm64_std = "7e0ad2e67817f224b7a6331e48d6397303fc050edaccf81784ed786ffddc884a";
+    assert!(
+        dockerfile.contains(arm64_std) && fragment.contains(arm64_std),
+        "the aarch64 rust-std digest; the negative control would test nothing"
+    );
+    for (name, sample) in [
+        (
+            "a moved zig",
+            dockerfile.replace("ARG ZIG_VERSION=0.17.0", "ARG ZIG_VERSION=0.16.0"),
+        ),
+        (
+            "another aarch64 rust-std digest",
+            dockerfile.replace(arm64_std, &"0".repeat(64)),
+        ),
+        (
+            "no cargo-zigbuild version",
+            dockerfile.replace("ARG CARGO_ZIGBUILD_VERSION=0.24.0\n", ""),
+        ),
+    ] {
+        assert_ne!(
+            sample, dockerfile,
+            "{name}: the sample is the Dockerfile itself"
+        );
+        let problems = dockerfile_pin_problems(&sample, &fragment);
         assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
     }
 }
@@ -767,29 +822,12 @@ fn shellcheck_is_one_version() {
     assert!(problem.is_none(), "{problem:?}");
 }
 
-/// Go: `TestDroastIsOneVersion`. The droast hook builds the release at its rev, which Dependabot
-/// moves, and the Go Dockerfile meta-tests run the binary CI installs with setup-droast; both must
-/// be the same release, so the label test checks the droast that lints.
-#[test]
-fn droast_is_one_version() {
-    let problem = hook_version_problem(
-        "droast",
-        &repo::read(PRE_COMMIT_CONFIG),
-        DROAST_HOOK,
-        &repo::read(DROAST_ACTION),
-        DROAST_PIN,
-    );
-    assert!(problem.is_none(), "{problem:?}");
-}
-
-/// The negative control of the two version checks: a moved hook, a moved action and a missing
-/// pin are each a problem.
+/// The negative control of the version check: a moved hook, a moved action and a missing pin are
+/// each a problem.
 #[test]
 fn hook_version_rules() {
-    let hooks = "  - repo: https://github.com/shellcheck-py/shellcheck-py\n    rev: v0.11.0.1\n\
-                 \x20 - repo: https://github.com/immanuwell/dockerfile-roast\n    rev: 1.7.0\n";
+    let hooks = "  - repo: https://github.com/shellcheck-py/shellcheck-py\n    rev: v0.11.0.1\n";
     let shellcheck = "        SHELLCHECK_VERSION: v0.11.0\n";
-    let droast = "        DROAST_VERSION: 1.7.0\n";
     assert_eq!(
         hook_version_problem(
             "ShellCheck",
@@ -798,10 +836,6 @@ fn hook_version_rules() {
             shellcheck,
             SHELLCHECK_PIN
         ),
-        None
-    );
-    assert_eq!(
-        hook_version_problem("droast", hooks, DROAST_HOOK, droast, DROAST_PIN),
         None
     );
     for (name, problem) in [
@@ -816,21 +850,106 @@ fn hook_version_rules() {
             ),
         ),
         (
-            "a moved droast hook",
+            "a moved ShellCheck hook",
             hook_version_problem(
-                "droast",
-                &hooks.replace("rev: 1.7.0", "rev: 1.8.0"),
-                DROAST_HOOK,
-                droast,
-                DROAST_PIN,
+                "ShellCheck",
+                &hooks.replace("rev: v0.11.0.1", "rev: v0.12.0.1"),
+                SHELLCHECK_HOOK,
+                shellcheck,
+                SHELLCHECK_PIN,
             ),
         ),
         (
-            "a missing droast pin",
-            hook_version_problem("droast", hooks, DROAST_HOOK, "", DROAST_PIN),
+            "a missing ShellCheck pin",
+            hook_version_problem("ShellCheck", hooks, SHELLCHECK_HOOK, "", SHELLCHECK_PIN),
         ),
     ] {
         assert!(problem.is_some(), "{name} was accepted");
+    }
+}
+
+const RELEASE_WORKFLOW: &str = ".github/workflows/release.yaml";
+const SETUP_TRIVY: &str = "aquasecurity/setup-trivy";
+/// The release workflow's Trivy pin: an exact vX.Y.Z.
+static TRIVY_VERSION: LazyLock<Regex> =
+    LazyLock::new(|| regex(r#"(?m)^\s*TRIVY_VERSION:\s*["']?([^"'\s]*)["']?\s*$"#));
+static EXACT_TRIVY: LazyLock<Regex> = LazyLock::new(|| regex(r"^v\d+\.\d+\.\d+$"));
+
+/// What is wrong with the Trivy the release workflow `content` scans with: `TRIVY_VERSION` is
+/// written once, as an exact release, and every setup-trivy step installs exactly that variable.
+fn trivy_problems(content: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    let pins: Vec<&str> = TRIVY_VERSION
+        .captures_iter(content)
+        .filter_map(|captures| captures.get(1).map(|version| version.as_str()))
+        .collect();
+    match pins.as_slice() {
+        [version] if EXACT_TRIVY.is_match(version) => {}
+        [version] => problems.push(format!(
+            "{RELEASE_WORKFLOW} pins Trivy {version:?}, not an exact vX.Y.Z release"
+        )),
+        pins => problems.push(format!(
+            "{RELEASE_WORKFLOW} writes TRIVY_VERSION {} times, want once",
+            pins.len()
+        )),
+    }
+    let steps: Vec<ActionStep> = parse_action_steps(RELEASE_WORKFLOW, content)
+        .into_iter()
+        .filter(|step| step.action == SETUP_TRIVY)
+        .collect();
+    if steps.is_empty() {
+        problems.push(format!("{RELEASE_WORKFLOW} has no {SETUP_TRIVY} step"));
+    }
+    for step in steps {
+        let version = step.with.get("version").map_or("", String::as_str);
+        if version != "${{ env.TRIVY_VERSION }}" {
+            problems.push(format!(
+                "{SETUP_TRIVY} installs version {version:?}, want ${{{{ env.TRIVY_VERSION }}}}"
+            ));
+        }
+    }
+    problems
+}
+
+/// SSE's `trivy_is_one_version`, for the one workflow that scans: the release scans the image
+/// with one pinned Trivy, so a finding means the same on every release and a recovery re-run.
+#[test]
+fn trivy_is_pinned() {
+    let problems = trivy_problems(&repo::read(RELEASE_WORKFLOW));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control: a floating version, a second pin, no setup-trivy step, and a step that
+/// installs its own version are each refused.
+#[test]
+fn trivy_rules() {
+    let good = "env:\n  TRIVY_VERSION: v0.74.0\njobs:\n  release:\n    steps:\n      \
+                - uses: aquasecurity/setup-trivy@0123456789abcdef0123456789abcdef01234567\n        \
+                with:\n          version: ${{ env.TRIVY_VERSION }}\n";
+    assert_eq!(trivy_problems(good), Vec::<String>::new());
+    for (name, sample) in [
+        (
+            "a floating version",
+            good.replace("TRIVY_VERSION: v0.74.0", "TRIVY_VERSION: latest"),
+        ),
+        (
+            "a second pin",
+            good.replace("jobs:", "  OTHER:\n    TRIVY_VERSION: v0.73.0\njobs:"),
+        ),
+        (
+            "no setup-trivy step",
+            good.replace("aquasecurity/setup-trivy", "some/other-action"),
+        ),
+        (
+            "a step with its own version",
+            good.replace("${{ env.TRIVY_VERSION }}", "v0.73.0"),
+        ),
+    ] {
+        assert_eq!(
+            trivy_problems(&sample).len(),
+            1,
+            "{name} was not refused once"
+        );
     }
 }
 

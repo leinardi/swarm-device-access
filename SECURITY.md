@@ -39,7 +39,7 @@ succeeds. Deny globs also apply to aliases, but only as a best-effort veto at
 evaluation time; the boundary to rely on is a glob on the kernel name (see the
 README's Security section).
 
-**Opt-in default.** The daemon defaults to `-policy-mode=opt-in`, processing only
+**Opt-in default.** The daemon defaults to `--policy-mode=opt-in`, processing only
 containers that carry `swarm-device-access.enable: "true"`. This minimises blast
 radius — containers that happen to bind-mount `/dev/...` paths are not silently
 granted extra device access unless an operator explicitly opts them in.

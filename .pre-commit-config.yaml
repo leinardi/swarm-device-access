@@ -10,7 +10,7 @@ repos:
     hooks:
       - id: check-merge-conflict
       # Fixtures are byte-for-byte captures of another tool's output (the files
-      # under internal/cgroup/testdata are /proc captures), and a formatter that
+      # under tests/testdata/cgroup are /proc captures), and a formatter that
       # tidies them makes them prove something other than what was captured.
       - id: end-of-file-fixer
         exclude: (^|/)testdata/
@@ -69,9 +69,9 @@ repos:
         files: \.(yml|yaml)$
         args: ["--write"]
       # The offline documentation check: every relative link and its fragment resolve. The meta
-      # crate's docs test (meta/tests/docs.rs), which cargo reruns on every call; its Go original,
-      # test/docs, stays in make go-test until the cutover. always_run because the file list comes
-      # from git ls-files and deleting a linked page passes no file to the hook at all.
+      # crate's docs test (meta/tests/docs.rs), which cargo reruns on every call. always_run because
+      # the file list comes from git ls-files and deleting a linked page passes no file to the hook
+      # at all.
       - id: docs-links
         name: docs links
         entry: cargo test --locked -p meta --test docs
@@ -103,21 +103,6 @@ repos:
         # always_run makes this hook eligible at every installed stage, and commit-msg is one of
         # them; pinned so the whole-tree scan runs once.
         stages: [pre-commit]
-      # Dependency-change check, and nothing more. It runs the same target as `make audit-deps` --
-      # the full source-aware govulncheck scan over every package plus the banned-module check --
-      # but only when go.mod or go.sum change, which is what limits it: it catches a bad upgrade
-      # at the moment it is made, and nothing else. It does not catch a CVE disclosed against a
-      # dependency nobody touched since, and it never fires on a .go change, so new code reaching
-      # an already-vulnerable API goes unseen here. Widening the trigger is not the fix: it would
-      # put a multi-minute network scan on every Go commit. The audit-deps CI job runs the same
-      # target on every pull request.
-      - id: audit-deps-go
-        name: go dependency audit
-        entry: make audit-deps
-        language: system
-        pass_filenames: false
-        require_serial: true
-        files: ^go\.(mod|sum)$
   # The Rust workspace, adapted from swarm-scheduler-exporter's .pre-commit-config.yaml at
   # d57dcc220d29 (MIT, same author). Every command is workspace-wide, so the meta and testenv crates
   # are held to the same lints as the daemon, and --locked, so Cargo.lock is what gets tested.
@@ -189,18 +174,6 @@ repos:
     rev: 1.7.0
     hooks:
       - id: droast
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.14.0
-    hooks:
-      - id: golangci-lint-config-verify
-      - id: golangci-lint-fmt
-      - id: golangci-lint-full
-        types: [file]
-        files: '(\.go$|^go\.(mod|sum)$|^\.golangci\.(yml|yaml|toml|json)$)'
-  - repo: https://github.com/tekwizely/pre-commit-golang
-    rev: v1.0.0-rc.4
-    hooks:
-      - id: go-test-repo-mod
   # The release version is derived from the commit types since the last tag, so
   # a message nobody can classify is a release nobody can version. With
   # --force-scope: every commit here names a scope, and AGENTS.md requires one.

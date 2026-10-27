@@ -17,38 +17,57 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! The shipped image's invariants that the Dockerfile's own comments and `droast.toml` state: one
-//! Dockerfile, a pinned frontend, the deps, build and runtime stages from tag-pinned bases, the
-//! version stamps, the runtime posture, and the seven OCI labels `droast.toml` requires. The Rust
-//! side of `test/dockerfiles`, which stays until the cutover.
+//! Dockerfile, a pinned frontend, the build and runtime stages from tag-pinned bases, the Rust
+//! build stage and its version stamps, the runtime posture (root, no healthcheck, no exposed
+//! port), the platforms, and the seven OCI labels `droast.toml` requires. Each rule has its
+//! negative control.
 //!
-//! The image still builds the Go daemon, so the stage assertions are Go's (`go mod download`,
-//! the `-ldflags` stamps); SSE's Rust build stage, version stamps and platform checks come with
-//! the Rust image. `TestDroastRequiresTheLabels` ran droast; here the same rule is read from the
-//! files, so no tool is needed: `droast.toml` requires exactly the runtime stage's labels, with
-//! `strict-labels` refusing any other, and each negative control drops one side of that.
+//! `TestDroastRequiresTheLabels` ran droast; here the same rule is read from the files, so no tool
+//! is needed: `droast.toml` requires exactly the runtime stage's labels, with `strict-labels`
+//! refusing any other, and each negative control drops one side of that.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::sync::LazyLock;
 
 use meta::dockerfile::{self, Stage};
 use meta::repo;
+use regex::Regex;
 use toml::Table;
 
 const SHIPPED_DOCKERFILE: &str = "deployments/docker/Dockerfile";
 const DROAST_CONFIG: &str = "droast.toml";
 const BINARY: &str = "/usr/local/bin/swarm-device-access";
 const CREATED_LABEL: &str = "org.opencontainers.image.created";
+const STAMP_FRAGMENT: &str = ".mk/rust.mk";
+const WORKFLOWS_DIR: &str = ".github/workflows";
+const WANT_PLATFORMS: &str = "linux/amd64,linux/arm64";
 
 fn shipped_stages() -> Vec<Stage> {
     let stages = dockerfile::parse(&repo::read(SHIPPED_DOCKERFILE))
         .unwrap_or_else(|error| panic!("{SHIPPED_DOCKERFILE}: {error}"));
     assert_eq!(
         stages.len(),
-        3,
-        "{SHIPPED_DOCKERFILE} has {} stages, want deps, build and runtime",
+        2,
+        "{SHIPPED_DOCKERFILE} has {} stages, want build and runtime",
         stages.len()
     );
     stages
+}
+
+/// The stage named `name` of `stages`, which must be the only one.
+fn stage(stages: Vec<Stage>, name: &str) -> Stage {
+    let found: Vec<Stage> = stages
+        .into_iter()
+        .filter(|candidate| candidate.name == name)
+        .collect();
+    match <[Stage; 1]>::try_from(found) {
+        Ok([stage]) => stage,
+        Err(found) => panic!(
+            "{SHIPPED_DOCKERFILE} has {} stages named {name}, want one",
+            found.len()
+        ),
+    }
 }
 
 fn is_dockerfile(name: &str) -> bool {
@@ -128,106 +147,218 @@ fn syntax_directive_is_pinned() {
     );
 }
 
-/// Go: `TestShippedStages`. The three stages, in order: deps and the unnamed runtime stage from
-/// literal bases pinned by tag and not by digest (dhi.io republishes its tags with security
-/// fixes, and a rebuild should pick those up), and build from deps, whose module download it
-/// reuses.
+/// Go: `TestShippedStages`. The two stages, in order, each from a literal base pinned by tag and
+/// not by digest: dhi.io republishes its tags with security fixes, and a rebuild should pick
+/// those up. A variable or latest would let a build change base unseen.
 #[test]
-fn shipped_stages_are_deps_build_and_runtime() {
+fn shipped_stages_are_build_and_runtime() {
     let stages = shipped_stages();
-    let names: Vec<&str> = stages.iter().map(|stage| stage.name.as_str()).collect();
-    assert_eq!(
-        names,
-        ["deps", "build", ""],
-        "want deps, build and the unnamed runtime stage, in order"
-    );
-    for stage in [&stages[0], &stages[2]] {
+    for stage in &stages {
         assert!(
             dockerfile::tag_pinned(&stage.image),
-            "stage {:?} is FROM {:?}, which is not a literal reference pinned by tag",
+            "stage {:?} is FROM {:?}, which is not a literal reference pinned by tag alone",
             stage.name,
             stage.image
         );
     }
-    assert_eq!(
-        stages[1].image, "deps",
-        "the build stage starts from deps, whose module download it reuses"
-    );
+    let names: Vec<&str> = stages.iter().map(|stage| stage.name.as_str()).collect();
+    assert_eq!(names, ["build", "runtime"]);
 }
 
-/// Go: `TestBuildStages`. deps runs on the build platform from dhi.io/golang and downloads the
-/// modules; build compiles the static binary with the version stamps the daemon reports.
-#[test]
-fn build_stages() {
-    let stages = shipped_stages();
-    let (deps, build) = (&stages[0], &stages[1]);
-    assert_eq!(
-        deps.platform, "$BUILDPLATFORM",
-        "the deps stage's --platform"
-    );
-    assert_eq!(
-        dockerfile::repository(&deps.image),
-        "dhi.io/golang",
-        "the deps stage's base"
-    );
-    assert!(
-        deps.joined().contains("go mod download"),
-        "the deps stage does not download the modules:\n{}",
-        deps.joined()
-    );
+/// What is wrong with the build stage: it must run on the build platform from dhi.io/rust,
+/// cross-compile with cargo-zigbuild to the target platform's static musl triple from the locked
+/// dependency graph, check every toolchain download against its own digest, and stamp the version
+/// strings the binary reads.
+fn build_stage_problems(build: &Stage) -> Vec<String> {
+    let mut problems = Vec::new();
+    if build.platform != "$BUILDPLATFORM" {
+        problems.push(format!(
+            "the build stage runs on --platform={:?}, want $BUILDPLATFORM",
+            build.platform
+        ));
+    }
+    if dockerfile::repository(&build.image) != "dhi.io/rust" {
+        problems.push(format!(
+            "the build stage is FROM {:?}, want dhi.io/rust",
+            build.image
+        ));
+    }
 
     let instructions = build.joined();
-    let missing: Vec<&str> = [
+    for want in [
         "ARG VERSION",
         "ARG COMMIT",
         "ARG DATE",
-        "ARG TARGETOS",
+        "ARG RUST_VERSION=",
+        "ARG ZIG_VERSION=",
+        "ARG CARGO_ZIGBUILD_VERSION=",
+        "ARG BUILDARCH",
         "ARG TARGETARCH",
-        "CGO_ENABLED=0",
-        "-trimpath",
-        "-buildvcs=false",
-        "-X 'main.version=${VERSION}'",
-        "-X 'main.commit=${COMMIT}'",
-        "-X 'main.date=${DATE}'",
-        "-o /out/swarm-device-access ./cmd/swarm-device-access",
-    ]
-    .into_iter()
-    .filter(|want| !instructions.contains(want))
-    .collect();
-    assert!(
-        missing.is_empty(),
-        "the build stage lacks {missing:?}:\n{instructions}"
-    );
+        "amd64) triple=x86_64-unknown-linux-musl;",
+        "arm64) triple=aarch64-unknown-linux-musl;",
+        "/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-${zigbuild_asset}.tar.xz",
+        "https://static.rust-lang.org/dist/rust-std-${RUST_VERSION}-${triple}.tar.xz",
+        r#"cargo zigbuild --release --locked --target "${triple}" --bin swarm-device-access"#,
+        r#"cp "target/${triple}/release/swarm-device-access" /out/swarm-device-access"#,
+    ] {
+        if !instructions.contains(want) {
+            problems.push(format!("the build stage lacks {want:?}"));
+        }
+    }
+
+    // Every download is checked against its own digest: each curl in the stage is followed by a
+    // sha256sum check of the file it wrote.
+    let downloads = instructions.matches("curl -fsSL").count();
+    let checks = instructions.matches("| sha256sum -c -").count();
+    if downloads == 0 {
+        problems.push("the build stage downloads nothing".to_owned());
+    }
+    if downloads != checks {
+        problems.push(format!(
+            "the build stage downloads {downloads} files and checks {checks}"
+        ));
+    }
+    problems
 }
 
-/// Go: `TestRuntimeStage`. The posture of the image that ships: no shell to run anything in, root
-/// (the daemon writes BPF programs and cgroup files), the binary as the entrypoint, and the seven
-/// OCI labels.
+/// Go: `TestBuildStage`, for the Rust build.
 #[test]
-fn runtime_stage() {
-    let runtime = shipped_stages().swap_remove(2);
+fn build_stage() {
+    let problems = build_stage_problems(&stage(shipped_stages(), "build"));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control of the build stage rules: a stage on the target platform, from another
+/// base, without --locked, or with a download nobody checks is each refused.
+#[test]
+fn build_stage_rules() {
+    let content = repo::read(SHIPPED_DOCKERFILE);
+    let unchecked = content.replacen(
+        r#"&& echo "${zig_sha256}  /tmp/zig.tar.xz" | sha256sum -c - \"#,
+        r#"&& echo "${zig_sha256}" \"#,
+        1,
+    );
+    for (name, sample) in [
+        (
+            "the target platform",
+            content.replace("FROM --platform=$BUILDPLATFORM dhi.io", "FROM dhi.io"),
+        ),
+        (
+            "another base",
+            content.replace("dhi.io/rust:", "docker.io/library/rust:"),
+        ),
+        (
+            "an unlocked build",
+            content.replace(
+                "cargo zigbuild --release --locked",
+                "cargo zigbuild --release",
+            ),
+        ),
+        ("an unchecked download", unchecked),
+    ] {
+        assert_ne!(
+            sample, content,
+            "{name}: the sample is the Dockerfile itself"
+        );
+        let stages = dockerfile::parse(&sample).expect("parse the sample");
+        assert!(
+            !build_stage_problems(&stage(stages, "build")).is_empty(),
+            "{name} was accepted"
+        );
+    }
+}
+
+/// What is wrong with the version stamps: `version_rs` must read each of the three variables at
+/// compile time, `build` (the build stage's instructions) must set each from its build argument,
+/// and `make` (the make fragment) must set each.
+fn stamp_problems(version_rs: &str, build: &str, make: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    for field in ["VERSION", "COMMIT", "DATE"] {
+        let variable = format!("SWARM_DEVICE_ACCESS_{field}");
+        if !version_rs.contains(&format!("option_env!(\x22{variable}\x22)")) {
+            problems.push(format!("src/version.rs does not read {variable}"));
+        }
+        if !build.contains(&format!("{variable}=\x22${{{field}}}\x22")) {
+            problems.push(format!(
+                "the build stage does not stamp {variable} from ${field}"
+            ));
+        }
+        if !make.contains(&format!("{variable}=")) {
+            problems.push(format!("{STAMP_FRAGMENT} does not stamp {variable}"));
+        }
+    }
+    problems
+}
+
+/// Go: `TestVersionIsStamped`. The version, commit and date the binary reports come from the
+/// build: the image's build stage and the make targets set the three variables src/version.rs
+/// reads at compile time, from the same build arguments and git values. A path that stamped
+/// nothing would ship a binary reporting "dev".
+#[test]
+fn version_is_stamped() {
+    let problems = stamp_problems(
+        &repo::read("src/version.rs"),
+        &stage(shipped_stages(), "build").joined(),
+        &repo::read(STAMP_FRAGMENT),
+    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control of the stamp rules: a stamp dropped from each of the three places is a
+/// problem.
+#[test]
+fn stamp_rules() {
+    let version_rs = "stamp(option_env!(\x22SWARM_DEVICE_ACCESS_VERSION\x22))\n\
+                      stamp(option_env!(\x22SWARM_DEVICE_ACCESS_COMMIT\x22))\n\
+                      stamp(option_env!(\x22SWARM_DEVICE_ACCESS_DATE\x22))\n";
+    let build = "SWARM_DEVICE_ACCESS_VERSION=\x22${VERSION}\x22 \
+                 SWARM_DEVICE_ACCESS_COMMIT=\x22${COMMIT}\x22 \
+                 SWARM_DEVICE_ACCESS_DATE=\x22${DATE}\x22";
+    let make = "SWARM_DEVICE_ACCESS_VERSION=x SWARM_DEVICE_ACCESS_COMMIT=x \
+                SWARM_DEVICE_ACCESS_DATE=x";
     assert_eq!(
-        dockerfile::repository(&runtime.image),
-        "dhi.io/static",
-        "the runtime stage's base"
+        stamp_problems(version_rs, build, make),
+        Vec::<String>::new()
     );
-    assert!(
-        runtime.platform.is_empty(),
-        "the runtime stage pins --platform={}; it has to follow the target platform",
-        runtime.platform
+    let problems = stamp_problems(
+        &version_rs.replace("ACCESS_DATE", "ACCESS_WHEN"),
+        &build.replace("${COMMIT}", "none"),
+        &make.replace("SWARM_DEVICE_ACCESS_VERSION=x ", ""),
     );
+    assert_eq!(problems.len(), 3, "{problems:#?}");
+}
+
+/// What is wrong with the runtime stage: from dhi.io/static on the target platform, no shell to
+/// run anything in and nothing to write to, root (the daemon writes BPF programs and cgroup
+/// files), the binary as the entrypoint, no healthcheck and no exposed port (the metrics listener
+/// is off by default, and the launcher's daemon has no network), and the seven OCI labels.
+fn runtime_problems(runtime: &Stage) -> Vec<String> {
+    let mut problems = Vec::new();
+    if dockerfile::repository(&runtime.image) != "dhi.io/static" {
+        problems.push(format!(
+            "the runtime stage is FROM {:?}, want dhi.io/static",
+            runtime.image
+        ));
+    }
+    if !runtime.platform.is_empty() {
+        problems.push(format!(
+            "the runtime stage pins --platform={}; it has to follow the target platform",
+            runtime.platform
+        ));
+    }
 
     let mut seen: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for instruction in &runtime.instructions {
-        assert!(
-            !matches!(
-                instruction.keyword.as_str(),
-                "RUN" | "SHELL" | "VOLUME" | "ADD"
-            ),
-            "the runtime stage carries {} {}; the base has no shell",
-            instruction.keyword,
-            instruction.args
-        );
+        if matches!(
+            instruction.keyword.as_str(),
+            "RUN" | "SHELL" | "VOLUME" | "WORKDIR" | "ADD" | "ENV" | "HEALTHCHECK" | "EXPOSE"
+        ) {
+            problems.push(format!(
+                "the runtime stage carries {} {}; it has no shell, writes nothing, and has no \
+                 healthcheck or exposed port",
+                instruction.keyword, instruction.args
+            ));
+        }
         seen.entry(instruction.keyword.as_str())
             .or_default()
             .push(instruction.args.as_str());
@@ -239,22 +370,22 @@ fn runtime_stage() {
         ("ENTRYPOINT", entrypoint.as_str()),
         ("COPY", copy.as_str()),
     ] {
-        assert_eq!(
-            seen.get(keyword).map(Vec::as_slice),
-            Some([args].as_slice()),
-            "the runtime stage's {keyword}, want exactly {keyword} {args}"
-        );
+        if seen.get(keyword).map(Vec::as_slice) != Some([args].as_slice()) {
+            problems.push(format!(
+                "the runtime stage's {keyword} is {:?}, want exactly {keyword} {args}",
+                seen.get(keyword)
+            ));
+        }
     }
 
-    let labels = dockerfile::labels(&runtime);
+    let labels = dockerfile::labels(runtime);
     let description = labels
         .get("org.opencontainers.image.description")
         .cloned()
         .unwrap_or_default();
-    assert!(
-        !description.is_empty(),
-        "the runtime stage has no org.opencontainers.image.description"
-    );
+    if description.is_empty() {
+        problems.push("the runtime stage has no org.opencontainers.image.description".to_owned());
+    }
     let want: BTreeMap<String, String> = [
         ("org.opencontainers.image.title", "swarm-device-access"),
         ("org.opencontainers.image.description", description.as_str()),
@@ -270,9 +401,147 @@ fn runtime_stage() {
     .into_iter()
     .map(|(key, value)| (key.to_owned(), value.to_owned()))
     .collect();
-    assert_eq!(labels, want, "want exactly the seven OCI labels");
+    if labels != want {
+        problems.push(format!(
+            "the runtime stage's labels are {labels:?}, want exactly the seven OCI labels"
+        ));
+    }
+    problems
 }
 
+/// Go: `TestRuntimeStage`. The posture of the image that ships.
+#[test]
+fn runtime_stage() {
+    let problems = runtime_problems(&stage(shipped_stages(), "runtime"));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control of the runtime rules: a healthcheck, an exposed port, a non-root user, a
+/// shell command and a pinned platform are each refused.
+#[test]
+fn runtime_rules() {
+    let content = repo::read(SHIPPED_DOCKERFILE);
+    let entrypoint = format!("ENTRYPOINT [\x22{BINARY}\x22]\n");
+    assert!(
+        content.contains(&entrypoint),
+        "the Dockerfile's entrypoint line; the negative control would test nothing"
+    );
+    for (name, sample) in [
+        (
+            "a healthcheck",
+            content.replace(
+                &entrypoint,
+                &format!("HEALTHCHECK CMD [\x22{BINARY}\x22, \x22--help\x22]\n{entrypoint}"),
+            ),
+        ),
+        (
+            "an exposed port",
+            content.replace(&entrypoint, &format!("EXPOSE 9090\n{entrypoint}")),
+        ),
+        (
+            "a non-root user",
+            content.replace("\nUSER 0\n", "\nUSER 65532:65532\n"),
+        ),
+        (
+            "a shell command",
+            content.replace(&entrypoint, &format!("RUN true\n{entrypoint}")),
+        ),
+        (
+            "a pinned platform",
+            content.replace(
+                "FROM dhi.io/static:",
+                "FROM --platform=linux/amd64 dhi.io/static:",
+            ),
+        ),
+    ] {
+        assert_ne!(
+            sample, content,
+            "{name}: the sample is the Dockerfile itself"
+        );
+        let stages = dockerfile::parse(&sample).expect("parse the sample");
+        assert!(
+            !runtime_problems(&stage(stages, "runtime")).is_empty(),
+            "{name} was accepted"
+        );
+    }
+}
+
+/// A `platforms:` or `PLATFORMS:` declaration in a workflow, with its value.
+static PLATFORM_DECLARATION: LazyLock<Regex> = LazyLock::new(|| {
+    let pattern = r"(?mi)^\s*(?:-\s*)?(platforms?|PLATFORMS)\s*:\s*(.+)$";
+    Regex::new(pattern).unwrap_or_else(|error| panic!("invalid pattern {pattern}: {error}"))
+});
+
+/// The declarations of `workflows` (path and content) that name other platforms than
+/// [`WANT_PLATFORMS`], and how many literal declarations they hold.
+fn platform_problems(workflows: &[(String, String)]) -> (usize, Vec<String>) {
+    let mut declared = 0;
+    let mut problems = Vec::new();
+    for (workflow, content) in workflows {
+        for captures in PLATFORM_DECLARATION.captures_iter(content) {
+            let value = captures[2].trim().trim_matches(['"', '\'']);
+            if value.starts_with("${{") {
+                continue;
+            }
+            declared += 1;
+            if value != WANT_PLATFORMS {
+                problems.push(format!(
+                    "{workflow} declares {} {value:?}, want {WANT_PLATFORMS:?}",
+                    &captures[1]
+                ));
+            }
+        }
+        if content.contains("linux/arm/v") || content.contains("linux/386") {
+            problems.push(format!(
+                "{workflow} names a platform other than {WANT_PLATFORMS}"
+            ));
+        }
+    }
+    (declared, problems)
+}
+
+/// Go: `TestPlatforms`. The two platforms wherever a workflow names platforms: dhi.io/static has
+/// no arm/v7, and the release binaries are built for exactly these two.
+#[test]
+fn platforms() {
+    let workflows: Vec<(String, String)> = repo::files_under(WORKFLOWS_DIR, &[".yaml", ".yml"])
+        .into_iter()
+        .map(|path| {
+            let content = repo::read(&path);
+            (path, content)
+        })
+        .collect();
+    let (declared, problems) = platform_problems(&workflows);
+    assert!(
+        declared > 0,
+        "no workflow declares its platforms; the check would pass on nothing"
+    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The negative control of the platform rule: a third platform in a declaration, and an arm/v7
+/// image named anywhere, are each refused; an expression is not a declaration.
+#[test]
+fn platform_rules() {
+    let good = "env:\n  PLATFORMS: linux/amd64,linux/arm64\n".to_owned();
+    let (declared, problems) = platform_problems(&[("a.yaml".to_owned(), good.clone())]);
+    assert_eq!((declared, problems.len()), (1, 0), "{problems:#?}");
+    for (name, sample) in [
+        (
+            "a third platform",
+            good.replace("linux/arm64", "linux/arm64,linux/s390x"),
+        ),
+        ("an arm/v7 image", format!("{good}  other: linux/arm/v7\n")),
+    ] {
+        let (_, problems) = platform_problems(&[("a.yaml".to_owned(), sample)]);
+        assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
+    }
+    let (declared, _) = platform_problems(&[(
+        "a.yaml".to_owned(),
+        "      platforms: ${{ env.PLATFORMS }}\n".to_owned(),
+    )]);
+    assert_eq!(declared, 0, "an expression was read as a declaration");
+}
 /// What is wrong with the label policy: `droast.toml` must refuse any label outside its
 /// `[required-labels]` (`strict-labels = true`), and require exactly the labels the runtime stage
 /// of `dockerfile` carries, so droast fails (DF074) on a Dockerfile that loses one.
@@ -379,13 +648,13 @@ fn parse_rejects_what_the_assertions_must_not_miss() {
     for (name, image) in [
         (
             "a variable tag",
-            "dhi.io/golang:${GO_LINE}-alpine3.23-dev".to_owned(),
+            "dhi.io/rust:${RUST_LINE}-debian13-dev".to_owned(),
         ),
         ("a variable image", "$BASE".to_owned()),
         ("no tag", "dhi.io/static".to_owned()),
         ("latest", "dhi.io/static:latest".to_owned()),
         ("a digest", format!("dhi.io/static:20250419{digest}")),
-        ("a stage name, not a ref", "deps".to_owned()),
+        ("a stage name, not a ref", "build".to_owned()),
     ] {
         assert!(
             !dockerfile::tag_pinned(&image),

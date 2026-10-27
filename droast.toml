@@ -16,8 +16,8 @@ require-suppression-reason = true
 report-unused-suppressions = true
 
 # DF052 (apk add without pinned versions) is info, so min-severity hides it on purpose: Alpine
-# drops superseded package versions from its index, so an exact pin in the deps stage would stop
-# building; its packages follow the stable branch of the pinned base instead.
+# drops superseded package versions from its index, so an exact pin stops building; a stage that
+# installs packages pins its base instead. No Dockerfile here runs apk add today.
 
 # Reject any label outside [required-labels]
 strict-labels = true

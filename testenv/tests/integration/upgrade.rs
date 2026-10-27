@@ -28,9 +28,9 @@
 //! the restore plan leaves it. The wrapper goldens alone do not prove this: they never run one
 //! daemon against the other's kernel state.
 //!
-//! The Go daemon is `SDA_GO_TEST_IMAGE` (default `swarm-device-access:integration`, the Go
-//! Dockerfile's build), which must answer the identity flag as Go; the Rust daemon is the image
-//! under test, which the runner already proved Rust.
+//! The Go daemon is `SDA_GO_TEST_IMAGE`, the last published 1.x image pinned by digest, which
+//! must answer the identity flag as Go; the Rust daemon is the image under test, which the runner
+//! already proved Rust.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -38,10 +38,10 @@ use std::time::Duration;
 use bollard::query_parameters::InspectContainerOptions;
 use swarm_device_access::policy::LABEL_ENABLE;
 use testenv::enforce::{
-    Build, DUMP_FLAG, ENV_ENFORCE, ENV_GO_TEST_IMAGE, ProgramDump, cgroup_problem, go_test_image,
-    granted_problems, revoked_problems, runtime_originals,
+    Build, DUMP_FLAG, ENV_ENFORCE, ProgramDump, cgroup_problem, granted_problems, revoked_problems,
+    runtime_originals,
 };
-use testenv::host::{OP_TIMEOUT, check_go_image_identity, with_timeout};
+use testenv::host::{OP_TIMEOUT, with_timeout};
 use tokio::process::Command;
 
 use crate::daemon::require_processed;
@@ -50,7 +50,8 @@ use crate::enforce::{
     enforce_requested, pick_device, require_allowed, require_denied, require_enforce_host,
     require_or_skip, start_daemon_container, stop_daemon_container,
 };
-use crate::testing::{Fatal, TestHandle, TestResult, docker, suite};
+use crate::identity::require_go_image;
+use crate::testing::{TestHandle, TestResult, docker, suite};
 
 /// Bounds one read of the attached programs through sudo.
 const DUMP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -200,27 +201,6 @@ async fn run_step(
     ));
     stop_daemon_container(test, test.ctx(), &daemon).await;
     Ok(())
-}
-
-/// The Go image, which must exist (a missing image is a missing prerequisite, a failure under
-/// `SDA_IT_ENFORCE=1`) and must answer the identity flag as the Go daemon (anything else fails).
-async fn require_go_image(test: &TestHandle) -> Result<String, Fatal> {
-    let image = go_test_image(std::env::var(ENV_GO_TEST_IMAGE).ok().as_deref());
-    if let Err(error) = with_timeout(test.ctx(), OP_TIMEOUT, docker().inspect_image(&image)).await {
-        return Err(require_or_skip(
-            test,
-            enforce_requested(),
-            &format!(
-                "Go daemon image {image:?} (set {ENV_GO_TEST_IMAGE} or run make \
-                 rust-test-integration {ENV_ENFORCE}=1): {error}"
-            ),
-        ));
-    }
-    check_go_image_identity(test.ctx(), docker(), &image, &suite().labels)
-        .await
-        .map_err(|error| test.fatal(format!("{ENV_GO_TEST_IMAGE}: {error}")))?;
-    test.log(format!("identity: {image} is the Go daemon"));
-    Ok(image)
 }
 
 /// The device programs attached to the cgroup of `container_id`: this binary, run as root through

@@ -51,17 +51,19 @@ files against Go; they are recaptured by hand.
 
 ## Recapturing
 
-Needs a Docker daemon on `/var/run/docker.sock` that the user can reach, no container named
-`swarm-device-access` (the capture refuses to run otherwise, since the launcher would remove it),
-and network access the first time, to pull `busybox:1.36`:
+The capture tooling was Go and was removed at the cutover with the rest of the Go code; it is in
+the git history at the parent of the commit that deleted `go.mod` (`git log -1 -- go.mod` names
+that commit). There it needed a Docker daemon on `/var/run/docker.sock` that the user can reach,
+no container named `swarm-device-access` (the capture refuses to run otherwise, since the launcher
+would remove it), and network access the first time, to pull `busybox:1.36`:
 
 ```bash
 make wire-capture
 ```
 
-It builds the binary (`make go-build`), runs `go test -tags=wirecapture -run '^TestCapture'
-./internal/wirecapture/` with `SDA_WIRE_BINARY` pointing at it, and rewrites the files of the
-local daemon's API version. The recording proxy and the harness are `internal/wirecapture`, built
+It built the binary (`make go-build`), ran `go test -tags=wirecapture -run '^TestCapture'
+./internal/wirecapture/` with `SDA_WIRE_BINARY` pointing at it, and rewrote the files of the
+local daemon's API version. The recording proxy and the harness were `internal/wirecapture`, built
 only under that tag. A killed run can leave containers behind; each carries the label
 `swarm-device-access-wirecapture`:
 

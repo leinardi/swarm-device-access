@@ -16,8 +16,8 @@
 
 //! Every CI gate is required: each job of ci.yaml that is a gate rather than an annotation is
 //! needed by `ci-result`, the one required check, and `pre-commit-all` skips only the hooks a
-//! needed job runs instead. The Rust side of `test/toolchain/ci_test.go`, which stays until the
-//! cutover; SSE has no counterpart.
+//! needed job runs instead. Ported from this project's Go meta-test `test/toolchain/ci_test.go`;
+//! SSE has no counterpart.
 
 use std::collections::BTreeMap;
 
@@ -30,12 +30,7 @@ const PRE_COMMIT_JOB: &str = "pre-commit-all";
 
 /// For each hook `pre-commit-all` may skip, the ci.yaml job that runs it instead. A skip is only
 /// safe when that job exists and `ci-result` needs it.
-const SKIPPED_HOOK_RUNNERS: [(&str, &str); 4] = [
-    ("go-test-repo-mod", "test"),
-    ("audit-deps-go", "audit-deps"),
-    ("cargo-test", "rust"),
-    ("cargo-deny", "rust"),
-];
+const SKIPPED_HOOK_RUNNERS: [(&str, &str); 2] = [("cargo-test", "rust"), ("cargo-deny", "rust")];
 
 /// The jobs that only post review comments on a pull request; `ci-result` does not need them,
 /// because `pre-commit-all` runs the same hooks on every file.

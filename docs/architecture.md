@@ -180,7 +180,7 @@ unprivileged and with only the Docker socket (`internal/launcher`):
    foreign container aborts the launcher.
 3. **Create, attach, wait, start**, in the order the `docker run` CLI uses. `daemonSpec` is the one
    source of the daemon's privileged set: the image ID, `Privileged`, host cgroup, PID and user
-   namespaces, network `none` (or `host` with `-host-network`), `AutoRemove`, a 10s stop timeout,
+   namespaces, network `none` (or `host` with `--host-network`), `AutoRemove`, a 10s stop timeout,
    and bind `Mounts` (never `Binds`, so a missing source fails the create) for the Docker socket,
    `/sys` at `/host/sys`, `/dev`, and optionally the DBus socket and a read-only config directory.
    The attach copy goroutine starts before `ContainerStart`, and `ContainerWait(removed)` is
@@ -319,12 +319,12 @@ The daemon uses a two-level policy:
 
 **Global policy** (flags / config file):
 
-- `-policy-mode` (`opt-in` or `all`): controls which containers are processed.
+- `--policy-mode` (`opt-in` or `all`): controls which containers are processed.
   - `opt-in`: only containers with label `swarm-device-access.enable=true`.
   - `all`: all containers unless `swarm-device-access.enable=false`.
-- `-device-allow`: repeatable glob — defines the maximum allowed set of `/dev/...` paths. Empty =
+- `--device-allow`: repeatable glob — defines the maximum allowed set of `/dev/...` paths. Empty =
   all.
-- `-device-deny`: repeatable glob — paths always excluded. Takes priority over allow.
+- `--device-deny`: repeatable glob — paths always excluded. Takes priority over allow.
 
 **Per-container policy** (Docker labels):
 
@@ -376,7 +376,7 @@ under `/var/run/` because `dhi.io/static` has no `/var/run → /run` symlink.
 
 ### Prometheus metrics (`--metrics-addr`)
 
-When `-metrics-addr=127.0.0.1:9090` is set, the daemon exposes:
+When `--metrics-addr=127.0.0.1:9090` is set, the daemon exposes:
 
 | Endpoint | Description |
 | --- | --- |
@@ -405,7 +405,7 @@ Metrics exposed:
 
 ### pprof debug server (`--debug-addr`)
 
-When `-debug-addr=127.0.0.1:6060` is set, the standard Go pprof endpoints are available at
+When `--debug-addr=127.0.0.1:6060` is set, the standard Go pprof endpoints are available at
 `/debug/pprof/*`. The server has a 10 s read timeout and a 60 s idle timeout but no write timeout,
 because a CPU profile or trace streams for as long as the caller asks; keep it on a loopback
 address.
@@ -416,7 +416,7 @@ metrics server has a 10 s read, 30 s write and 60 s idle timeout.
 
 ## Dry-run mode
 
-`-dry-run` logs the complete device set each container _would_ get (at `Info` level) without pinning
+`--dry-run` logs the complete device set each container _would_ get (at `Info` level) without pinning
 its process, reading its `/proc` entry, querying its cgroup, calling `bpf(2)` or writing to
 `devices.allow`/`devices.deny`. Useful for auditing policy and CI smoke tests.
 
@@ -429,7 +429,7 @@ level=INFO msg="dry-run: would set device rules" id=abc rules=1
 
 ### Container gets `EACCES` opening a device after daemon is running
 
-1. Enable debug logs: `-log-level debug`
+1. Enable debug logs: `--log-level debug`
 2. Confirm the container's mount source starts with `/dev`:
 
    ```
@@ -460,7 +460,7 @@ cannot subscribe: the first failure is logged at `Warn`
 
 ### Daemon cannot connect to Docker
 
-Check the socket path with `-docker-socket`. Default: `/var/run/docker.sock`. On some hosts Docker
+Check the socket path with `--docker-socket`. Default: `/var/run/docker.sock`. On some hosts Docker
 Desktop uses a different path.
 
 The daemon requires Docker Engine 19.03+ (API 1.40). The `github.com/moby/moby/client` SDK refuses

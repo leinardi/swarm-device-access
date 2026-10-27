@@ -1,6 +1,6 @@
 services:
   swarm-device-access:
-    image: ghcr.io/leinardi/swarm-device-access:1
+    image: ghcr.io/leinardi/swarm-device-access:2
 
     volumes:
       # The launcher only needs the host Docker socket: it creates the daemon
@@ -16,20 +16,20 @@ services:
       # Launcher flags. Bind the host's systemd DBus socket, so the daemon
       # reapplies device rules after systemctl daemon-reload, which wipes cgroup
       # BPF programs (without it the daemon warns and skips reload handling):
-      # - -dbus
-      # Bind a host directory read-only at /etc/swarm-device-access, for -config
+      # - --dbus
+      # Bind a host directory read-only at /etc/swarm-device-access, for --config
       # below. Mount the directory, not the file: an editor that replaces the
       # file would leave a file mount on the old content, and a reload would
       # silently apply it.
-      # - -config-dir=/etc/swarm-device-access
-      # Run the daemon in the host network, needed for -metrics-addr/-debug-addr:
-      # - -host-network
+      # - --config-dir=/etc/swarm-device-access
+      # Run the daemon in the host network, needed for --metrics-addr:
+      # - --host-network
       - --
       # Daemon flags, passed to the daemon verbatim.
       # Reload the config file with: docker kill -s HUP swarm-device-access
-      # - -config=/etc/swarm-device-access/config.yaml
-      - -log-level=info
-      - -log-format=text
+      # - --config=/etc/swarm-device-access/config.yaml
+      - --log-level=info
+      - --log-format=text
 
     restart: unless-stopped
 

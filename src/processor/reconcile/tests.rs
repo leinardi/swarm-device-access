@@ -594,12 +594,31 @@ async fn reconcile_opt_in_processes_enabled() {
 /// container-level error and emits one INFO summary.
 #[tokio::test]
 async fn reconcile_dev_directory_summary() {
-    let mut options = Options::new("all", true);
-    options.runtime.policy = Global::new("all", Some(vec!["/dev/null".to_owned()]), None).unwrap();
-    options.reply = Ok(running(46, "", vec![bind("/dev", "/dev")]));
-    let env = Env::with(options);
-
-    env.reconcile().await.unwrap();
+    // The walk of the host's /dev resolves links such as /dev/block/<major>:<minor>, which point
+    // to `../<name>`; openat2 with RESOLVE_BENEATH refuses such a `..` step with EAGAIN whenever
+    // a mount or a rename anywhere on the host races it, and the daemon leaves that set
+    // incomplete for its retry. The test retries the same way, on a fresh processor.
+    let mut attempts = 0;
+    let env = loop {
+        let mut options = Options::new("all", true);
+        options.runtime.policy =
+            Global::new("all", Some(vec!["/dev/null".to_owned()]), None).unwrap();
+        options.reply = Ok(running(46, "", vec![bind("/dev", "/dev")]));
+        let env = Env::with(options);
+        match env.reconcile().await {
+            Ok(()) => break env,
+            Err(error)
+                if attempts < 5
+                    && error
+                        .to_string()
+                        .to_lowercase()
+                        .contains("resource temporarily unavailable") =>
+            {
+                attempts += 1;
+            }
+            Err(error) => panic!("reconcile: {error}"),
+        }
+    };
     let log = env.log();
     let summaries: Vec<&str> = log
         .lines()

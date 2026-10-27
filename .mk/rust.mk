@@ -20,22 +20,21 @@
 ifndef MK_LOCAL_RUST_INCLUDED
 MK_LOCAL_RUST_INCLUDED := 1
 
-# Local snippet (NOT part of make-common): the Rust workspace, beside the Go module until the
-# cutover (docs/rust-port.md). Every lint and test command runs workspace-wide, so the meta and
-# testenv crates are held to the same lints and tests as the daemon: the lint set lives once in the
-# root [workspace.lints], and a command scoped to one package would leave the others unchecked.
-# --locked everywhere: Cargo.lock is the pin, and a command that rewrote it would test a dependency
-# graph nobody reviewed. cargo deny takes --workspace for the same reason: the root is a package
-# too, and cargo-deny would otherwise check its graph alone. Build and clippy take --all-features,
-# so the harness code behind testenv's integration feature is compiled and linted like the rest;
-# the tests do not, since that feature's suite needs Docker.
+# Local snippet (NOT part of make-common): the Rust workspace. Every lint and test command runs
+# workspace-wide, so the meta and testenv crates are held to the same lints and tests as the daemon:
+# the lint set lives once in the root [workspace.lints], and a command scoped to one package would
+# leave the others unchecked. --locked everywhere: Cargo.lock is the pin, and a command that
+# rewrote it would test a dependency graph nobody reviewed. cargo deny takes --workspace for the
+# same reason: the root is a package too, and cargo-deny would otherwise check its graph alone.
+# Build and clippy take --all-features, so the harness code behind testenv's integration feature is
+# compiled and linted like the rest; the tests do not, since that feature's suite needs Docker.
 
 CARGO ?= cargo
 
-# The version stamps the daemon reads at compile time, from git and the clock, as go.mk stamps the
-# Go binary (its definitions win when both are included; these are the same commands). Only the
-# builds stamp, so the tests see the defaults. Cargo tracks the variables: going from a stamped
-# build to an unstamped one recompiles the daemon crate, nothing else.
+# The version stamps the daemon reads at compile time, from git and the clock; docker.mk passes
+# the same three values to the image build as build arguments. Only the builds stamp, so the tests
+# see the defaults. Cargo tracks the variables: going from a stamped build to an unstamped one
+# recompiles the daemon crate, nothing else.
 GIT_COMMIT  ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo "none")
 GIT_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo "v0.0.0")
 BUILD_DATE  ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")

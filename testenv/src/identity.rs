@@ -24,8 +24,8 @@
 //! Inverted ([`check_go_identity`]), the same answer proves that the Go image the cross-language
 //! upgrade test runs is Go: never a Go image standing in for Rust, nor the reverse.
 //!
-//! Also here, since it needs no daemon either: whether an ELF binary is static, which a binary
-//! copied into a `FROM scratch` image has to be.
+//! Also here, since it needs no daemon either: whether an ELF binary is static, as the binary the
+//! suite copies out of the image under test is.
 
 use swarm_device_access::go_compat::quote;
 
@@ -103,7 +103,7 @@ pub fn check_go_identity(
 }
 
 /// The ELF program header type of the dynamic loader's path: a binary that has one needs a loader
-/// (and its libraries) that a `FROM scratch` image does not have.
+/// (and its libraries) that the static runtime image does not have.
 const PT_INTERP: u32 = 3;
 
 /// Whether the ELF binary `bytes` is static: it has no `PT_INTERP` program header, as a static or

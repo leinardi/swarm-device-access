@@ -340,13 +340,13 @@ changing in the same commit.
 ## 17. Lint and test loop
 
 1. `make rust-fmt` (or let the edit hook do it).
-2. `make verify`: the Go and the Rust verification while Go exists (`verify-rust` runs
-   `rust-build`, `rust-fmt-check`, `rust-clippy` and `rust-test` over the workspace, the
-   meta-tests included). After a dependency change, also `make rust-deny` (network required).
+2. `make verify` (`verify-rust`: `rust-build`, `rust-fmt-check`, `rust-clippy` and `rust-test`
+   over the workspace, the meta-tests included). After a dependency change, also
+   `make rust-deny` (network required).
 3. Fix each report and re-run until clean. For a single test:
    `cargo test --locked --lib <module>::tests::<name>`.
-4. After a change the integration suite exercises (daemon, processor, cgroup, launcher): the
-   Rust testenv suite as well as `make go-test-integration`; enforcement only on a throwaway host.
+4. After a change the integration suite exercises (daemon, processor, cgroup, launcher):
+   `make test-integration`; enforcement only on a throwaway host.
 5. `make check-stage` (or `make check`), then `git status`: hooks may rewrite files in place. If
    you added, moved or removed a suppression, run `scripts/check-suppressions.sh --update` and
    stage `.suppressions-baseline`.

@@ -21,19 +21,19 @@
 ifndef MK_LOCAL_RUST_RELEASE_INCLUDED
 MK_LOCAL_RUST_RELEASE_INCLUDED := 1
 
-# Local snippet (NOT part of make-common): the static musl builds of the Rust daemon, prepared
-# beside the Go release, which still ships (docs/rust-port.md). Nothing here is published or goes
-# into an image yet.
+# Local snippet (NOT part of make-common): the static musl builds of the daemon that the release
+# ships, built by the release workflow with rust-release-binaries.
 
 # The release toolchain beyond rust-toolchain.toml, each archive by its sha256, re-verified against
 # the downloads: zig from https://ziglang.org/download/index.json, cargo-zigbuild from the release
 # asset's .sha256, rust-std from the .sha256 static.rust-lang.org publishes beside each archive.
-# .github/actions/setup-zigbuild installs the x86_64 zig and cargo-zigbuild, and the Rust image's
-# build stage will take all of them; meta/tests/toolchain.rs keeps the versions and the x86_64
-# digests one value with the action's, and RUST_RELEASE_RUST_STD_VERSION the exact release of
-# rust-toolchain.toml. cargo-zigbuild publishes no aarch64 musl asset, so an arm64 build host
-# takes the gnu one. Only the image's build stage will download the rust-std archives and the
-# aarch64 build-host archives: everywhere else rustup installs the musl targets.
+# This is the one record of those pins: .github/actions/setup-zigbuild installs the x86_64 zig and
+# cargo-zigbuild, the image's build stage (deployments/docker/Dockerfile) downloads every archive
+# below, and meta/tests/toolchain.rs keeps each copy equal to this one, and
+# RUST_RELEASE_RUST_STD_VERSION the exact release of rust-toolchain.toml. cargo-zigbuild publishes
+# no aarch64 musl asset, so an arm64 build host takes the gnu one. Only the image's build stage
+# downloads the rust-std archives and the aarch64 build-host archives: everywhere else rustup
+# installs the musl targets.
 RUST_RELEASE_ZIG_VERSION := 0.17.0
 RUST_RELEASE_ZIG_SHA256_x86_64 := 1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026
 RUST_RELEASE_ZIG_SHA256_aarch64 := 9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8
@@ -45,10 +45,10 @@ RUST_RELEASE_RUST_STD_SHA256_x86_64-unknown-linux-musl := bd9f35880de21dab0e387e
 RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := 7e0ad2e67817f224b7a6331e48d6397303fc050edaccf81784ed786ffddc884a
 
 # The release platforms, as <docker arch>:<Rust target>, and where their binaries and
-# checksums.txt go: under dist/, beside the Go binary, but in a directory of their own so the names
-# the Go release uses (dist/swarm-device-access-linux-<arch>) are never overwritten.
+# checksums.txt go: dist/, under the names the release assets carry
+# (swarm-device-access-linux-<arch>).
 RUST_RELEASE_PLATFORMS := amd64:x86_64-unknown-linux-musl arm64:aarch64-unknown-linux-musl
-RUST_RELEASE_DIR       := $(REPO_ROOT)/$(DIST_DIR)/rust
+RUST_RELEASE_DIR       := $(REPO_ROOT)/$(DIST_DIR)
 
 # The one static build, for one Rust target: cargo-zigbuild with zig as the C compiler and linker,
 # the version stamps of rust-build, and the checkout and the cargo home remapped, so the binary
@@ -56,8 +56,7 @@ RUST_RELEASE_DIR       := $(REPO_ROOT)/$(DIST_DIR)/rust
 # bytes. The toolchain's rust-src, when it is installed, is mapped back to the /rustc/<commit> the
 # standard library was built with: rustc otherwise writes the local copy's path, under the rustup
 # home, in place of that prefix, so a machine with rust-src and one without (CI's minimal profile)
-# would build different bytes. rust-release-binaries runs it for each release platform and
-# rust-integration-image for the host's target. RUSTFLAGS is set, not inherited: a flag from the
+# would build different bytes. rust-release-binaries runs it for each release platform. RUSTFLAGS is set, not inherited: a flag from the
 # environment would change the shipped bytes. With --target, cargo applies it to the daemon and
 # not to build scripts. Recursive (=), so rustc is asked only by a recipe that builds.
 RUST_RELEASE_CARGO_HOME = $(or $(CARGO_HOME),$(HOME)/.cargo)
@@ -92,7 +91,7 @@ rust-zigbuild-check: ## Fail unless the zig and cargo-zigbuild on PATH are the p
 	fi
 
 .PHONY: rust-release-binaries
-rust-release-binaries: rust-zigbuild-check ## Build the static musl binaries (amd64, arm64) and checksums.txt into dist/rust/ (not shipped yet)
+rust-release-binaries: rust-zigbuild-check ## Build the static musl release binaries (amd64, arm64) and checksums.txt into dist/
 	set -eu; \
 	mkdir -p "$(RUST_RELEASE_DIR)"; \
 	for platform in $(RUST_RELEASE_PLATFORMS); do \

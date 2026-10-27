@@ -1,8 +1,7 @@
 name: "Set up cargo-zigbuild"
 description: >-
-  Installs zig and cargo-zigbuild, the cross-compiler and linker behind the static musl binaries
-  (make rust-release-binaries, make rust-integration-image), each verified against its published
-  digest.
+  Installs zig and cargo-zigbuild, the cross-compiler and linker behind the static musl release
+  binaries (make rust-release-binaries), each verified against its published digest.
 
 # Adapted from swarm-scheduler-exporter's .github/actions/setup-zigbuild/action.yaml at
 # d57dcc220d29 (MIT, same author): the same releases and digests.
@@ -10,7 +9,7 @@ runs:
   using: "composite"
   steps:
     # The same versions and x86_64 archives .mk/rust-release.mk records (RUST_RELEASE_ZIG_* and
-    # RUST_RELEASE_CARGO_ZIGBUILD_*, which the Rust image's build stage will take); the meta crate's
+    # RUST_RELEASE_CARGO_ZIGBUILD_*, which the image's build stage copies); the meta crate's
     # toolchain test keeps each one value, and the make targets refuse any other release on PATH.
     # The zig digest is from https://ziglang.org/download/index.json, the cargo-zigbuild one is the
     # release asset's .sha256.
