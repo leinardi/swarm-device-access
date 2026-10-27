@@ -14,10 +14,19 @@
  * limitations under the License.
  */
 
-//! The reconcile path's device discovery: what each `/dev` bind mount of a container names
-//! ([`devfs`], [`rules`]) and the process whose cgroup gets the rules ([`pin`]). Go's
-//! `internal/processor`; the reconcile itself (`compute_desired`, `apply_pinned`) builds on it.
+//! The reconcile of a container's device grants ([`Processor`]): what each `/dev` bind mount of
+//! a container names ([`devfs`], [`rules`]), the process whose cgroup gets the rules ([`pin`]),
+//! and the history of runs revocations are resolved against ([`lifecycle`]). Go's
+//! `internal/processor`.
 
 pub mod devfs;
+mod error;
+#[cfg(test)]
+mod fake_devfs;
+pub mod lifecycle;
 pub mod pin;
+mod reconcile;
 pub mod rules;
+
+pub use error::{Error, VerifyCause};
+pub use reconcile::{Inspector, PROVISIONAL_TTL, PassRequester, Processor, Settings};

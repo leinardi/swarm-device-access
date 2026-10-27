@@ -35,6 +35,7 @@ use jiff::Timestamp;
 use serde::Deserialize;
 
 use super::client::{Body, Client};
+use super::context::{CallContext, with_context};
 use super::error::Error;
 use super::events::{EVENTS_ACCEPT, JsonStream, StreamError};
 use super::host::push_percent;
@@ -223,18 +224,17 @@ fn trim_id<'id>(kind: &str, id: &'id str) -> Result<&'id str, Error> {
     Ok(id)
 }
 
-/// Bounds `call` by `timeout`, as `context.WithTimeout` bounds a Go call.
+/// Bounds `call` by `timeout`, as `context.WithTimeout` bounds a Go call: [`with_context`] under
+/// a context with that deadline only.
 ///
 /// # Errors
 ///
-/// The call's [`Error`], or [`Error::deadline_exceeded`] when the time ran out first.
+/// The call's [`Error`], or the deadline's (see [`with_context`]) when the time ran out first.
 pub async fn with_timeout<T>(
     timeout: Duration,
     call: impl Future<Output = Result<T, Error>>,
 ) -> Result<T, Error> {
-    tokio::time::timeout(timeout, call)
-        .await
-        .unwrap_or_else(|_| Err(Error::deadline_exceeded()))
+    with_context(&CallContext::default().with_timeout(timeout), call).await
 }
 
 impl Client {

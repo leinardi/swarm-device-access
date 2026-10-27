@@ -38,6 +38,7 @@ use hyper::{Method, Request, Response, StatusCode};
 
 use super::DUMMY_HOST;
 use super::connect::Connector;
+use super::context;
 use super::error::{ConfigError, Error};
 use super::host::{escape_host, escape_path, join_path, unix_socket};
 use super::pool::{Pool, PooledBody, SendError};
@@ -229,10 +230,24 @@ impl Client {
         // net/http's url.Error names the method this way: "Get", "Head".
         let method = build().method().as_str().to_owned();
         let operation = format!("{}{}", &method[..1], method[1..].to_ascii_lowercase());
-        let response =
-            self.pool.send(build).await.map_err(|failure| {
-                self.connection_error(&operation, &self.url(target), &failure)
-            })?;
+        let sent = async {
+            self.pool
+                .send(build)
+                .await
+                .map_err(|failure| self.connection_error(&operation, &self.url(target), &failure))
+        };
+        // A request under a caller's context fails as net/http fails it once the context is
+        // done, before or during the exchange.
+        let response = match context::current() {
+            Some(call) => tokio::select! {
+                biased;
+                done = call.done() => {
+                    return Err(Error::context_request(done, &operation, &self.url(target)));
+                }
+                response = sent => response?,
+            },
+            None => sent.await?,
+        };
         let (parts, inner) = response.into_parts();
         Ok(Response::from_parts(parts, Body { inner }))
     }

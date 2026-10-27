@@ -30,7 +30,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{UnixListener, UnixStream};
 
 use super::client::Client;
-use super::{ErrorKind, Settings};
+use super::{DockerApi as _, ErrorKind, Settings};
 use crate::test_support::TempDir;
 
 /// A request the fake daemon received.
@@ -632,4 +632,111 @@ async fn errors_are_worded_as_moby() {
         "Error response from daemon: API returned a 500 (Internal Server Error) but provided no \
          error-message"
     );
+}
+
+/// A socket whose connections are accepted and never answered, held open by the returned task.
+fn silent_daemon(dir: &TempDir) -> (String, tokio::task::JoinHandle<()>) {
+    let socket = dir.path().join("d.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let held = tokio::spawn(async move {
+        let mut open = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            open.push(stream);
+        }
+    });
+    (socket.display().to_string(), held)
+}
+
+/// A call whose context is done before the daemon answers fails with net/http's `url.Error` for
+/// the request, as moby passes it through; the texts are a Go program's against such a socket.
+#[tokio::test(start_paused = true)]
+async fn a_done_context_fails_the_request_as_net_http() {
+    let dir = TempDir::new();
+    let (socket, held) = silent_daemon(&dir);
+    let client = Client::new(Settings::unix(&socket).unwrap());
+    let url = format!(
+        "http://{}/v1.56/containers/abc/json",
+        socket.replace('/', "%2F")
+    );
+
+    let timed = super::CallContext::default().with_timeout(Duration::from_millis(200));
+    let error = super::with_context(&timed, client.container_inspect("abc"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::DeadlineExceeded);
+    assert_eq!(
+        error.to_string(),
+        format!("Get \"{url}\": context deadline exceeded")
+    );
+
+    let cancelled = super::CallContext::default();
+    let trigger = tokio::spawn({
+        let cancelled = cancelled.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            cancelled.cancel();
+        }
+    });
+    let error = super::with_context(&cancelled, client.container_inspect("abc"))
+        .await
+        .unwrap_err();
+    trigger.await.unwrap();
+    assert_eq!(error.kind(), ErrorKind::Canceled);
+    assert_eq!(
+        error.to_string(),
+        format!("Get \"{url}\": context canceled")
+    );
+    held.abort();
+}
+
+/// Outside a client request, a done context is the bare error.
+#[tokio::test(start_paused = true)]
+async fn a_done_context_ends_any_other_call_with_the_bare_error() {
+    let cancelled = super::CallContext::default();
+    cancelled.cancel();
+    let error = super::with_context(
+        &cancelled,
+        std::future::pending::<Result<(), super::Error>>(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Canceled);
+    assert_eq!(error.to_string(), "context canceled");
+    assert_eq!(cancelled.err(), Some(super::ContextError::Canceled));
+
+    let parent = super::CallContext::default().with_timeout(Duration::from_secs(1));
+    let child = parent.with_timeout(Duration::from_secs(5));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(child.err(), Some(super::ContextError::DeadlineExceeded));
+}
+
+/// Go's context tree: a child's cancellation does not reach its parent, a parent's reaches its
+/// children, and `err` keeps the cause that came first.
+#[tokio::test(start_paused = true)]
+async fn contexts_cancel_downwards_and_keep_the_first_cause() {
+    let root = super::CallContext::new();
+    let child = root.with_timeout(Duration::from_secs(5));
+    child.cancel();
+    assert_eq!(child.err(), Some(super::ContextError::Canceled));
+    assert_eq!(
+        root.err(),
+        None,
+        "a child's cancellation reached its parent"
+    );
+
+    let sibling = root.with_timeout(Duration::from_secs(5));
+    root.cancel();
+    assert_eq!(sibling.err(), Some(super::ContextError::Canceled));
+    assert_eq!(sibling.done().await, super::ContextError::Canceled);
+
+    // A deadline that passed before the cancellation stays the cause, and the other way round.
+    let root = super::CallContext::new();
+    let timed = root.with_timeout(Duration::from_secs(1));
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    timed.cancel();
+    assert_eq!(timed.err(), Some(super::ContextError::DeadlineExceeded));
+    let timed = root.with_timeout(Duration::from_secs(1));
+    root.cancel();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(timed.err(), Some(super::ContextError::Canceled));
 }

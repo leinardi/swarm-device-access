@@ -722,6 +722,8 @@ pub enum DeviceError {
     },
     /// The mount source Docker mounted no longer exists (`errUnresolved`).
     MountSourceGone(String),
+    /// `/dev` could not be opened for the pass, so no device resolves (`errUnresolved`).
+    DevOpen(SysError),
     /// Go's `errNotDevice`: a single file mounted from `/dev` that is not a device.
     NotDevice(String),
     /// Go's `errIncompleteWalk`: a name of a directory mount could not be enumerated.
@@ -742,7 +744,10 @@ impl DeviceError {
     /// Whether it is Go's `errUnresolved`.
     #[must_use]
     pub const fn is_unresolved(&self) -> bool {
-        matches!(self, Self::Unresolved { .. } | Self::MountSourceGone(_))
+        matches!(
+            self,
+            Self::Unresolved { .. } | Self::MountSourceGone(_) | Self::DevOpen(_)
+        )
     }
 
     /// Whether it is Go's `errIncompleteWalk`.
@@ -778,6 +783,7 @@ impl fmt::Display for DeviceError {
                 "{UNRESOLVED}: mount source {path}: {}",
                 SysError::new("", Errno::NOENT)
             ),
+            Self::DevOpen(cause) => write!(formatter, "{UNRESOLVED}: {cause}"),
             Self::NotDevice(path) => write!(
                 formatter,
                 "device {} is neither character nor block device",

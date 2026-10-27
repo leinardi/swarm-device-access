@@ -37,6 +37,7 @@
 mod api;
 mod client;
 mod connect;
+pub mod context;
 mod error;
 pub mod events;
 mod host;
@@ -46,6 +47,7 @@ pub mod version;
 
 pub use api::{ClientEventStream, DockerApi, EventStream, Filters, since_parameter, with_timeout};
 pub use client::{Body, Client, Settings};
+pub use context::{CallContext, ContextError, with_context};
 pub use error::{ConfigError, Error, ErrorKind};
 pub use events::{StreamError, StreamErrorKind};
 pub use version::{MAX_API_VERSION, MIN_API_VERSION};

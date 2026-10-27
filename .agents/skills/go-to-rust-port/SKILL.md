@@ -281,6 +281,17 @@ Prometheus exporter).
   `MissedTickBehavior::Skip`, consuming the immediate first tick. (3 of 3 slow-poll cases)
 - Go's two locks with a lock order can often become one `std::sync::Mutex` held briefly, never
   across `.await`, by moving the second structure's key set into the first. (port review)
+- A Go mutex held across a whole transaction that makes a context-bound call in the middle (a
+  re-inspect before a mutation) → run the transaction in `spawn_blocking`, take the
+  `std::sync::Mutex` inside it, and drive the call with `Handle::block_on` under the caller's
+  context; await the `JoinHandle` to completion, so a dropped caller never ends the mutation.
+  On a `current_thread` test runtime `block_on` works because the test thread drives the timers
+  and I/O while it awaits the handle. (reconcile cancellation test)
+- A Go call under `context.WithTimeout` that times out inside net/http fails with a `url.Error`
+  (`Get "<url>": context deadline exceeded`), which moby passes through; a
+  `tokio::time::timeout` around the Rust call yields only the bare text → make the context
+  visible to the client for the call (a task-local) and race each request against it there.
+  (Go program against a socket that never answers, moby v0.6.0)
 
 ## 5. Tooling, lints and packaging
 

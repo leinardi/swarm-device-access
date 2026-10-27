@@ -24,6 +24,9 @@ use std::fmt;
 
 use hyper::StatusCode;
 
+use super::context::ContextError;
+use crate::go_compat::quote::quote;
+
 /// Why the client could not be built: moby's `New(WithHost("unix://" + socket))` error, which the
 /// Go daemon logs as `docker client init failed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +63,8 @@ pub enum ErrorKind {
     InvalidParameter,
     /// The caller's deadline passed first: Go's `context.DeadlineExceeded`.
     DeadlineExceeded,
+    /// The caller cancelled the call: Go's `context.Canceled`.
+    Canceled,
 }
 
 /// A failed request.
@@ -114,10 +119,33 @@ impl Error {
     /// Go's `context.DeadlineExceeded`, which moby passes through undecorated.
     #[must_use]
     pub fn deadline_exceeded() -> Self {
+        Self::context(ContextError::DeadlineExceeded)
+    }
+
+    /// The bare error of a done context, Go's `ctx.Err()`.
+    #[must_use]
+    pub fn context(done: ContextError) -> Self {
         Self {
-            kind: ErrorKind::DeadlineExceeded,
-            message: "context deadline exceeded".to_owned(),
+            kind: Self::context_kind(done),
+            message: done.text().to_owned(),
             status: None,
+        }
+    }
+
+    /// The error of a request the done context cut short: net/http's `url.Error`, `<operation>
+    /// "<url>": <context error>`, which moby passes through undecorated.
+    pub(crate) fn context_request(done: ContextError, operation: &str, url: &str) -> Self {
+        Self {
+            kind: Self::context_kind(done),
+            message: format!("{operation} {}: {}", quote(url), done.text()),
+            status: None,
+        }
+    }
+
+    const fn context_kind(done: ContextError) -> ErrorKind {
+        match done {
+            ContextError::Canceled => ErrorKind::Canceled,
+            ContextError::DeadlineExceeded => ErrorKind::DeadlineExceeded,
         }
     }
 

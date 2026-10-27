@@ -29,3 +29,19 @@ fn capture_logs_records_what_is_logged_at_the_level() {
     log.warn("shown", &[Attr::string("key", "value")]);
     assert_eq!(sink.contents(), "level=WARN shown key=value\n");
 }
+
+#[tokio::test(start_paused = true)]
+async fn eventually_returns_once_the_condition_holds() {
+    let start = tokio::time::Instant::now();
+    eventually("a second", Duration::from_secs(5), || {
+        start.elapsed() >= Duration::from_secs(1)
+    })
+    .await;
+    assert!(start.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test(start_paused = true)]
+#[should_panic(expected = "timed out after 1s waiting for nothing")]
+async fn eventually_fails_once_the_wait_is_over() {
+    eventually("nothing", Duration::from_secs(1), || false).await;
+}

@@ -106,8 +106,9 @@ sha2 = { version = "0.10.9", default-features = false }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio"] }
 # The poll of the watcher's signal streams; zbus's own Stream trait.
 futures-core = { version = "0.3.34", default-features = false }
-# CancellationToken, Go's context cancellation.
-tokio-util = { version = "0.7.20", default-features = false }
+# CancellationToken, Go's context cancellation, and the TaskTracker that awaits the processor's
+# blocking transactions.
+tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
 # The timer TokioClock follows, the unix socket, the tasks and the lock of the Docker client, and
 # select! for the systemd watcher. Later phases add the runtime and the signals.
 tokio = { version = "1.54.1", default-features = false, features = [
