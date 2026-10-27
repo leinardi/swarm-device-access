@@ -17,7 +17,8 @@
 // Adapted from swarm-scheduler-exporter/src/go_compat/quote.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! Go's `strconv.Quote`, and the `IsPrint` and `IsSpace` predicates behind it and slog's quoting.
+//! Go's `strconv.Quote` and `strconv.QuoteRune`, and the `IsPrint` and `IsSpace` predicates behind
+//! them and slog's quoting.
 //!
 //! The predicates read Go's Unicode 15 tables, generated from Go: Rust's standard library follows
 //! a later Unicode version (17 in Rust 1.98), so its notion of printable differs for the code
@@ -69,9 +70,23 @@ pub fn quote(text: &str) -> String {
 
 /// Appends `strconv.Quote(text)` to `out`.
 pub fn push_quoted(out: &mut String, text: &str) {
-    out.push('"');
+    push_quoted_with(out, text, '"');
+}
+
+/// `strconv.QuoteRune(character)`: the same escapes in single quotes, where `'` is escaped and
+/// `"` is not.
+#[must_use]
+pub fn quote_rune(character: char) -> String {
+    let mut out = String::with_capacity(8);
+    let mut buffer = [0_u8; 4];
+    push_quoted_with(&mut out, character.encode_utf8(&mut buffer), '\'');
+    out
+}
+
+fn push_quoted_with(out: &mut String, text: &str, quote: char) {
+    out.push(quote);
     for character in text.chars() {
-        if character == '"' || character == '\\' {
+        if character == quote || character == '\\' {
             out.push('\\');
             out.push(character);
             continue;
@@ -97,7 +112,7 @@ pub fn push_quoted(out: &mut String, text: &str) {
             _ => push_hex_escape(out, 'U', u32::from(character), 8),
         }
     }
-    out.push('"');
+    out.push(quote);
 }
 
 /// Appends a backslash, `kind`, and `value` as `digits` lowercase hex digits.
@@ -113,6 +128,27 @@ pub fn push_hex_escape(out: &mut String, kind: char, value: u32, digits: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What Go 1.26's `strconv.QuoteRune` returns (a scratch Go program).
+    #[test]
+    fn quote_rune_matches_go() {
+        let cases = [
+            ('x', "'x'"),
+            ('\'', r"'\''"),
+            ('"', "'\"'"),
+            ('\\', r"'\\'"),
+            ('\n', r"'\n'"),
+            ('\x7f', r"'\x7f'"),
+            ('\u{a0}', r"'\u00a0'"),
+            ('\u{fffd}', "'\u{fffd}'"),
+            ('\u{1f680}', "'\u{1f680}'"),
+            ('\u{897}', r"'\u0897'"),
+            ('\u{e9}', "'\u{e9}'"),
+        ];
+        for (character, want) in cases {
+            assert_eq!(quote_rune(character), want, "{character:?}");
+        }
+    }
 
     /// Go's `strconv.Quote` on the cases that tell Unicode versions and escape forms apart.
     #[test]

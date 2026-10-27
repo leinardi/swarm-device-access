@@ -24,30 +24,38 @@
 //!
 //! - [`float`] ports `strconv.FormatFloat(f, 'g', -1, 64)` and encoding/json's float layout;
 //! - [`duration`] ports `time.Duration.String` and `time.ParseDuration`;
-//! - [`quote`] ports `strconv.Quote`, with Go's Unicode 15 `IsPrint` and `IsSpace`;
+//! - [`quote`] ports `strconv.Quote` and `strconv.QuoteRune`, with Go's Unicode 15 `IsPrint` and
+//!   `IsSpace`;
 //! - [`time_layout`] ports the `time.RFC3339Nano` and `2006-01-02T15:04:05.000Z07:00` layouts;
 //! - [`local_zone`] ports how Go's `time.Local` is resolved from `TZ` and the zoneinfo files;
-//! - [`strings`] ports `strings.EqualFold`, `strings.ToLower` and `strings.TrimSpace`, with Go's
-//!   Unicode 15 case tables;
+//! - [`strings`] ports `strings.EqualFold`, `strings.ToLower`, `strings.TrimSpace` and
+//!   `strings.Fields`, with Go's Unicode 15 case and space tables;
 //! - [`parse_bool`] ports `strconv.ParseBool` (new here);
 //! - [`errno`] gives an `io::Error` Go's `syscall.Errno` text;
-//! - [`filepath`] ports `filepath.Match` and `filepath.Clean` (new here);
+//! - [`filepath`] ports `filepath.Match`, `filepath.Clean` and `filepath.Base` (new here);
 //! - [`parse_float`] ports `strconv.ParseFloat`, for the q values of an `Accept` header;
 //! - [`sort`] ports `sort.Sort`, whose order goautoneg's comparison depends on;
-//! - [`http_status`] ports `http.StatusText`, for moby's error wording.
+//! - [`http_status`] ports `http.StatusText`, for moby's error wording;
+//! - [`parse_int`] ports `strconv.ParseInt` and `strconv.ParseUint`, for `devices.list` and the
+//!   config loader's tag resolution (new here);
+//! - [`scanner`] ports `bufio.Scanner` with `ScanLines` and [`errors`] ports `errors.Join`, for
+//!   the cgroup files (new here).
 //!
 //! Only the modules the ported code uses are here; swarm-scheduler-exporter's others join when a
 //! phase needs them (`docs/rust-port.md`, the reuse ledger).
 
 pub mod duration;
 pub mod errno;
+pub mod errors;
 pub mod filepath;
 pub mod float;
 pub mod http_status;
 pub mod local_zone;
 pub mod parse_bool;
 pub mod parse_float;
+pub mod parse_int;
 pub mod quote;
+pub mod scanner;
 pub mod sort;
 pub mod strings;
 pub mod time_layout;

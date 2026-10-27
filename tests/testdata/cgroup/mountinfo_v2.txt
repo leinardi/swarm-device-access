@@ -1,0 +1,2 @@
+22 21 0:21 / /sys rw,nosuid,nodev,noexec,relatime shared:2 - sysfs sysfs rw
+35 22 0:29 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:11 - cgroup2 cgroup2 rw,nsdelegate,memory_recursiveprot

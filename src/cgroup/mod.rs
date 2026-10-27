@@ -1,0 +1,43 @@
+/*
+ * Copyright 2026 Roberto Leinardi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+//! The device cgroup of a container: where it lives (parsed from the process's `/proc` files), a
+//! handle on its directory that every later read and write goes through, and the controllers
+//! that make the daemon-owned device grants of that cgroup equal a desired set: cgroup v1's
+//! `devices.allow` and `devices.deny`, with the [`Ledger`] of what the daemon itself added.
+//!
+//! `api.rs`, `v1.rs` and `v2.rs` port NVIDIA's files and keep NVIDIA's header. The Go
+//! `Interface` methods that read `/proc/<pid>` by path (`GetDeviceCGroupMountPath`,
+//! `GetDeviceCGroupRootPath`) and `GetDeviceCGroupVersion` are not ported: the daemon only parses
+//! the contents it read through a pinned `/proc/<pid>` descriptor ([`parse_proc_cgroup`]).
+//!
+//! The `/proc` files and `devices.list` are the kernel's ASCII output. A byte that is not UTF-8
+//! is replaced before parsing, where Go keeps it; that can only change a path that then opens
+//! nothing, or the text of an error about a malformed line.
+
+mod api;
+mod error;
+mod handle;
+mod ledger;
+mod v1;
+mod v1set;
+mod v2;
+
+pub use api::{CgroupVersion, DeviceRule, Interface, ParseError, ProcCgroup, parse_proc_cgroup};
+pub use error::{Error, FileError, ListEntryCause};
+pub use handle::{CgroupHandle, HandleError, Identity};
+pub use ledger::Ledger;
+pub use v1::CgroupV1;

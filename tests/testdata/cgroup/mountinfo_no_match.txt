@@ -1,0 +1,2 @@
+22 21 0:21 / /sys rw,nosuid,nodev,noexec,relatime shared:2 - sysfs sysfs rw
+23 21 0:22 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw

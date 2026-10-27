@@ -22,6 +22,7 @@
 //! `docs/rust-port.md` records the design, the intended differences from 1.x and where each module
 //! comes from.
 
+pub mod cgroup;
 pub mod clock;
 pub mod config;
 pub mod docker;
@@ -29,3 +30,5 @@ pub mod go_compat;
 pub mod logger;
 pub mod metrics;
 pub mod policy;
+#[cfg(test)]
+mod test_support;

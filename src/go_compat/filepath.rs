@@ -228,6 +228,20 @@ fn decode_rune(bytes: &[u8]) -> (u32, usize) {
         .unwrap_or((REPLACEMENT, 1))
 }
 
+/// `filepath.Base`: the last element of `path`, trailing separators dropped first; `.` for an
+/// empty path and `/` for one made of separators only.
+#[must_use]
+pub fn base(path: &str) -> &str {
+    if path.is_empty() {
+        return ".";
+    }
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return "/";
+    }
+    trimmed.rsplit_once('/').map_or(trimmed, |(_, last)| last)
+}
+
 /// `filepath.Clean`: the shortest path naming the same file by lexical processing: repeated
 /// separators collapse, `.` elements go, a `..` element removes the element before it (and is
 /// dropped at the root), a trailing separator goes, and an empty result is `.`.
@@ -290,6 +304,26 @@ pub fn clean(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What Go 1.26's `filepath.Base` returns (a scratch Go program).
+    #[test]
+    fn base_is_go_s() {
+        let cases = [
+            ("", "."),
+            ("/", "/"),
+            ("//", "/"),
+            ("devices", "devices"),
+            ("/sys/fs/cgroup/devices", "devices"),
+            ("/sys/fs/cgroup/devices/", "devices"),
+            ("/a//", "a"),
+            ("a/b", "b"),
+            ("./", "."),
+            (".", "."),
+        ];
+        for (path, want) in cases {
+            assert_eq!(base(path), want, "{path:?}");
+        }
+    }
 
     #[test]
     fn star_does_not_cross_a_separator() {

@@ -268,8 +268,9 @@ fn read_float(text: &[u8]) -> Option<ReadFloat> {
     })
 }
 
-/// Go's `underscoreOK`: every underscore sits between digits, or after a base prefix.
-fn underscore_ok(text: &[u8]) -> bool {
+/// Go's `underscoreOK`: every underscore sits between digits, or after a base prefix. Shared
+/// with `ParseInt` ([`super::parse_int`]) and the config loader, as in `strconv`.
+pub(crate) fn underscore_ok(text: &[u8]) -> bool {
     // The last character class seen: the start, a digit or base prefix, an underscore, or other.
     #[derive(PartialEq)]
     enum Saw {

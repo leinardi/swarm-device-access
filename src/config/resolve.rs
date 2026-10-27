@@ -18,7 +18,11 @@
 //! scalars are strings: a config value that resolves to anything else fails its key's shape. The
 //! numeric checks port what `resolve` asks of `strconv.ParseInt`, `ParseUint` and `ParseFloat`,
 //! and the timestamp check what it asks of `time.Parse` with its four layouts; only whether each
-//! succeeds matters here, never the value.
+//! succeeds matters here, never the value. `ParseInt`, `ParseUint` and `underscoreOK` are the
+//! shared ports in `go_compat`.
+
+use crate::go_compat::parse_float::underscore_ok;
+use crate::go_compat::parse_int::{parse_int, parse_uint};
 
 /// `!!null`.
 pub(super) const NULL_TAG: &str = "!!null";
@@ -168,9 +172,9 @@ fn resolve_number(tag: &str, input: &str) -> Option<(&'static str, Resolved)> {
     }
     let plain = input.replace('_', "");
     let integer = |digits: &str, base: u32| {
-        if parse_int(digits, base) {
+        if parse_int(digits, base).is_ok() {
             Some((INT_TAG, Resolved::Int))
-        } else if parse_uint(digits, base) {
+        } else if parse_uint(digits, base).is_ok() {
             Some((INT_TAG, Resolved::Uint))
         } else {
             None
@@ -188,7 +192,7 @@ fn resolve_number(tag: &str, input: &str) -> Option<(&'static str, Resolved)> {
                 return Some(found);
             }
         } else if let Some(digits) = plain.strip_prefix(negative_prefix)
-            && parse_int(&format!("-{digits}"), base)
+            && parse_int(&format!("-{digits}"), base).is_ok()
         {
             return Some((INT_TAG, Resolved::Int));
         }
@@ -274,120 +278,9 @@ fn go_float_syntax(text: &str) -> bool {
             return false;
         }
     }
-    index == bytes.len() && underscore_ok(text) && decimal_is_finite(&text.replace('_', ""))
-}
-
-/// `strconv.underscoreOK`: every underscore sits between digits, or between a base prefix and a
-/// digit.
-fn underscore_ok(text: &str) -> bool {
-    let mut bytes = text.as_bytes();
-    if let [b'+' | b'-', rest @ ..] = bytes {
-        bytes = rest;
-    }
-    let mut saw = b'^';
-    let mut index = 0;
-    let mut hex = false;
-    if bytes.len() >= 2
-        && bytes[0] == b'0'
-        && matches!(bytes[1].to_ascii_lowercase(), b'b' | b'o' | b'x')
-    {
-        index = 2;
-        saw = b'0';
-        hex = bytes[1].eq_ignore_ascii_case(&b'x');
-    }
-    for &byte in &bytes[index..] {
-        if byte.is_ascii_digit() || (hex && byte.is_ascii_hexdigit()) {
-            saw = b'0';
-            continue;
-        }
-        if byte == b'_' {
-            if saw != b'0' {
-                return false;
-            }
-            saw = b'_';
-            continue;
-        }
-        if saw == b'_' {
-            return false;
-        }
-        saw = b'!';
-    }
-    saw != b'_'
-}
-
-/// `strconv.ParseUint(text, base, 64)` succeeding (`text` holds no underscore). Base 0 reads
-/// Go's prefixes: `0b`, `0o`, `0x`, and a leading `0` for octal.
-fn parse_uint(text: &str, base: u32) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-    let (base, digits) = if base == 0 {
-        base_prefix(text)
-    } else {
-        (base, text)
-    };
-    let mut value: u64 = 0;
-    for byte in digits.bytes() {
-        let Some(digit) = char::from(byte).to_digit(36) else {
-            return false;
-        };
-        if digit >= base {
-            return false;
-        }
-        let Some(next) = value
-            .checked_mul(u64::from(base))
-            .and_then(|scaled| scaled.checked_add(u64::from(digit)))
-        else {
-            return false;
-        };
-        value = next;
-    }
-    true
-}
-
-/// `strconv.ParseInt(text, base, 64)` succeeding: a sign, then `ParseUint`'s digits, within
-/// `int64`.
-fn parse_int(text: &str, base: u32) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-    let (negative, unsigned) = match text.as_bytes()[0] {
-        b'+' => (false, &text[1..]),
-        b'-' => (true, &text[1..]),
-        _ => (false, text),
-    };
-    if !parse_uint(unsigned, base) {
-        return false;
-    }
-    let (base, digits) = if base == 0 {
-        base_prefix(unsigned)
-    } else {
-        (base, unsigned)
-    };
-    let magnitude = u64::from_str_radix(digits, base).unwrap_or(0);
-    let cutoff = 1_u64 << 63;
-    if negative {
-        magnitude <= cutoff
-    } else {
-        magnitude < cutoff
-    }
-}
-
-/// The base and digits of a base-0 `ParseUint` input.
-fn base_prefix(text: &str) -> (u32, &str) {
-    let bytes = text.as_bytes();
-    if bytes.first() != Some(&b'0') {
-        return (10, text);
-    }
-    if bytes.len() >= 3 {
-        match bytes[1].to_ascii_lowercase() {
-            b'b' => return (2, &text[2..]),
-            b'o' => return (8, &text[2..]),
-            b'x' => return (16, &text[2..]),
-            _ => {}
-        }
-    }
-    (8, &text[1..])
+    index == bytes.len()
+        && underscore_ok(text.as_bytes())
+        && decimal_is_finite(&text.replace('_', ""))
 }
 
 /// `parseTimestamp`: four digits and a dash, then one of yaml.v3's layouts as `time.Parse`

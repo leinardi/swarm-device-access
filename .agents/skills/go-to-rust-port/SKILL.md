@@ -85,6 +85,16 @@ Prometheus exporter).
   crates (`glob`, `globset`) differ on all of these → port `match.go` and `Clean` line for line.
   (go program)
 
+- `bufio.Scanner` (default buffer) fails a line of 64 KiB or more with `token too long`, after
+  yielding the lines before it, and drops one trailing `\r`; `str::lines` has no limit and drops
+  `\r` only before `\n` → port the scanner once and read every Go-scanned file through it.
+  `strings.Split(s, " ")` keeps empty fields where `split_whitespace` drops them, and mountinfo
+  indexes fields from the end. `strings.TrimPrefix` strips a string, not a path element
+  (`/docker/abc` off `/docker/abc123def` leaves `def`). (go1.26 scratch program)
+- `strconv.ParseInt` returns a range error at the digit that overflows, before a later invalid
+  byte (`99999999999999999999x` is out of range); `i64::from_str` says invalid. `%+v` of a struct
+  with pointer fields prints addresses → a Q entry, not a guess. (go1.26 scratch program)
+
 ### JSON and YAML
 
 - `encoding/json` escapes `<>&` as `\u003c` and so on; serde_json does not. It matches keys

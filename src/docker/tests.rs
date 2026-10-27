@@ -21,7 +21,6 @@
 //! S1 negotiation case.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -32,32 +31,7 @@ use tokio::net::{UnixListener, UnixStream};
 
 use super::client::Client;
 use super::{ErrorKind, Settings};
-
-/// A temporary directory, removed on drop.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Self {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "sda-docker-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::SeqCst)
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+use crate::test_support::TempDir;
 
 /// A request the fake daemon received.
 #[derive(Debug, Clone)]

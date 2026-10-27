@@ -104,6 +104,14 @@ pub fn trim_space(text: &str) -> &str {
     text.trim_matches(is_space)
 }
 
+/// Go's `strings.Fields`: the runs of text between Unicode white space.
+#[must_use]
+pub fn fields(text: &str) -> Vec<&str> {
+    text.split(is_space)
+        .filter(|field| !field.is_empty())
+        .collect()
+}
+
 /// Go's `strings.TrimSpace` over bytes that need not be UTF-8, as a Go string holds: leading and
 /// trailing Unicode white space removed, stopping at the first byte that does not decode, which
 /// Go reads as `utf8.RuneError` and keeps.
@@ -156,6 +164,17 @@ mod tests {
         assert_eq!(trim_space_bytes(b"\xff x \xff"), b"\xff x \xff");
         assert_eq!(trim_space_bytes(b" \t\r\n"), b"");
         assert_eq!(trim_space_bytes(b"  partial reason  "), b"partial reason");
+    }
+
+    /// What Go 1.26's `strings.Fields` returns (a scratch Go program).
+    #[test]
+    fn fields_split_at_go_s_white_space() {
+        let empty: [&str; 0] = [];
+        assert_eq!(fields(""), empty);
+        assert_eq!(fields("  "), empty);
+        assert_eq!(fields(" a  b\tc\n"), ["a", "b", "c"]);
+        assert_eq!(fields("a\u{a0}b\u{85}c\u{2028}d"), ["a", "b", "c", "d"]);
+        assert_eq!(fields("x"), ["x"]);
     }
 
     #[test]
