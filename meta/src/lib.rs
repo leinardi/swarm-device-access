@@ -17,8 +17,12 @@
 // Copyright (c) 2026 Roberto Leinardi
 
 //! Repository meta-tests: checks on the repository itself rather than on the daemon. The tests
-//! live under `tests/`; this library holds what they share: the repository's files. Every
-//! meta-test fails rather than skips when something it needs is missing, and carries a negative
-//! control: a case proving the rule fails on the input it exists to stop.
+//! live under `tests/`; this library holds what they share: the repository's files, an isolated
+//! git environment, and the Dockerfile and Markdown readers. Every meta-test fails rather than
+//! skips when something it needs is missing, and carries a negative control: a case proving the
+//! rule fails on the input it exists to stop.
 
+pub mod dockerfile;
+pub mod gitenv;
+pub mod links;
 pub mod repo;

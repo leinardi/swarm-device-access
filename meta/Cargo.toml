@@ -30,7 +30,13 @@ publish = false
 [lints]
 workspace = true
 
-# The workspace manifests (TOML) and the attribute scan of the unsafe allowlist.
-[dev-dependencies]
+# The Dockerfile and Markdown readers of the library, and the source scans of the tests.
+[dependencies]
 regex = "1.13.1"
+
+# The pre-commit configuration and the workflows (YAML), the scratch repositories of the script
+# tests, and the workspace manifests and droast.toml (TOML).
+[dev-dependencies]
+serde_yaml_ng = "0.10"
+tempfile = "3.27.0"
 toml = "1.1.8"

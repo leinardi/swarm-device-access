@@ -68,12 +68,13 @@ repos:
         additional_dependencies: ["prettier@3.9.9"]
         files: \.(yml|yaml)$
         args: ["--write"]
-      # The offline documentation check: every relative link and its fragment resolve. -count=1
-      # because the file list comes from git ls-files, which the test cache cannot see; always_run
-      # because deleting a linked page passes no file to the hook at all.
+      # The offline documentation check: every relative link and its fragment resolve. The meta
+      # crate's docs test (meta/tests/docs.rs), which cargo reruns on every call; its Go original,
+      # test/docs, stays in make go-test until the cutover. always_run because the file list comes
+      # from git ls-files and deleting a linked page passes no file to the hook at all.
       - id: docs-links
         name: docs links
-        entry: go test -count=1 ./test/docs/
+        entry: cargo test --locked -p meta --test docs
         language: system
         pass_filenames: false
         always_run: true

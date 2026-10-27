@@ -75,6 +75,11 @@ out of untagged tests), `test/dockerfiles`, `test/docs` (relative links), `test/
 not on PATH) and `shellcheck`. `SDA_REQUIRE_TOOLS=1 go test ./test/...` turns a missing droast or
 shellcheck into a failure instead of a skip, as CI's `repo-gates` job does.
 
+The meta crate's tests (`meta/tests`, run by `make rust-test`) check the same rules on the Rust
+side, plus the Rust boundaries; they need only git and bash, never skip, and carry a negative
+control each. The `docs-links` hook runs `cargo test --locked -p meta --test docs`. Both sets stay
+until the cutover.
+
 ### Generated or vendored: never hand-edit
 
 - `.mk/{docker,help,go,password,pre-commit}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
@@ -248,16 +253,17 @@ Run before considering an edit done. `make check` applies to every row.
 | `go.mod`, `go.sum` | `make go-tidy`, `make audit-deps` (network), `go test ./test/toolchain/` |
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify-rust` (load `rust-style-guide` first), then `make check-stage` |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify-rust`, `make rust-deny` (network) |
-| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/` (droast runs in `make check`), `make docker-build` |
+| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `go test ./test/dockerfiles/ ./test/toolchain/`, `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.golangci.yaml` | `make go-lint` |
-| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/` |
-| `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/` |
+| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `go test ./test/suppressions/`, `cargo test --locked -p meta --test suppressions` |
+| `scripts/check-license-headers.sh` | `go test ./test/licenseheaders/`, `cargo test --locked -p meta --test license_headers` |
 | `test/**` | `SDA_REQUIRE_TOOLS=1 go test -count=1 ./test/...`, `make go-lint` |
-| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, Rust release, droast and ShellCheck pins, vacuous flags, required gates and skipped hooks) |
-| `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `go test ./test/toolchain/`, `make help` |
+| `meta/**` | `make verify-rust` (load `rust-style-guide` first) |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `go test ./test/toolchain/` (Go line, Rust release, droast and ShellCheck pins, vacuous flags, required gates and skipped hooks), `cargo test --locked -p meta` |
+| `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `go test ./test/toolchain/`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/gofmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.go` file in Claude Code |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
-| `README.md`, `docs/**/*.md`, other Markdown | `go test -count=1 ./test/docs/`; prose wraps at 100 columns (markdownlint in `make check`) |
+| `README.md`, `docs/**/*.md`, other Markdown | `cargo test --locked -p meta --test docs` (the `docs-links` hook), `go test -count=1 ./test/docs/`; prose wraps at 100 columns (markdownlint in `make check`) |
 | `.agents/skills/**` | the Markdown row |
 
 ## Commit messages

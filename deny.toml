@@ -29,7 +29,13 @@ all-features = true
 version = 2
 unmaintained = "all"
 yanked = "deny"
-ignore = []
+ignore = [
+    # Unmaintained, the parser under serde_yaml_ng, which only the meta crate's tests use, to read
+    # this repository's own workflows and .pre-commit-config.yaml; nothing it parses reaches the
+    # daemon. No vulnerability is reported against it; serde-saphyr is the safe-Rust way out if
+    # that changes. SSE's ignore, for SSE's reason.
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained, transitive via serde_yaml_ng in the meta crate's tests only; no known vulnerability" },
+]
 
 [licenses]
 version = 2
@@ -43,8 +49,10 @@ version = 2
 # encountered. Those licences are still decided here, by hand, rather than by omission.
 allow = [
     "Apache-2.0",
-    # winnow (MIT only), under the meta crate's toml dev-dependency; memchr and aho-corasick
-    # (Unlicense OR MIT), under its regex dev-dependency. Dev-only: see above.
+    # winnow (MIT only), under the meta crate's toml dev-dependency; serde_yaml_ng and
+    # unsafe-libyaml (MIT only), under its serde_yaml_ng dev-dependency (dev-only: see above);
+    # memchr and aho-corasick (Unlicense OR MIT), under regex, a dependency of the meta library,
+    # which only the meta-tests build.
     "MIT",
     # unicode-ident ((MIT OR Apache-2.0) AND Unicode-3.0), under proc-macro2 and syn, which
     # tokio-macros needs for the tests' #[tokio::test].
