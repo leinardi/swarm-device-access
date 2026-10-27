@@ -15,8 +15,9 @@ captures the ports are checked against, and the upstream candidates.
   other difference is a defect.** 1.x, as its captures and the published v1.0.3 record it, is the
   behavioural authority.
 - The [`rust-style-guide`](../.agents/skills/rust-style-guide/SKILL.md) skill holds the coding
-  rules; the porting traps found along the way go into
-  [`go-to-rust-port`](../.agents/skills/go-to-rust-port/SKILL.md).
+  rules. The porting traps found along the way were collected in a `go-to-rust-port` skill kept in
+  this repository during the port and moved back to the maintainer's user skills after the field
+  test.
 
 ## Contents
 

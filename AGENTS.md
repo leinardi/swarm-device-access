@@ -217,19 +217,11 @@ after review:
   `src/run.rs`), `src/launcher`, the HTTP server (`src/server.rs`, `src/server/`),
   `deployments/docker/Dockerfile` or anything else under `deployments/**`, or `examples/**`.
 - `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
-- `go-to-rust-port` — the porting traps, kept until the port's field test is done; load it before
-  changing a behaviour ported from 1.x or reviewing such a change.
 
 `rust-style-guide` and `adversarial-review` point at [`docs/rust-port.md`](docs/rust-port.md) as
 the reuse ledger, with the crates, the design decisions and the provenance of every component
 reused from swarm-scheduler-exporter or swarm-rootless-docker. Check the ledger, and update its row
 in the same commit, when a reused component changes or an upstream fix is taken.
-
-`go-to-rust-port` is the project copy of a user skill, kept here until the port's field test on a
-real host is done. Every new trap found until then (a field-test finding, a failed build, a review
-finding) is added to it as trap, fix and evidence, versioned where the version matters, in the same
-commit as the change that found it. After the field test the skill moves back to the user skills
-and is deleted from this repository, together with this note.
 
 ## Quality rules not enforced by tooling
 

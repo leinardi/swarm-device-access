@@ -178,9 +178,6 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   provenance line (`Adapted from <repo>/<path> at <commit>, originally MIT-licensed, Copyright (c)
   <year> Roberto Leinardi`); a pasted MIT block, a missing provenance line, a reused component
   changed without its ledger row, or a missing row is a finding.
-- **Porting traps.** Until the port's field test is done, a trap the change found (a field-test
-  finding, a failed build, a review finding) is added to `.agents/skills/go-to-rust-port` in the
-  same commit.
 
 ## 4. Adversarial passes — language-agnostic
 
