@@ -34,4 +34,13 @@ golden-check: ## Check the committed Go golden captures against the Go code
 golden-update: ## Rewrite the Go golden captures under tests/testdata (review the diff)
 	SDA_GOLDEN_UPDATE=1 $(GO) test -tags=goldencapture -count=1 -run '^TestGolden' $(GOLDEN_PKG)
 
+# wire-capture records what the Go daemon and launcher send a live Docker daemon and what it
+# answers, into tests/testdata/engine_wire/api-<version> (its README says how and why). The capture
+# tests sit behind the wirecapture build tag and need Docker, so only this target runs them; it is
+# not part of any gate, since the answers carry IDs and times that change with every run.
+
+.PHONY: wire-capture
+wire-capture: go-build ## Recapture the engine-wire fixtures from the Go binary against the local Docker daemon
+	SDA_WIRE_BINARY=$(REPO_ROOT)/$(DIST_DIR)/$(BIN_NAME) $(GO) test -tags=wirecapture -count=1 -run '^TestCapture' ./internal/wirecapture/
+
 endif  # MK_LOCAL_GOLDEN_INCLUDED

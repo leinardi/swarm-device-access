@@ -39,8 +39,9 @@ const dockerClientPackage = "github.com/moby/moby/client"
 // dockerClientConstructors are the SDK functions that build a client or its daemon connection.
 var dockerClientConstructors = []string{"New", "NewClientWithOpts", "FromEnv"}
 
-// dockerTags are the build tags that Docker-dependent tests sit behind.
-var dockerTags = []string{"integration"}
+// dockerTags are the build tags that Docker-dependent tests sit behind: the integration suite and
+// the engine-wire captures.
+var dockerTags = []string{"integration", "wirecapture"}
 
 // testFile is one parsed _test.go file of the repository.
 type testFile struct {

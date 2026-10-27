@@ -1,11 +1,12 @@
 version: "2"
 
 run:
-  # test/integration and the Go golden captures are behind these tags; without them the linter
-  # skips those files.
+  # test/integration, the Go golden captures and the engine-wire captures are behind these tags;
+  # without them the linter skips those files.
   build-tags:
     - integration
     - goldencapture
+    - wirecapture
 
 linters:
   default: all
@@ -145,6 +146,12 @@ linters:
         linters:
           - gosec
         text: "G70[23]:"
+      # The engine-wire captures run the daemon binary named by SDA_WIRE_BINARY, which make
+      # wire-capture sets to the build output, and copy it into the test's directory.
+      - path: internal/wirecapture/.+_test\.go
+        linters:
+          - gosec
+        text: "G(204|70[23]):"
 
       # NVIDIA-derived cgroup/eBPF code: keep close to upstream shape.
       - path: internal/cgroup/.+\.go

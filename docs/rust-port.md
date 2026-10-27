@@ -167,6 +167,13 @@ exists only under the tag.
 | `internal/observability`, `TestGoldenNegotiation` | `metrics/negotiation.tsv` | The `Content-Type` and `Content-Encoding` the daemon's `/metrics` handler answers for 106 pairs of `Accept` and `Accept-Encoding` values: swarm-scheduler-exporter's corpus, plus wildcard types that common v0.70.1 negotiates differently from v0.71.0. The handler is called directly, so a value keeps the spaces an HTTP client would trim |
 | `internal/observability`, `TestGoldenRuntimeFamilies` | `metrics/runtime.prom` | The HELP and TYPE lines of the `process_` and `promhttp_` families and the `promhttp_` samples, as the fifth scrape sees them, from promhttp's handler on a registry of its own with the default registry's process collector; the test checks the default handler serves the same families but `go_` (Q3) |
 
+The Engine wire captures under `tests/testdata/engine_wire` are Go captures too, but of a live
+Docker daemon's answers, which carry IDs and times that change with every run: no gate checks
+them. `make wire-capture` records them by hand through a recording proxy (`internal/wirecapture`,
+behind the `wirecapture` build tag), from the Go daemon in dry-run and the Go launcher with fake
+inputs; [their README](../tests/testdata/engine_wire/README.md) lists what each file holds and how
+the inputs are faked.
+
 ## Upstream candidates
 
 Fixes found during the port that are worth sending back to SSE or SRD. None yet.

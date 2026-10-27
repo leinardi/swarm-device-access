@@ -23,6 +23,7 @@ make go-lint       # golangci-lint v2, all linters, at the pre-commit pin
 make verify-go     # go-build, go-test, go-vet, go-vet-integration, go-lint, golden-check
 make golden-check  # the Go golden captures under tests/testdata still match the Go code (goldencapture tag)
 make golden-update # rewrite them after a reviewed Go change (docs/rust-port.md, Go golden captures)
+make wire-capture  # recapture tests/testdata/engine_wire from the Go binary (needs Docker; wirecapture tag)
 make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test (meta-tests included)
 make verify        # verify-go, then verify-rust: both while the Go and Rust code live side by side
 make rust-fmt      # cargo fmt --all
