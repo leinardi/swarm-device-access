@@ -543,6 +543,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "jiff",
+ "libc",
  "rustix",
  "saphyr-parser",
  "serde",

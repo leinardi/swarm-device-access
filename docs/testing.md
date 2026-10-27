@@ -83,6 +83,20 @@ The dry-run tests cover:
 - `-policy-mode=opt-in` filtering: containers without `swarm-device-access.enable=true` are skipped.
 - Per-container `swarm-device-access.enable` label opt-in.
 
+## Rust `bpf(2)` test
+
+`tests/bpf_privileged.rs` loads each runtime fixture under `tests/testdata/devfilter`, and the
+daemon's wrapper around it, into the running kernel through the Rust `bpf(2)` module, and compares
+the kernel's dumps with the committed `.reloaded` and `.wrapped` files, which the Go
+`TestCaptureFixtures` recorded. It attaches nothing, but it needs `CAP_BPF` and `CAP_SYS_ADMIN`,
+so it is built only with the `privileged-tests` feature and no gate runs it. Run it by hand, on a
+throwaway host: build it as your user, then run the binary cargo prints as root.
+
+```bash
+cargo test --features privileged-tests --test bpf_privileged --no-run
+sudo target/debug/deps/bpf_privileged-<hash>
+```
+
 ## Native Privileged Checklist
 
 Use this checklist manually on a trusted Linux host when changing cgroup, BPF,

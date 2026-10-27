@@ -26,6 +26,10 @@
 //!   `#[allow]`, an item-level `#[expect]`, a `cfg_attr`, even a comment) is refused: the rule is
 //!   about the name, so no attribute syntax this scan does not model can slip past it.
 //!
+//! The same module is the only one that may call `libc`: the raw system call is what the lint is
+//! lifted for, and a `libc::` call elsewhere would be a way around the audited module even
+//! without `unsafe` (a safe `libc` function still reaches the kernel unchecked).
+//!
 //! The lint's name is assembled at compile time below, so this file does not mention it itself.
 //! The checks are functions of the text, and each is also run on input built to break it.
 
@@ -37,6 +41,9 @@ use toml::Table;
 
 /// The lint, spelled so that this file never contains its name.
 const LINT: &str = concat!("unsafe", "_code");
+
+/// This test's own path.
+const THIS_FILE: &str = "meta/tests/unsafe_allowlist.rs";
 
 /// The only Rust files that may lift the lint.
 const ALLOWLIST: &[&str] = &["src/cgroup/bpf_sys.rs"];
@@ -81,6 +88,26 @@ fn file_problems(path: &str, text: &str) -> Vec<String> {
          #![expect(..., reason = \"...\")]; want exactly one, and no other mention",
         mentions.len()
     )]
+}
+
+/// A use of the `libc` crate in code: a path through it, an import or an `extern crate`.
+fn libc_use() -> Regex {
+    Regex::new(r"\blibc\s*::|\buse\s+libc\b|\bextern\s+crate\s+libc\b")
+        .unwrap_or_else(|error| panic!("libc pattern: {error}"))
+}
+
+/// Where a Rust file outside the allowlist uses `libc`, if it does.
+fn libc_problems(path: &str, text: &str) -> Vec<String> {
+    if ALLOWLIST.contains(&path) {
+        return Vec::new();
+    }
+    libc_use()
+        .find_iter(text)
+        .map(|found| {
+            let line = text[..found.start()].matches('\n').count() + 1;
+            format!("{path}:{line}: uses libc, which only {ALLOWLIST:?} may call")
+        })
+        .collect()
 }
 
 /// What is wrong with the root manifest's level for the lint, if anything.
@@ -139,9 +166,7 @@ fn nothing_outside_the_manifest_names_the_lint() {
 fn only_the_allowlisted_module_lifts_the_lint() {
     let files = repo::tracked_or_new(&["*.rs"]);
     assert!(
-        files
-            .iter()
-            .any(|path| path == "meta/tests/unsafe_allowlist.rs"),
+        files.iter().any(|path| path == THIS_FILE),
         "the scan saw no Rust file at all, not even this one: {files:?}"
     );
     // A tracked file deleted in the worktree is about to go; it cannot lift anything.
@@ -151,6 +176,48 @@ fn only_the_allowlisted_module_lifts_the_lint() {
         .flat_map(|path| file_problems(path, &repo::read(path)))
         .collect();
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn only_the_allowlisted_module_calls_libc() {
+    let files = repo::tracked_or_new(&["*.rs"]);
+    let allowed = ALLOWLIST[0];
+    assert!(
+        libc_use().is_match(&repo::read(allowed)),
+        "{allowed} no longer calls libc: the scan would pass on nothing"
+    );
+    // This file names libc in its fixtures; it calls nothing.
+    let problems: Vec<String> = files
+        .iter()
+        .filter(|path| *path != THIS_FILE && repo::path(path).is_file())
+        .flat_map(|path| libc_problems(path, &repo::read(path)))
+        .collect();
+    assert!(
+        files.iter().any(|path| path == "src/cgroup/v2ops.rs"),
+        "the scan saw no daemon source: {files:?}"
+    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Negative control: every way to reach `libc` outside the allowlist is refused, and a mention
+/// that is not a use is not.
+#[test]
+fn a_libc_use_outside_the_allowlist_is_refused() {
+    for text in [
+        "fn run() { unsafe { libc::getpid() }; }\n",
+        "use libc::c_int;\n",
+        "use libc;\n",
+        "extern crate libc;\n",
+        "let id = libc :: SYS_bpf;\n",
+    ] {
+        assert_eq!(
+            libc_problems("src/cgroup/v2ops.rs", text).len(),
+            1,
+            "accepted outside the allowlist:\n{text}"
+        );
+        assert!(libc_problems(ALLOWLIST[0], text).is_empty());
+    }
+    assert!(libc_problems("src/x.rs", "// see src/libcrun/ebpf.c and glibc\n").is_empty());
 }
 
 /// Negative control: every way to name the lint outside the allowlist is refused, wherever the

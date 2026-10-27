@@ -33,6 +33,7 @@
 
 mod api;
 mod asm;
+mod bpf_sys;
 #[cfg(test)]
 mod bpfinterp;
 mod ebpf;
@@ -59,4 +60,8 @@ pub use owned::{
     from_canonical, new_nonce, parse_owned,
 };
 pub use v1::CgroupV1;
-pub use v2ops::kernel_at_least;
+pub use v2ops::{
+    Attached, F_ALLOW_MULTI, F_ALLOW_OVERRIDE, FetchError, InfoError, InstructionsError, KernelOps,
+    KernelProg, LoadError, OpsError, PROCESS_REPLACE_PROBE, ReplaceProbe, V2Ops,
+    describe_attach_flags, kernel_at_least,
+};

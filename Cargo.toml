@@ -89,7 +89,14 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # The cgroup directory descriptor and the openat, fstat and open calls on it, and getrandom for
 # the wrapper nonce, without unsafe.
-rustix = { version = "1.1.5", default-features = false, features = ["std", "fs", "rand"] }
+rustix = { version = "1.1.5", default-features = false, features = [
+    "std",
+    "fs",
+    "rand",
+    "system",
+] }
+# The raw bpf(2) syscall, in src/cgroup/bpf_sys.rs only.
+libc = "0.2.191"
 # The digest of the original program in the device filter wrapper's header, as Go's crypto/sha256.
 sha2 = { version = "0.10.9", default-features = false }
 # The timer TokioClock follows, and the unix socket, the tasks and the lock of the Docker client.
@@ -113,6 +120,16 @@ tokio = { version = "1.54.1", default-features = false, features = [
     "io-util",
     "sync",
 ] }
+
+[features]
+# Builds the tests that load BPF programs into the running kernel (tests/bpf_privileged.rs). They
+# need CAP_BPF and CAP_SYS_ADMIN, attach nothing, and run only on throwaway hosts:
+# cargo test --features privileged-tests --test bpf_privileged, as root.
+privileged-tests = []
+
+[[test]]
+name = "bpf_privileged"
+required-features = ["privileged-tests"]
 
 [lints]
 workspace = true

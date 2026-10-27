@@ -142,8 +142,12 @@ fn prepend_device_filter_ends_with_the_original() {
     assert!(program.ends_with(&original));
     let raw = canonical_bytes(&program).unwrap();
     assert_eq!(from_canonical(&raw).unwrap(), program);
+}
 
-    let error = prepend_device_filter(&rules, &[]).unwrap_err();
+/// Go: `TestPrependDeviceFilter_RefusesMissingOriginal`.
+#[test]
+fn prepend_device_filter_refuses_a_missing_original() {
+    let error = prepend_device_filter(&[rule("c", 1, 3, "rwm")], &[]).unwrap_err();
     assert_eq!(error, RuleError::NoOriginal);
 }
 
