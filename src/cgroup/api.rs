@@ -20,14 +20,20 @@
 //! from its `cgroup` and `mountinfo` files.
 
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use super::error::Error;
 use super::handle::CgroupHandle;
+use super::ledger::Ledger;
+use super::v1::CgroupV1;
+use super::v2::CgroupV2;
+use super::v2plan::FilterCache;
 use super::{v1, v2};
 use crate::go_compat::quote::quote;
 use crate::go_compat::scanner::{self, TokenTooLong};
+use crate::logger::LogHandle;
 
 /// One device rule, the shape of runtime-spec's `LinuxDeviceCgroup`, which the Go daemon inlined:
 /// the JSON keys and the omission of an empty type or access and of an absent number are that
@@ -73,6 +79,22 @@ pub trait Interface: Send + Sync {
     /// [`Error`] when a rule cannot be expressed, a file cannot be read or written, or the
     /// result differs from what was set.
     fn set_device_rules(&self, handle: &CgroupHandle, rules: &[DeviceRule]) -> Result<(), Error>;
+}
+
+/// The controller of `version`: cgroup v1 records its grants in `ledger`, cgroup v2 rebuilds wiped
+/// filters from `cache`; both outlive it (one per processor). Go's `New`, whose refusals of an
+/// unknown version and of a missing ledger the types rule out.
+#[must_use]
+pub fn new(
+    version: CgroupVersion,
+    ledger: Arc<Ledger>,
+    cache: Arc<FilterCache>,
+    log: LogHandle,
+) -> Box<dyn Interface> {
+    match version {
+        CgroupVersion::V1 => Box::new(CgroupV1::new(ledger)),
+        CgroupVersion::V2 => Box::new(CgroupV2::new(cache, log)),
+    }
 }
 
 /// The cgroup version of a process's device cgroup.

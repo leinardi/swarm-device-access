@@ -68,7 +68,7 @@ const HDR_VERSION: usize = 2;
 const HDR_NONCE_LO: usize = 3;
 const HDR_NONCE_HI: usize = 4;
 const HDR_DIGEST: usize = 5;
-const HDR_BLOCK_LEN: usize = 9;
+pub(super) const HDR_BLOCK_LEN: usize = 9;
 
 /// A validated wrapper taken apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,7 +111,7 @@ fn marker(value: u32) -> Instruction {
 }
 
 /// The value of a dead-store marker.
-fn marker_value(instruction: &Instruction) -> Option<u32> {
+pub(super) fn marker_value(instruction: &Instruction) -> Option<u32> {
     (instruction.opcode == OpCode::alu32(MOV, IMM_SOURCE)
         && instruction.dst == R0
         && instruction.src == R0

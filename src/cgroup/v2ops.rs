@@ -361,6 +361,12 @@ impl ReplaceProbe {
         self.state.load(Ordering::Relaxed) != REPLACE_UNSUPPORTED
     }
 
+    /// Whether a replace has succeeded, so the kernel is known to support it.
+    #[cfg(test)]
+    pub(super) fn supported(&self) -> bool {
+        self.state.load(Ordering::Relaxed) == REPLACE_SUPPORTED
+    }
+
     /// Records the outcome of a replace: the first success or `EINVAL` decides.
     pub fn record(&self, outcome: Result<(), &OpsError>) {
         let decided = match outcome {

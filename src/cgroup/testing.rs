@@ -17,13 +17,16 @@
 //! Helpers the cgroup tests share: rule constructors, the runtime device filter fixtures and the
 //! Go goldens under `tests/testdata/devfilter`.
 //!
-//! Go: the helpers of `v1set_test.go` and `fixtures_test.go`.
+//! Go: the helpers of `v1set_test.go`, `fixtures_test.go`, `owned_test.go` and `v2swap_test.go`.
 
 use std::fmt::Write as _;
 
 use serde::Deserialize;
 
 use super::api::DeviceRule;
+use super::asm::{AND, Instruction, JNE, MOV, R0, R1, R2, R4, R5, WORD};
+use super::ebpf::DEV_CHAR;
+use super::owned::{canonical_bytes, emit_owned, from_canonical};
 use crate::test_support::testdata;
 
 /// An allow rule.
@@ -40,6 +43,46 @@ pub(super) fn rule_of(allow: bool, kind: &str, major: i64, minor: i64, access: &
         minor: Some(minor),
         access: access.to_owned(),
     }
+}
+
+/// A runtime-style original that allows exactly c 1:3 (any access) and denies everything else.
+/// Go: `allowNullOriginal`.
+pub(super) fn allow_null_original() -> Vec<Instruction> {
+    vec![
+        Instruction::load_mem(R2, R1, 0, WORD),
+        Instruction::alu32_imm(AND, R2, 0xffff),
+        Instruction::load_mem(R4, R1, 4, WORD),
+        Instruction::load_mem(R5, R1, 8, WORD),
+        Instruction::jump_imm(JNE, R2, DEV_CHAR, 4),
+        Instruction::jump_imm(JNE, R4, 1, 3),
+        Instruction::jump_imm(JNE, R5, 3, 2),
+        Instruction::alu32_imm(MOV, R0, 1),
+        Instruction::exit(),
+        Instruction::alu32_imm(MOV, R0, 0),
+        Instruction::exit(),
+    ]
+}
+
+/// A minimal runtime device filter: deny everything. Go: `runtimeOriginal`.
+pub(super) fn runtime_original() -> Vec<Instruction> {
+    vec![Instruction::alu32_imm(MOV, R0, 0), Instruction::exit()]
+}
+
+/// The canonical bytes of `instructions`. Go: `mustCanonical`.
+pub(super) fn canonical(instructions: &[Instruction]) -> Vec<u8> {
+    canonical_bytes(instructions).unwrap()
+}
+
+/// The wrapper of `original`. Go: `mustEmit`.
+pub(super) fn emit(rules: &[DeviceRule], nonce: u64, original: &[u8]) -> Vec<u8> {
+    emit_owned(rules, nonce, original).unwrap()
+}
+
+/// The wrapper with instruction `index` replaced.
+pub(super) fn corrupt(raw: &[u8], index: usize, instruction: Instruction) -> Vec<u8> {
+    let mut instructions = from_canonical(raw).unwrap();
+    instructions[index] = instruction;
+    canonical(&instructions)
 }
 
 /// The runtimes whose device filters were captured from the kernel.

@@ -16,8 +16,7 @@
 
 //! Go's `api_test.go`. Not ported: `TestNew_InvalidVersion`, `TestNew_InvalidVersionIncludesValue`
 //! and `TestNew_V1RequiresLedger`, because [`CgroupVersion`] has only the two versions and
-//! [`super::super::CgroupV1::new`] takes its ledger, so neither failure can be expressed;
-//! `TestNew_ValidVersions` waits for the cgroup v2 controller, which `New` also builds.
+//! [`new`] takes the ledger, so neither failure can be expressed.
 
 use super::*;
 use crate::test_support::testdata;
@@ -188,4 +187,18 @@ fn proc_cgroup_errors_read_as_go() {
             .map_err(|error| error.to_string()),
         Err(r#"read "cgroup": bufio.Scanner: token too long"#.to_owned())
     );
+}
+
+/// Go: `TestNew_ValidVersions`.
+#[test]
+fn the_factory_builds_both_versions() {
+    let (log, _) = crate::test_support::capture_logs(crate::logger::Level::DEBUG);
+    for version in [CgroupVersion::V1, CgroupVersion::V2] {
+        let _controller: Box<dyn Interface> = new(
+            version,
+            Arc::new(Ledger::default()),
+            Arc::new(FilterCache::new()),
+            log.clone(),
+        );
+    }
 }

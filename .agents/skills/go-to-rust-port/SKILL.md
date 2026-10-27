@@ -164,6 +164,12 @@ Prometheus exporter).
   `v` prints `{UNRECOGNIZED: s}`; `%v` of a rune prints its number → take error texts from a Go
   run, not from the format string. `fmt.Sscanf("%d.%d")` skips spaces (Unicode ones too, but not a
   newline) before each number, takes a sign, needs no input after the last verb. (go program)
+- A Go fake behind an interface returns any `error` (`errors.New("injected failure")`) and the
+  test asks `errors.Is`; a Rust trait with a concrete error enum cannot → inject an errno, let the
+  fake return the error the real operation would, and print the composite text from the Go code
+  over its own fake with injected errors of that wording. `errors.Is` on a sentinel becomes a
+  classifier method that walks every wrap and every join, or a sentinel inside a join is missed.
+  (cgroup v2 swap tests)
 
 ## 3. Ecosystem map
 

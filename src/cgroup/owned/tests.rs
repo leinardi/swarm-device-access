@@ -14,52 +14,21 @@
  * limitations under the License.
  */
 
-//! Go: `owned_test.go`. The `TestSet_*` tests drive the cgroup v2 controller and come with it.
+//! Go: `owned_test.go`. The `TestSet_*` tests drive the cgroup v2 controller: they are in
+//! `v2plan/tests.rs`.
 
 use super::*;
 use crate::cgroup::asm::{ADD, CALL, DWORD, IMM_SOURCE, JEQ, MODE_IMM, R3, REG_SOURCE, RFP, WORD};
 use crate::cgroup::bpfinterp::{DevRequest, READ, WRITE, run_device_filter};
 use crate::cgroup::testing::{
-    FIXTURE_NONCE, Golden, ParseGolden, RUNTIME_FIXTURES, fixture_rules, hex_lines, read_fixture,
-    rule, rule_of, unhex,
+    FIXTURE_NONCE, Golden, ParseGolden, RUNTIME_FIXTURES, allow_null_original, canonical, corrupt,
+    emit, fixture_rules, hex_lines, read_fixture, rule, rule_of, unhex,
 };
 
 const KNOWN: ProgMeta = ProgMeta {
     map_ids_known: true,
     map_count: 0,
 };
-
-/// A runtime-style original that allows exactly c 1:3 (any access) and denies everything else.
-fn allow_null_original() -> Vec<Instruction> {
-    vec![
-        Instruction::load_mem(R2, R1, 0, WORD),
-        Instruction::alu32_imm(AND, R2, 0xffff),
-        Instruction::load_mem(R4, R1, 4, WORD),
-        Instruction::load_mem(R5, R1, 8, WORD),
-        Instruction::jump_imm(JNE, R2, DEV_CHAR, 4),
-        Instruction::jump_imm(JNE, R4, 1, 3),
-        Instruction::jump_imm(JNE, R5, 3, 2),
-        Instruction::alu32_imm(MOV, R0, 1),
-        Instruction::exit(),
-        Instruction::alu32_imm(MOV, R0, 0),
-        Instruction::exit(),
-    ]
-}
-
-fn canonical(instructions: &[Instruction]) -> Vec<u8> {
-    canonical_bytes(instructions).unwrap()
-}
-
-fn emit(rules: &[DeviceRule], nonce: u64, original: &[u8]) -> Vec<u8> {
-    emit_owned(rules, nonce, original).unwrap()
-}
-
-/// The wrapper with instruction `index` replaced.
-fn corrupt(raw: &[u8], index: usize, instruction: Instruction) -> Vec<u8> {
-    let mut instructions = from_canonical(raw).unwrap();
-    instructions[index] = instruction;
-    canonical(&instructions)
-}
 
 /// Go: `TestFixtures_PassGateAndRoundTrip`. For the real runc, crun and systemd device filters,
 /// the original passes the gate, reloads to the same bytes, is not mistaken for a wrapper, and

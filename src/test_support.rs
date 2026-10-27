@@ -14,15 +14,24 @@
  * limitations under the License.
  */
 
-// Adapted from swarm-scheduler-exporter/src/docker/tests.rs at d57dcc220d29,
+// Adapted from swarm-scheduler-exporter/src/test_support/mod.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! Helpers the unit tests share.
+//! Helpers the unit tests share: a temporary directory, the files under `tests/testdata`, and log
+//! capture through the logger's injectable sink.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// A temporary directory, removed on drop.
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
+
+use crate::clock::FakeClock;
+use crate::logger::{Config, Format, Level, LogHandle, Logger, MemorySink};
+
+/// A temporary directory, removed on drop. Moved out of SSE's `src/docker/tests.rs` at the same
+/// commit.
 #[derive(Debug)]
 pub(crate) struct TempDir(PathBuf);
 
@@ -57,3 +66,23 @@ pub(crate) fn testdata(relative: &str) -> Vec<u8> {
         .join(relative);
     std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
+
+/// A plain-format logger at `level` behind a handle, writing to the returned sink without record
+/// times: the Go tests' handler swap, without a process-wide logger to race on.
+pub(crate) fn capture_logs(level: Level) -> (LogHandle, MemorySink) {
+    let sink = MemorySink::default();
+    let logger = Logger::new(
+        Config {
+            format: Format::Plain,
+            level,
+            include_time: false,
+        },
+        Box::new(sink.clone()),
+        TimeZone::UTC,
+        Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+    );
+    (LogHandle::new(logger), sink)
+}
+
+#[cfg(test)]
+mod tests;
