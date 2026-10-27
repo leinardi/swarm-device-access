@@ -1,0 +1,131 @@
+### -log-format=xml -policy-mode=bogus
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: setting "log-format": unknown value "xml", must be one of [text json plain]
+unknown policy mode "bogus": must be "opt-in" or "all"
+#END
+### -log-format=xml
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: setting "log-format": unknown value "xml", must be one of [text json plain]
+#END
+### -policy-mode=bogus
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: setting "policy-mode": unknown policy mode "bogus": must be "opt-in" or "all"
+unknown policy mode "bogus": must be "opt-in" or "all"
+#END
+### -device-allow=relative
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: device-allow: glob pattern must start with /dev/: "relative"
+#END
+### -device-allow=/dev/[
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: device-allow: invalid glob pattern "/dev/[": syntax error in pattern
+#END
+### -device-deny=/etc/x -device-allow=/dev/[
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: device-allow: invalid glob pattern "/dev/[": syntax error in pattern
+#END
+### -log-level=loud
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: setting "log-level": unknown value "loud", must be one of [debug info warn error]
+#END
+### -config=/nonexistent
+exit=Some(1)
+--- stdout
+--- stderr
+config file error: read config file "/nonexistent": open /nonexistent: no such file or directory
+#END
+### -config=tests/testdata/parity/unknown-key.conf
+exit=Some(1)
+--- stdout
+--- stderr
+config file error: config file "tests/testdata/parity/unknown-key.conf": decode: yaml: unmarshal errors:
+  line 2: field listen-addr not found in type config.FileSchema
+#END
+### -config=tests/testdata/parity/bad-syntax.conf
+exit=Some(1)
+--- stdout
+--- stderr
+config file error: parse config file "tests/testdata/parity/bad-syntax.conf": yaml: line 1: did not find expected node content
+#END
+### -config=tests/testdata/parity/valid.conf -log-format=xml
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: setting "log-format": unknown value "xml", must be one of [text json plain]
+#END
+### -config=tests/testdata/parity/tab-value.conf -log-format=xml
+exit=Some(1)
+--- stdout
+--- stderr
+invalid config: setting "log-format": unknown value "xml", must be one of [text json plain]
+#END
+### launch -config-dir=rel
+exit=Some(1)
+--- stdout
+--- stderr
+launch: flag "-config-dir": "rel" must be an absolute, clean path
+#END
+### launch -config-dir=/srv/../etc
+exit=Some(1)
+--- stdout
+--- stderr
+launch: flag "-config-dir": "/srv/../etc" must be an absolute, clean path
+#END
+### launch -host-docker-socket=
+exit=Some(1)
+--- stdout
+--- stderr
+launch: flag "-host-docker-socket": "" must be an absolute, clean path
+#END
+### launch -log-format=xml
+exit=Some(1)
+--- stdout
+--- stderr
+launch: flag "log-format": unknown value "xml", must be one of [text json plain]
+#END
+### launch -log-level=trace -log-format=xml
+exit=Some(1)
+--- stdout
+--- stderr
+launch: flag "log-format": unknown value "xml", must be one of [text json plain]
+#END
+### launch extra
+exit=Some(1)
+--- stdout
+--- stderr
+launch: "extra": unexpected argument; daemon flags go after --
+#END
+### launch -dry-run
+exit=Some(1)
+--- stdout
+--- stderr
+flag provided but not defined: -dry-run
+Usage: swarm-device-access launch [flags] -- [daemon flags]
+  -config-dir string
+    	Host directory bound read-only at /etc/swarm-device-access in the daemon. Empty = none.
+  -dbus
+    	Bind the host's systemd DBus socket into the daemon, enabling daemon-reload handling
+  -host-docker-socket string
+    	Host path of the Docker socket bound into the daemon (default "/var/run/docker.sock")
+  -host-network
+    	Run the daemon in the host network (needed for -metrics-addr/-debug-addr); default is no network
+  -log-format string
+    	Launcher log format: json, text or plain (default "text")
+  -log-level string
+    	Launcher log level: debug, info, warn or error (default "info")
+launch: flag provided but not defined: -dry-run
+#END

@@ -1,0 +1,17 @@
+level=INFO msg="swarm-device-access starting" version=<stamp> commit=<stamp> date=<stamp> config_file=<dir>/config.yaml dry_run=true policy_mode=all device_allow=[] device_deny=[/dev/sda]
+level=WARN msg="dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run"
+level=INFO msg="metrics server listening" addr=127.0.0.1:<port>
+level=WARN msg="systemd reload handling unavailable; retrying in the background" err="connect system bus: dial unix <dir>/no-bus: connect: no such file or directory" retry_in=1s
+level=DEBUG msg="reconciling running containers" count=1 generation=1 epoch=1
+level=INFO msg="dry-run: would set device rules" id=1111111111111111111111111111111111111111111111111111111111111111 rules=0
+level=INFO msg="config reload complete" generation=1 epoch=1
+level=DEBUG msg="subscribed to docker events"
+level=INFO msg="dry-run: would set device rules" id=2222222222222222222222222222222222222222222222222222222222222222 rules=0
+level=INFO msg="SIGHUP received; reloading config" config_file=<dir>/config.yaml
+level=INFO msg="config reloaded" generation=2 dry_run=true policy_mode=opt-in device_allow=[] device_deny=[]
+level=DEBUG msg="reconciling running containers" count=1 generation=2 epoch=2
+level=INFO msg="dry-run: would set device rules" id=1111111111111111111111111111111111111111111111111111111111111111 rules=0
+level=INFO msg="config reload complete" generation=2 epoch=2
+level=INFO msg="SIGHUP received; reloading config" config_file=<dir>/config.yaml
+level=ERROR msg="config reload rejected; keeping previous config" err="config reload failed: config file \"<dir>/config.yaml\": key \"log-level\": unknown value \"loud\", must be one of [debug info warn error]"
+level=INFO msg="swarm-device-access shutting down"

@@ -14,20 +14,46 @@
  * limitations under the License.
  */
 
-//! A placeholder for the daemon's entry point while the port is in progress. It is built and
-//! linted with the workspace but goes into no image: the Go binary still ships. It refuses to run,
-//! so that nothing mistakes it for a working daemon.
+// Adapted from swarm-scheduler-exporter/src/main.rs at d57dcc220d29,
+// originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-use std::io::{self, Write as _};
+//! The swarm-device-access binary: runs the daemon, or the launcher, on a runtime of its own and
+//! returns its exit code. The Go binary still ships until the cutover.
+
+use std::io::Write as _;
 use std::process::ExitCode;
+use std::time::Duration;
 
+use swarm_device_access::run::{hangup_channel, run_with, shutdown_signal};
+
+/// The runtime's worker threads: the daemon's work is a few Docker calls and blocking cgroup
+/// transactions, which run on the blocking pool, so two workers keep the resident set small.
+const WORKER_THREADS: usize = 2;
+
+/// Builds the runtime by hand, rather than with `#[tokio::main]`, so its shutdown is bounded by
+/// what is left of the shutdown budget: dropping a runtime waits for its blocking tasks, with no
+/// bound at all.
 fn main() -> ExitCode {
-    // Nothing useful can be done when stderr itself cannot be written; the exit status still says
-    // the run failed.
-    let _written = writeln!(
-        io::stderr(),
-        "swarm-device-access {}: the Rust port is not usable yet; run the Go build",
-        option_env!("SWARM_DEVICE_ACCESS_VERSION").unwrap_or("dev")
-    );
-    ExitCode::FAILURE
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(WORKER_THREADS)
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = writeln!(std::io::stderr(), "tokio runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let exit = runtime.block_on(run_with(
+        std::env::args_os(),
+        |key| std::env::var(key).ok(),
+        shutdown_signal,
+        hangup_channel,
+    ));
+    let remaining = exit.deadline.map_or(Duration::ZERO, |deadline| {
+        deadline.saturating_duration_since(tokio::time::Instant::now())
+    });
+    runtime.shutdown_timeout(remaining);
+    ExitCode::from(u8::try_from(exit.code).unwrap_or(1))
 }

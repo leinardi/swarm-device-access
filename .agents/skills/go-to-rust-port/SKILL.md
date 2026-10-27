@@ -96,6 +96,16 @@ Prometheus exporter).
   `strings.Split(s, " ")` keeps empty fields where `split_whitespace` drops them, and mountinfo
   indexes fields from the end. `strings.TrimPrefix` strips a string, not a path element
   (`/docker/abc` off `/docker/abc123def` leaves `def`). (go1.26 scratch program)
+- yaml.v3 (libyaml) reads a tab between `:` and a plain value as separation (`key:<TAB>value`);
+  saphyr-parser 0.3 refuses it (`':' must be followed by a valid YAML whitespace`), though it
+  takes the tab before a quoted value → a Q entry, or a pre-scan that is safe inside quoted
+  scalars; a fixture with the tab in the parity probes. (v1.0.3 against saphyr-parser 0.3.2)
+- cilium's `rlimit.RemoveMemlock` is not a plain `setrlimit`: at process start it lowers the
+  soft limit to 0, creates a one-entry array map and restores it; a map created means memcg
+  accounting and the limit is left alone, `EPERM` means raise it to infinity. Unprivileged, Go
+  logs `failed to set memlock rlimit: operation not permitted` → port the probe (one
+  `BPF_MAP_CREATE`), or the warning and the limit differ from 1.x. (cilium v0.22.0 source; the
+  parity run as a user)
 - `strconv.ParseInt` returns a range error at the digit that overflows, before a later invalid
   byte (`99999999999999999999x` is out of range); `i64::from_str` says invalid. `%+v` of a struct
   with pointer fields prints addresses → a Q entry, not a guess. (go1.26 scratch program)

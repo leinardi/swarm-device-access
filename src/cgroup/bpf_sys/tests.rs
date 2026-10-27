@@ -36,6 +36,14 @@ fn attribute_layouts_match_the_kernel_and_go() {
 
     assert_eq!(size_of::<ProgGetFdByIdAttr>(), 4);
 
+    assert_eq!(size_of::<MapCreateAttr>(), 96);
+    assert_eq!(offset_of!(MapCreateAttr, map_name), 28);
+    assert_eq!(offset_of!(MapCreateAttr, map_ifindex), 44);
+    assert_eq!(offset_of!(MapCreateAttr, map_extra), 64);
+    assert_eq!(offset_of!(MapCreateAttr, value_type_btf_obj_fd), 72);
+    assert_eq!(offset_of!(MapCreateAttr, excl_prog_hash), 80);
+    assert_eq!(offset_of!(MapCreateAttr, excl_prog_hash_size), 88);
+
     assert_eq!(size_of::<ObjGetInfoByFdAttr>(), 16);
     assert_eq!(offset_of!(ObjGetInfoByFdAttr, info_len), 4);
     assert_eq!(offset_of!(ObjGetInfoByFdAttr, info), 8);

@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-//! The raw `bpf(2)` commands the cgroup v2 device filter needs, and the only module of the
+//! The raw `bpf(2)` commands the cgroup v2 device filter needs (and the one map creation of
+//! cilium's `RLIMIT_MEMLOCK` probe, [`super::rlimit`]), and the only module of the
 //! workspace allowed `unsafe` (`docs/rust-port.md`, eBPF): no safe crate loads a program from raw
 //! instructions, attaches it with `BPF_F_REPLACE` and dumps a foreign program's translated
 //! instructions. Each command fills one `#[repr(C)]` attribute struct, laid out as the kernel's
@@ -38,6 +39,7 @@ use std::os::fd::{AsRawFd as _, BorrowedFd, FromRawFd as _, OwnedFd};
 
 use rustix::io::Errno;
 
+const BPF_MAP_CREATE: c_long = 0;
 const BPF_PROG_LOAD: c_long = 5;
 const BPF_PROG_ATTACH: c_long = 8;
 const BPF_PROG_DETACH: c_long = 9;
@@ -160,9 +162,35 @@ struct ProgDetachAttr {
     expected_revision: u64,
 }
 
+/// The attribute of `BPF_MAP_CREATE`, cilium's `MapCreateAttr`.
+#[repr(C)]
+#[derive(Debug, Default)]
+struct MapCreateAttr {
+    map_type: u32,
+    key_size: u32,
+    value_size: u32,
+    max_entries: u32,
+    map_flags: u32,
+    inner_map_fd: u32,
+    numa_node: u32,
+    map_name: [u8; OBJ_NAME_LEN],
+    map_ifindex: u32,
+    btf_fd: u32,
+    btf_key_type_id: u32,
+    btf_value_type_id: u32,
+    btf_vmlinux_value_type_id: u32,
+    map_extra: u64,
+    value_type_btf_obj_fd: i32,
+    map_token_fd: i32,
+    excl_prog_hash: u64,
+    excl_prog_hash_size: u32,
+    _pad: u32,
+}
+
 /// The attribute structs, the only types [`bpf`] passes to the kernel.
 trait Attr {}
 
+impl Attr for MapCreateAttr {}
 impl Attr for ProgQueryAttr {}
 impl Attr for ProgGetFdByIdAttr {}
 impl Attr for ObjGetInfoByFdAttr {}
@@ -197,6 +225,20 @@ fn bpf<T: Attr>(command: c_long, attr: &mut T) -> Result<c_long, Errno> {
             return Err(errno);
         }
     }
+}
+
+/// cilium's `detectMemcgAccounting` map: an array of one 4-byte entry with 4-byte keys, created
+/// only to see whether the kernel charges it to `RLIMIT_MEMLOCK`.
+pub(super) fn map_create_probe() -> Result<OwnedFd, Errno> {
+    let mut attr = MapCreateAttr {
+        // BPF_MAP_TYPE_ARRAY.
+        map_type: 2,
+        key_size: 4,
+        value_size: 4,
+        max_entries: 1,
+        ..MapCreateAttr::default()
+    };
+    owned_fd(bpf(BPF_MAP_CREATE, &mut attr)?)
 }
 
 /// The descriptor the kernel returned, owned.

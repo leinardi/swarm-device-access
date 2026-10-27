@@ -42,6 +42,7 @@ mod error;
 mod handle;
 mod ledger;
 mod owned;
+pub mod rlimit;
 #[cfg(test)]
 mod testing;
 mod v1;

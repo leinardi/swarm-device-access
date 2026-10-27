@@ -23,6 +23,7 @@
 //! comes from.
 
 pub mod cgroup;
+pub mod cli;
 pub mod clock;
 pub mod config;
 pub mod daemon;
@@ -33,8 +34,10 @@ pub mod logger;
 pub mod metrics;
 pub mod policy;
 pub mod processor;
+pub mod run;
 pub mod server;
 pub mod systemd;
 mod task;
 #[cfg(test)]
 mod test_support;
+pub mod version;
