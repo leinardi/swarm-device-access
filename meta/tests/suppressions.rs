@@ -17,9 +17,10 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! Drives scripts/check-suppressions.sh, the hook that keeps every in-file linter suppression
-//! counted against a reviewed baseline. The Rust side of `test/suppressions`, which stays until
-//! the cutover: its cases, the Go, shell and Dockerfile families as well as Rust's, since the
-//! script counts all of them for as long as the Go code lives here.
+//! counted against a reviewed baseline. The Rust port of `test/suppressions`, which the cutover
+//! removed: its cases on the Rust, shell and Dockerfile families. The Go `//nolint` family went
+//! with the Go code; its rule cases moved to the shell family, its detector cases have their Rust
+//! counterparts, and `ignores_go_files` pins that a `.go` file is no longer counted.
 //!
 //! Each case builds a scratch git repository and runs the script inside it, rather than against
 //! this repository: what is under test is the rule, not today's counts, and a case has to be able
@@ -40,8 +41,8 @@ const BASELINE_FILE: &str = ".suppressions-baseline";
 /// The refusal of the staged-diff rule.
 const UNTOUCHED_BASELINE: &str = "without touching .suppressions-baseline";
 
-/// The scratch Go file the Go cases edit.
-const GO_SCRATCH: &str = "scratch.go";
+/// The scratch shell script the shell cases edit.
+const SHELL_SCRATCH: &str = "scratch.sh";
 
 /// The scratch Rust file the Rust cases edit.
 const RUST_SCRATCH: &str = "scratch.rs";
@@ -49,52 +50,43 @@ const RUST_SCRATCH: &str = "scratch.rs";
 /// The baseline key of the Rust fixtures' one lint.
 const TOO_MANY_LINES: &str = "expect/clippy::too_many_lines";
 
-/// A Go file carrying exactly one `//nolint:gosec` directive.
-const GO_WITH_GOSEC: &str = r#"package scratch
+/// The baseline key of the shell fixtures' one directive.
+const SC2086: &str = "shellcheck-disable/SC2086";
 
-// Run does nothing in particular.
+/// A shell script without any directive.
+const SHELL_WITHOUT_DISABLE: &str = "#!/usr/bin/env bash
+echo ok
+";
+
+/// A shell script carrying exactly one `shellcheck disable=SC2086` directive.
+const SHELL_WITH_DISABLE: &str = "#!/usr/bin/env bash
+# shellcheck disable=SC2086
+echo $NAMES
+";
+
+/// The same single directive rewritten on a different line: the count is unchanged, which is the
+/// case the per-rule counting alone cannot see. Its text changes too, so the diff shows it as added
+/// rather than as an unchanged line the others moved around.
+const SHELL_WITH_DISABLE_MOVED: &str = "#!/usr/bin/env bash
+echo first
+# shellcheck disable=SC2086 # scratch fixture, moved
+echo $NAMES
+";
+
+/// Two directives for the same code.
+const SHELL_WITH_TWO_DISABLES: &str = "#!/usr/bin/env bash
+# shellcheck disable=SC2086
+echo $NAMES
+# shellcheck disable=SC2086
+echo $OTHERS
+";
+
+/// A Go file carrying `//nolint` directives, which the ratchet no longer reads.
+const GO_WITH_NOLINT: &str = r#"package scratch
+
+//nolint // deliberately unspecific
 func Run() string {
-    return "ok" //nolint:gosec // scratch fixture
-}
-"#;
-
-/// The same single directive on a different line: the count is unchanged, which is the case the
-/// per-rule counting alone cannot see.
-const GO_WITH_GOSEC_MOVED: &str = r#"package scratch
-
-//nolint:gosec // scratch fixture, moved
-func Run() string {
-    return "ok"
-}
-"#;
-
-/// Two directives for the same linter.
-const GO_WITH_TWO_GOSEC: &str = r#"package scratch
-
-// Run does nothing in particular.
-func Run() string {
-    value := "ok" //nolint:gosec // scratch fixture
-    return value  //nolint:gosec // scratch fixture too
-}
-"#;
-
-/// A string containing "//" before the directive. golangci-lint reads the directive; a detector
-/// that stops at the first "//" on the line does not.
-const GO_WITH_DIRECTIVE_AFTER_URL: &str = r#"package scratch
-
-// Run does nothing in particular.
-func Run() string {
-    return "https://example.com/x" //nolint:gosec // scratch fixture behind a URL
-}
-"#;
-
-/// A directive mentioned inside a sentence. It is not a suppression, and counting it as one would
-/// make every comment about the ratchet fail the ratchet.
-const GO_WITH_PROSE_MENTION: &str = r#"package scratch
-
-// Run is written so that it needs no //nolint:gosec directive at all.
-func Run() string {
-    return "ok"
+    return "ok" //nolint:gosec, errcheck // scratch fixture
 }
 "#;
 
@@ -105,83 +97,6 @@ const DOCKERFILE_WITH_IGNORES: &str = r#"FROM scratch
 # droast global ignore=DF005 reason="scratch fixture"
 # droast ignore=DF052 reason="scratch fixture"
 COPY x /x
-"#;
-
-/// A shellcheck directive.
-const SHELL_WITH_DISABLE: &str = "#!/usr/bin/env bash
-# shellcheck disable=SC2086
-echo $NAMES
-";
-
-/// Two linters silenced with a space after the comma, which golangci-lint and nolintlint both
-/// accept; stopping at the space would leave errcheck uncounted.
-const GO_WITH_SPACED_LIST: &str = r"package scratch
-
-// Run does nothing in particular.
-func Run() error {
-    return nil //nolint:gosec, ErrCheck // scratch fixture
-}
-";
-
-/// The broadest Go suppression there is: no linter named, so every one of them is silenced.
-const GO_WITH_BARE_NOLINT: &str = r"package scratch
-
-//nolint // deliberately unspecific
-func Run() {}
-";
-
-/// Directive text inside a Go raw string. None of it is a suppression.
-const GO_WITH_RAW_STRING_FIXTURE: &str = r#"package scratch
-
-// fixture is Go source held as data.
-const fixture = `package other
-
-func Run() string {
-    return "ok" //nolint:gosec // inside a raw string
-}
-`
-"#;
-
-/// One more line added inside that raw string -- the ordinary way a new case gets written, and a
-/// line the staged-diff rule must not read as a directive.
-const GO_WITH_RAW_STRING_FIXTURE_EXTENDED: &str = r#"package scratch
-
-// fixture is Go source held as data.
-const fixture = `package other
-
-func Run() string {
-    value := "ok" //nolint:gosec // inside a raw string too
-    return value //nolint:gosec // inside a raw string
-}
-`
-"#;
-
-/// A real directive added after the raw string closes, which the same rule must still catch.
-const GO_WITH_RAW_STRING_FIXTURE_AND_DIRECTIVE: &str = r#"package scratch
-
-// fixture is Go source held as data.
-const fixture = `package other
-
-func Run() string {
-    return "ok" //nolint:gosec // inside a raw string
-}
-`
-
-func Run() string {
-    return "ok" //nolint:gosec // a directive in code this time
-}
-"#;
-
-/// A directive mentioned on a continuation line of a block comment. golangci-lint honors no
-/// directive there, so neither does the ratchet.
-const GO_WITH_BLOCK_COMMENT: &str = r#"package scratch
-
-/*
- * Run needs no //nolint:gosec directive, and this line is not one.
- */
-func Run() string {
-    return "ok"
-}
 "#;
 
 /// One `#[expect(clippy::too_many_lines)]`.
@@ -355,9 +270,9 @@ impl Scratch {
         self.git(&["commit", "-q", "-m", "scratch fixture"]);
     }
 
-    /// Writes the scratch Go file and a baseline, and commits both.
+    /// Writes the scratch shell script and a baseline, and commits both.
     fn commit_initial(&self, source: &str, baseline: &str) {
-        self.commit_initial_as(GO_SCRATCH, source, baseline);
+        self.commit_initial_as(SHELL_SCRATCH, source, baseline);
     }
 
     fn git(&self, args: &[&str]) {
@@ -422,86 +337,74 @@ fn run_cases(cases: &[Case]) {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Go: `TestCheckSuppressions`, the staged-diff and count rules on Go's `//nolint`: each state
-/// the ratchet must accept or refuse.
+/// Go: `TestCheckSuppressions`, the staged-diff and count rules, on the shellcheck directive since
+/// the Go `//nolint` family was removed: each state the ratchet must accept or refuse.
 #[test]
 fn check_suppressions() {
     run_cases(&[
         (
             "a tree that matches its baseline passes",
-            |scratch| scratch.commit_initial(GO_WITH_GOSEC, "nolint/gosec\t1"),
+            |scratch| scratch.commit_initial(SHELL_WITH_DISABLE, "shellcheck-disable/SC2086\t1"),
             None,
         ),
         (
             "an added suppression with an untouched baseline is refused",
             |scratch| {
-                scratch.commit_initial(GO_WITH_GOSEC, "nolint/gosec\t1");
-                scratch.write(GO_SCRATCH, GO_WITH_TWO_GOSEC);
-                scratch.git(&["add", GO_SCRATCH]);
+                scratch.commit_initial(SHELL_WITH_DISABLE, "shellcheck-disable/SC2086\t1");
+                scratch.write(SHELL_SCRATCH, SHELL_WITH_TWO_DISABLES);
+                scratch.git(&["add", SHELL_SCRATCH]);
             },
             Some(UNTOUCHED_BASELINE),
         ),
         (
             "the same addition passes once the baseline is staged with it",
             |scratch| {
-                scratch.commit_initial(GO_WITH_GOSEC, "nolint/gosec\t1");
-                scratch.write(GO_SCRATCH, GO_WITH_TWO_GOSEC);
-                scratch.write_baseline("nolint/gosec\t2");
-                scratch.git(&["add", GO_SCRATCH, BASELINE_FILE]);
+                scratch.commit_initial(SHELL_WITH_DISABLE, "shellcheck-disable/SC2086\t1");
+                scratch.write(SHELL_SCRATCH, SHELL_WITH_TWO_DISABLES);
+                scratch.write_baseline("shellcheck-disable/SC2086\t2");
+                scratch.git(&["add", SHELL_SCRATCH, BASELINE_FILE]);
             },
             None,
         ),
         (
             "a suppression swapped one for one is refused even though the count holds",
             |scratch| {
-                scratch.commit_initial(GO_WITH_GOSEC, "nolint/gosec\t1");
-                scratch.write(GO_SCRATCH, GO_WITH_GOSEC_MOVED);
-                scratch.git(&["add", GO_SCRATCH]);
+                scratch.commit_initial(SHELL_WITH_DISABLE, "shellcheck-disable/SC2086\t1");
+                scratch.write(SHELL_SCRATCH, SHELL_WITH_DISABLE_MOVED);
+                scratch.git(&["add", SHELL_SCRATCH]);
             },
             Some(UNTOUCHED_BASELINE),
         ),
         (
             "a count above the baseline is refused with nothing staged",
-            |scratch| scratch.commit_initial(GO_WITH_TWO_GOSEC, "nolint/gosec\t1"),
+            |scratch| {
+                scratch.commit_initial(SHELL_WITH_TWO_DISABLES, "shellcheck-disable/SC2086\t1");
+            },
             Some("baseline allows 1"),
         ),
         (
             "a count below the baseline is refused too",
-            |scratch| scratch.commit_initial(GO_WITH_GOSEC, "nolint/gosec\t3"),
+            |scratch| scratch.commit_initial(SHELL_WITH_DISABLE, "shellcheck-disable/SC2086\t3"),
             Some("baseline still claims 3"),
         ),
         (
             "a rule the baseline has never heard of is refused",
-            |scratch| scratch.commit_initial(GO_WITH_GOSEC, "nolint/dupl\t1"),
+            |scratch| scratch.commit_initial(SHELL_WITH_DISABLE, "shellcheck-disable/SC2046\t1"),
             Some("does not list this rule"),
         ),
     ]);
 }
 
-/// Go: `TestCheckSuppressions`, the Go detector's boundaries and the missing baseline: what
-/// counts as a suppression, and that no baseline is never read as no suppressions.
+/// Go: `TestCheckSuppressions`, the missing baseline: no baseline is never read as no
+/// suppressions. The Go detector's boundary cases went with the Go family; the Rust detector's
+/// are in `check_suppressions_rust`.
 #[test]
-fn check_suppressions_detector_and_missing_baseline() {
+fn check_suppressions_missing_baseline() {
     run_cases(&[
-        (
-            "a directive behind a string containing a comment opener still counts",
-            |scratch| scratch.commit_initial(GO_WITH_DIRECTIVE_AFTER_URL, "nolint/dupl\t1"),
-            Some("nolint/gosec"),
-        ),
-        (
-            "a directive mentioned in prose is not a suppression",
-            |scratch| scratch.commit_initial(GO_WITH_PROSE_MENTION, ""),
-            None,
-        ),
-        (
-            "a directive inside a block comment is not a suppression either",
-            |scratch| scratch.commit_initial(GO_WITH_BLOCK_COMMENT, ""),
-            None,
-        ),
         (
             "a deleted baseline is refused rather than treated as no suppressions",
             |scratch| {
-                scratch.commit_initial(GO_WITH_GOSEC, "nolint/gosec\t1");
+                scratch.commit_initial(SHELL_WITH_DISABLE, "shellcheck-disable/SC2086\t1");
                 scratch.git(&["rm", "-q", BASELINE_FILE]);
             },
             Some("is missing"),
@@ -509,7 +412,7 @@ fn check_suppressions_detector_and_missing_baseline() {
         (
             "a deleted baseline is refused in a tree with no suppressions at all",
             |scratch| {
-                scratch.commit_initial(GO_WITH_PROSE_MENTION, "");
+                scratch.commit_initial(SHELL_WITHOUT_DISABLE, "");
                 scratch.git(&["rm", "-q", BASELINE_FILE]);
             },
             Some("is missing"),
@@ -523,7 +426,7 @@ fn check_suppressions_detector_and_missing_baseline() {
 #[test]
 fn update_writes_an_accepted_baseline() {
     let scratch = Scratch::new();
-    scratch.commit_initial(GO_WITH_TWO_GOSEC, "nolint/gosec\t1");
+    scratch.commit_initial(SHELL_WITH_TWO_DISABLES, "shellcheck-disable/SC2086\t1");
     let (accepted, output) = scratch.ratchet(&[]);
     assert!(
         !accepted,
@@ -534,7 +437,7 @@ fn update_writes_an_accepted_baseline() {
     assert!(updated, "--update failed:\n{output}");
     let written = scratch.read(BASELINE_FILE);
     assert!(
-        written.contains("nolint/gosec\t2"),
+        written.contains("shellcheck-disable/SC2086\t2"),
         "the rewritten baseline does not record the two directives:\n{written}"
     );
 
@@ -545,8 +448,8 @@ fn update_writes_an_accepted_baseline() {
     );
 }
 
-/// Go: `TestCheckSuppressionsCountsEveryFamily`. The detector across the Go, shell and
-/// Dockerfile mechanisms at once (`counts_every_rust_form` covers Rust's two): the baseline is
+/// Go: `TestCheckSuppressionsCountsEveryFamily`. The detector across the shell and Dockerfile
+/// mechanisms at once (`counts_every_rust_form` covers Rust's two): the baseline is
 /// keyed per rule, so a family that resolves to the wrong key -- or to no key -- takes its
 /// suppressions out of the ratchet without anything else noticing.
 #[test]
@@ -554,8 +457,6 @@ fn counts_every_family() {
     let scratch = Scratch::new();
     scratch.write("Dockerfile", DOCKERFILE_WITH_IGNORES);
     scratch.write("run.sh", SHELL_WITH_DISABLE);
-    scratch.write("bare.go", GO_WITH_BARE_NOLINT);
-    scratch.write("spaced.go", GO_WITH_SPACED_LIST);
     scratch.write_baseline("");
     scratch.git(&["add", "-A"]);
     scratch.git(&["commit", "-q", "-m", "one file per family"]);
@@ -564,57 +465,17 @@ fn counts_every_family() {
     assert!(updated, "--update failed:\n{output}");
     let written = scratch.read(BASELINE_FILE);
 
-    // Each linter of a two-linter nolint list counts separately, the global droast form is its
-    // own family, and a bare //nolint is recorded as the everything-suppression it is.
+    // The global droast form is its own family.
     for line in [
         "droast-global-ignore/DF005\t1",
         "droast-ignore/DF052\t1",
         "shellcheck-disable/SC2086\t1",
-        "nolint/*\t1",
-        "nolint/gosec\t1",
-        "nolint/errcheck\t1",
     ] {
         assert!(
             written.contains(line),
             "the baseline does not record {line:?}:\n{written}"
         );
     }
-}
-
-/// Go: `TestCheckSuppressionsReadsTheStagedFileNotTheHunk`. The staged-diff rule sees whole
-/// files. The detector carries raw-string and block-comment state across lines, so judging added
-/// lines on their own would both invent suppressions inside a fixture and miss real ones after a
-/// closing backquote -- and an invented one cannot be resolved, because the whole-tree count
-/// agrees with the baseline and --update would rewrite it unchanged.
-#[test]
-fn reads_the_staged_file_not_the_hunk() {
-    // A line added inside a raw string is not a suppression.
-    let scratch = Scratch::new();
-    scratch.commit_initial(GO_WITH_RAW_STRING_FIXTURE, "");
-    scratch.write(GO_SCRATCH, GO_WITH_RAW_STRING_FIXTURE_EXTENDED);
-    scratch.git(&["add", GO_SCRATCH]);
-    let (accepted, output) = scratch.ratchet(&[]);
-    assert!(
-        accepted,
-        "the ratchet read a raw-string line as a directive:\n{output}"
-    );
-
-    // A real directive added after the raw string still is. The staged-diff rule's own message is
-    // asserted: the count rule refuses this edit too, and asserting on the refusal alone would let
-    // a detector that found nothing pass.
-    let scratch = Scratch::new();
-    scratch.commit_initial(GO_WITH_RAW_STRING_FIXTURE, "");
-    scratch.write(GO_SCRATCH, GO_WITH_RAW_STRING_FIXTURE_AND_DIRECTIVE);
-    scratch.git(&["add", GO_SCRATCH]);
-    let (accepted, output) = scratch.ratchet(&[]);
-    assert!(
-        !accepted,
-        "the ratchet accepted an added directive:\n{output}"
-    );
-    assert!(
-        output.contains(UNTOUCHED_BASELINE),
-        "the staged-diff rule did not see the directive:\n{output}"
-    );
 }
 
 /// Go: `TestCheckSuppressionsUpdateDischargesASwap`. The way out of the one refusal the counts
@@ -624,7 +485,7 @@ fn reads_the_staged_file_not_the_hunk() {
 #[test]
 fn update_discharges_a_swap() {
     let scratch = Scratch::new();
-    scratch.write(GO_SCRATCH, GO_WITH_GOSEC);
+    scratch.write(SHELL_SCRATCH, SHELL_WITH_DISABLE);
     scratch.write_baseline("");
     scratch.git(&["add", "-A"]);
     scratch.git(&["commit", "-q", "-m", "scratch fixture"]);
@@ -637,8 +498,8 @@ fn update_discharges_a_swap() {
     scratch.git(&["commit", "-q", "-m", "record the baseline"]);
     let before = scratch.read(BASELINE_FILE);
 
-    scratch.write(GO_SCRATCH, GO_WITH_GOSEC_MOVED);
-    scratch.git(&["add", GO_SCRATCH]);
+    scratch.write(SHELL_SCRATCH, SHELL_WITH_DISABLE_MOVED);
+    scratch.git(&["add", SHELL_SCRATCH]);
     let (accepted, output) = scratch.ratchet(&[]);
     assert!(
         !accepted,
@@ -668,15 +529,14 @@ fn update_discharges_a_swap() {
 #[test]
 fn allows_a_rename() {
     let scratch = Scratch::new();
-    scratch.write("old.go", GO_WITH_SPACED_LIST);
+    scratch.write("old.sh", SHELL_WITH_DISABLE);
     scratch.write("Dockerfile", DOCKERFILE_WITH_IGNORES);
     scratch.write_baseline(
-        "droast-global-ignore/DF005\t1\ndroast-ignore/DF052\t1\nnolint/errcheck\t1\n\
-         nolint/gosec\t1",
+        "droast-global-ignore/DF005\t1\ndroast-ignore/DF052\t1\nshellcheck-disable/SC2086\t1",
     );
     scratch.git(&["add", "-A"]);
     scratch.git(&["commit", "-q", "-m", "files with suppressions"]);
-    scratch.git(&["mv", "old.go", "new.go"]);
+    scratch.git(&["mv", "old.sh", "new.sh"]);
     scratch.git(&["mv", "Dockerfile", "build.Dockerfile"]);
 
     let (accepted, output) = scratch.ratchet(&[]);
@@ -860,7 +720,7 @@ fn sees_a_lint_added_to_a_multi_line_expect() {
 #[test]
 fn skips_rust_fixtures() {
     let scratch = Scratch::new();
-    scratch.commit_initial(GO_WITH_PROSE_MENTION, "");
+    scratch.commit_initial(SHELL_WITHOUT_DISABLE, "");
     scratch.write("tests/testdata/fixture.rs", RUST_WITH_ONE);
     scratch.write("testdata/top.rs", RUST_WITH_ONE);
     scratch.git(&["add", "-A"]);
@@ -870,17 +730,17 @@ fn skips_rust_fixtures() {
 
 /// Go: `TestCheckSuppressionsCountsNeighborsOfRustFixtures`, the negative control of the test
 /// above: a Rust file next to a testdata/ directory but outside it is counted, and the exclusion
-/// covers Rust only, so a Go file under testdata/ is counted exactly as before Rust was added.
+/// covers Rust only, so a shell script under testdata/ is counted like any other.
 #[test]
 fn counts_neighbors_of_rust_fixtures() {
     let mut failures = Vec::new();
     for (name, content, key) in [
         ("tests/testdatax/x.rs", RUST_WITH_ONE, TOO_MANY_LINES),
         ("tests/testdata.rs", RUST_WITH_ONE, TOO_MANY_LINES),
-        ("internal/x/testdata/x.go", GO_WITH_GOSEC, "nolint/gosec"),
+        ("tests/testdata/x.sh", SHELL_WITH_DISABLE, SC2086),
     ] {
         let scratch = Scratch::new();
-        scratch.commit_initial(GO_WITH_PROSE_MENTION, "");
+        scratch.commit_initial(SHELL_WITHOUT_DISABLE, "");
         scratch.write(name, content);
         scratch.git(&["add", "-A"]);
         let (accepted, output) = scratch.ratchet(&[]);
@@ -891,8 +751,12 @@ fn counts_neighbors_of_rust_fixtures() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Go: `TestCheckSuppressionsReadsTheStagedRustFileNotTheHunk`, the Rust side of
-/// `reads_the_staged_file_not_the_hunk`: the raw-string state carries across lines.
+/// Go: `TestCheckSuppressionsReadsTheStagedFileNotTheHunk` and
+/// `TestCheckSuppressionsReadsTheStagedRustFileNotTheHunk`. The staged-diff rule sees whole files.
+/// The detector carries raw-string and block-comment state across lines, so judging added lines
+/// on their own would both invent suppressions inside a fixture and miss real ones after a raw
+/// string closes -- and an invented one cannot be resolved, because the whole-tree count agrees
+/// with the baseline and --update would rewrite it unchanged.
 #[test]
 fn reads_the_staged_rust_file_not_the_hunk() {
     // A line added inside a raw string is not a suppression.
@@ -935,5 +799,41 @@ fn allows_a_rust_rename() {
     assert!(
         accepted,
         "the ratchet read a moved file as newly added attributes:\n{output}"
+    );
+}
+
+/// Go files are no longer scanned: the Go code was removed at the Rust cutover, and the `//nolint`
+/// family with it. A tracked `.go` file full of directives is neither counted nor refused as an
+/// addition, while the shell script staged beside it in the second case is: that refusal is the
+/// negative control.
+#[test]
+fn ignores_go_files() {
+    let scratch = Scratch::new();
+    scratch.commit_initial_as("scratch.go", GO_WITH_NOLINT, "");
+    let (accepted, output) = scratch.ratchet(&[]);
+    assert!(accepted, "the ratchet counted a Go file:\n{output}");
+    let (updated, output) = scratch.ratchet(&["--update"]);
+    assert!(updated, "--update failed:\n{output}");
+    let written = scratch.read(BASELINE_FILE);
+    assert!(
+        !written.contains("nolint"),
+        "the baseline records a Go directive:\n{written}"
+    );
+
+    let scratch = Scratch::new();
+    scratch.commit_initial(SHELL_WITHOUT_DISABLE, "");
+    scratch.write("added.go", GO_WITH_NOLINT);
+    scratch.git(&["add", "added.go"]);
+    let (accepted, output) = scratch.ratchet(&[]);
+    assert!(
+        accepted,
+        "the ratchet refused a staged Go file as added suppressions:\n{output}"
+    );
+    scratch.write(SHELL_SCRATCH, SHELL_WITH_DISABLE);
+    scratch.git(&["add", SHELL_SCRATCH]);
+    let (accepted, output) = scratch.ratchet(&[]);
+    assert!(
+        !accepted && output.contains(UNTOUCHED_BASELINE) && !output.contains("added.go"),
+        "the staged-diff rule did not see the shell directive alone:\n{output}"
     );
 }

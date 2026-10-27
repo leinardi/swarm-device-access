@@ -22,14 +22,15 @@
 # one. The files preserved from NVIDIA's code keep NVIDIA's own Apache-2.0 header (AGENTS.md: never
 # relicense or reformat that block); they are named in NVIDIA_FILES, and only they may carry it.
 #
-# Governed: Go, Rust and shell sources, Dockerfiles, the Makefile and the repo-local .mk fragments.
+# Governed: Rust and shell sources, Dockerfiles, the Makefile and the repo-local .mk fragments.
 # Rust means every .rs file of every Cargo package: src, tests, build scripts, the meta and testenv
 # members. Exempt: the make-common files the bootstrap fetches (upstream, under make-common's MIT
 # license: the snippets named in the Makefile's MK_COMMON_FILES, and the bootstrap script itself),
 # and Rust files under a testdata/ directory, which are fixtures. YAML, JSON, TOML and Markdown are
 # never governed.
 #
-# Rust files have two more rules, which leave the Go, shell and make checks exactly as they were:
+# Rust files have two more rules, which leave the shell, Dockerfile and make checks exactly as
+# they were:
 #
 #   - Code reused from swarm-scheduler-exporter or swarm-rootless-docker (MIT, same author) carries
 #     this project's Apache-2.0 header followed by a provenance comment, "// Adapted from
@@ -60,8 +61,8 @@ fi
 
 cd "$(git rev-parse --show-toplevel)"
 
-# How many leading lines the header must sit in: a shebang, a build constraint or a Dockerfile
-# parser directive, and a blank line may precede it.
+# How many leading lines the header must sit in: a shebang or a Dockerfile parser directive, and a
+# blank line may precede it.
 HEADER_WINDOW=25
 
 REQUIRED_LINES=(
@@ -73,13 +74,9 @@ REQUIRED_LINES=(
 COPYRIGHT_RE='Copyright [0-9]{4}(-[0-9]{4})? Roberto Leinardi\.'
 NVIDIA_COPYRIGHT_RE='Copyright \(c\) [0-9]{4}, NVIDIA CORPORATION\.'
 
-# The files preserved from NVIDIA's code, which keep NVIDIA's copyright line: the Go originals and
-# their Rust ports.
+# The files preserved from NVIDIA's code, which keep NVIDIA's copyright line: the Rust ports of
+# NVIDIA's Go originals.
 NVIDIA_FILES=(
-	"internal/cgroup/api.go"
-	"internal/cgroup/ebpf.go"
-	"internal/cgroup/v1.go"
-	"internal/cgroup/v2.go"
 	"src/cgroup/api.rs"
 	"src/cgroup/ebpf.rs"
 	"src/cgroup/v1.rs"
@@ -110,7 +107,7 @@ is_governed() {
 	testdata/*.rs | */testdata/*.rs)
 		return 1
 		;;
-	*.go | *.rs | *.sh | .mk/*.mk)
+	*.rs | *.sh | .mk/*.mk)
 		return 0
 		;;
 	esac
@@ -234,7 +231,7 @@ done < <(git ls-files -z)
 if [[ ${#missing[@]} -gt 0 ]]; then
 	echo "These files lack the swarm-device-access Apache-2.0 header:" >&2
 	printf '  %s\n' "${missing[@]}" >&2
-	echo "Copy the header from any Go or shell file (IntelliJ: the Apache-2.0 copyright profile)." >&2
+	echo "Copy the header from any Rust or shell file (IntelliJ: the Apache-2.0 copyright profile)." >&2
 	echo "A reused Rust file adds a complete provenance comment below it, never the MIT block." >&2
 	exit 1
 fi

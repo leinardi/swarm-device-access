@@ -19,8 +19,10 @@
 //! Drives scripts/check-license-headers.sh: on this repository, and on scratch repositories that
 //! hold each kind of file it must reject or let through. The Rust port of `test/licenseheaders`,
 //! which the cutover removed; the cases are that test's, since the script is this project's
-//! (the Apache-2.0 notice, NVIDIA's four files and their Rust ports, the provenance comment),
-//! grouped into several tests as SSE's are so they run in parallel.
+//! (the Apache-2.0 notice, the Rust ports of NVIDIA's four files, the provenance comment),
+//! grouped into several tests as SSE's are so they run in parallel. The Go cases went with the Go
+//! code: a `.go` file is no longer governed, and the window and testdata cases moved to Rust and
+//! shell files.
 //!
 //! Every case that must be refused is the negative control of one that must pass: a missing
 //! header, another licence, another holder, NVIDIA's header outside its files, a header past the
@@ -41,7 +43,7 @@ const SCRIPT_PATH: &str = "scripts/check-license-headers.sh";
 /// only.
 const UNTRACKED_PREFIX: &str = "untracked/";
 
-/// The Apache-2.0 notice below the copyright line, as a Go or Rust file carries it.
+/// The Apache-2.0 notice below the copyright line, as a Rust file carries it.
 macro_rules! apache_body {
     () => {
         concat!(
@@ -62,7 +64,7 @@ macro_rules! apache_body {
     };
 }
 
-/// This project's Apache-2.0 block as a Go or Rust file carries it.
+/// This project's Apache-2.0 block as a Rust file carries it.
 macro_rules! apache_block {
     () => {
         concat!("/*\n * Copyright 2026 Roberto Leinardi.\n", apache_body!())
@@ -79,14 +81,8 @@ macro_rules! nvidia_block {
     };
 }
 
-/// A Go file with the header after its build constraint. Its last required line is its
-/// fourteenth.
-const GO_HEADER: &str = concat!("//go:build linux\n\n", apache_block!(), "\npackage x\n");
-
-/// The header of the Go files preserved from NVIDIA's code.
-const NVIDIA_HEADER: &str = concat!(nvidia_block!(), "\npackage cgroup\n");
-
-/// A Rust source with the header, followed by its module comment.
+/// A Rust source with the header, followed by its module comment. Its last required line is its
+/// twelfth.
 const RUST_HEADER: &str = concat!(apache_block!(), "\n//! A module.\n");
 
 /// The Rust port of an NVIDIA file: NVIDIA's block, then a modification notice.
@@ -147,9 +143,6 @@ const MAKEFILE_WITH_HEADER: &str = concat!(
     "# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n",
     "MK_COMMON_FILES := docker.mk help.mk\n"
 );
-
-/// One of the Go files preserved from NVIDIA's code.
-const NVIDIA_FILE: &str = "internal/cgroup/api.go";
 
 fn run_git(directory: &Path, args: &[&str]) {
     let output = gitenv::isolate(Command::new("git").args(args).current_dir(directory))
@@ -257,72 +250,46 @@ fn run_cases(cases: Vec<HeaderCase>) {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Go: `TestHeaderCases`, the notice on Go files: present, missing, another licence, another
-/// holder, NVIDIA's header in and out of its files, and the edges of the window it must sit in.
-/// `GO_HEADER`'s last required line is its fourteenth: 11 lines before it put it on line 25, the
-/// last line of the window, and one more pushes it out.
+/// Go: `TestHeaderCases`, the edges of the window the header must sit in. `RUST_HEADER`'s last
+/// required line is its twelfth: 13 lines before it put it on line 25, the last line of the
+/// window, and one more pushes it out.
 #[test]
-fn header_cases_for_go() {
-    let other_holder = GO_HEADER.replace("Roberto Leinardi", "Someone Else");
-    let at_the_edge = format!("{}{GO_HEADER}", "// filler\n".repeat(11));
-    let past_the_edge = format!("{}{GO_HEADER}", "// filler\n".repeat(12));
-    let incomplete_provenance =
-        GO_HEADER.replace("package x", "// Adapted from somewhere\n\npackage x");
+fn header_cases_for_the_window() {
+    let at_the_edge = format!("{}{RUST_HEADER}", "// filler\n".repeat(13));
+    let past_the_edge = format!("{}{RUST_HEADER}", "// filler\n".repeat(14));
     run_cases(vec![
         case(
-            "go file with the header",
-            &[("internal/x/x.go", GO_HEADER)],
-            true,
-        ),
-        case(
-            "go file without a header",
-            &[("internal/x/x.go", "package x\n")],
-            false,
-        ),
-        case(
-            "go file with another license",
-            &[("internal/x/x.go", MIT_HEADER)],
-            false,
-        ),
-        case(
-            "another holder's copyright",
-            &[("internal/x/x.go", &other_holder)],
-            false,
-        ),
-        case(
-            "nvidia header on an nvidia file",
-            &[(NVIDIA_FILE, NVIDIA_HEADER)],
-            true,
-        ),
-        case(
-            "nvidia header on any other file",
-            &[("internal/cgroup/new.go", NVIDIA_HEADER)],
-            false,
-        ),
-        case(
-            "own header on an nvidia file",
-            &[(NVIDIA_FILE, GO_HEADER)],
-            false,
-        ),
-        case(
             "header ending on the last line of the window",
-            &[("internal/x/x.go", &at_the_edge)],
+            &[("src/x.rs", &at_the_edge)],
             true,
         ),
         case(
             "header ending one line past the window",
-            &[("internal/x/x.go", &past_the_edge)],
+            &[("src/x.rs", &past_the_edge)],
             false,
         ),
+    ]);
+}
+
+/// Go files are no longer governed: the Go code was removed at the Rust cutover. A tracked `.go`
+/// file passes without any header, NVIDIA's former Go originals included; the window cases above
+/// and the `.rs` cases below are its negative controls.
+#[test]
+fn go_files_are_not_governed() {
+    run_cases(vec![
         case(
-            "go file under testdata, no header",
-            &[("internal/x/testdata/x.go", "package x\n")],
-            false,
+            "go file without a header",
+            &[("internal/x/x.go", "package x\n")],
+            true,
         ),
-        // Go files keep their rules: neither Rust-only rule applies to them.
         case(
-            "go file with an incomplete provenance",
-            &[("internal/x/x.go", &incomplete_provenance)],
+            "go file with another license",
+            &[("internal/x/x.go", MIT_HEADER)],
+            true,
+        ),
+        case(
+            "former nvidia go original without a header",
+            &[("internal/cgroup/api.go", "package cgroup\n")],
             true,
         ),
     ]);
@@ -349,6 +316,11 @@ fn header_cases_for_other_kinds_and_exemptions() {
             false,
         ),
         case(
+            "shell script under testdata, no header",
+            &[("tests/testdata/x.sh", "#!/usr/bin/env bash\necho\n")],
+            false,
+        ),
+        case(
             "local make fragment, no header",
             &[(".mk/local.mk", "x:\n")],
             false,
@@ -360,7 +332,7 @@ fn header_cases_for_other_kinds_and_exemptions() {
         ),
         case(
             "untracked file without a header",
-            &[("untracked/scratch.go", "package x\n")],
+            &[("untracked/scratch.sh", "#!/usr/bin/env bash\necho\n")],
             true,
         ),
         case(
@@ -386,8 +358,8 @@ fn header_cases_for_other_kinds_and_exemptions() {
     ]);
 }
 
-/// Go: `TestHeaderCases`, Rust: every .rs file of every package is governed like a Go file,
-/// except the fixtures under a testdata/ directory.
+/// Go: `TestHeaderCases`, Rust: every .rs file of every package is governed, except the fixtures
+/// under a testdata/ directory.
 #[test]
 fn header_cases_for_rust() {
     let other_holder = RUST_HEADER.replace("Roberto Leinardi", "Someone Else");
@@ -445,9 +417,13 @@ fn header_cases_for_rust() {
     ]);
 }
 
-/// Go: `TestHeaderCases`, NVIDIA's header: the four Rust ports, and no other Rust file.
+/// Go: `TestHeaderCases`, NVIDIA's header: the four Rust ports, and no other file.
 #[test]
 fn header_cases_for_the_nvidia_ports() {
+    let nvidia_shell = SHELL_HEADER.replace(
+        "Copyright 2026 Roberto Leinardi.",
+        "Copyright (c) 2021, NVIDIA CORPORATION.",
+    );
     run_cases(vec![
         case(
             "nvidia header on the rust api port",
@@ -472,6 +448,11 @@ fn header_cases_for_the_nvidia_ports() {
         case(
             "nvidia header on another rust file",
             &[("src/cgroup/v2plan.rs", RUST_NVIDIA_HEADER)],
+            false,
+        ),
+        case(
+            "nvidia header on a shell script",
+            &[("scripts/a.sh", &nvidia_shell)],
             false,
         ),
         case(
