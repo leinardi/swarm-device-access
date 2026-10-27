@@ -34,6 +34,8 @@
 //!
 //! The checks are functions of the text, and each is also run on input built to break it.
 
+use std::sync::LazyLock;
+
 use meta::repo;
 use regex::Regex;
 
@@ -55,6 +57,28 @@ fn entry_matches(entry: &str, path: &str) -> bool {
 fn pattern(text: &str) -> Regex {
     Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
 }
+
+/// A write hook's declaration, with its visibility.
+static HOOK_DECLARED: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+exchange(?:_upgrade)?\b"));
+/// A call to a write hook.
+static HOOK_CALLED: LazyLock<Regex> = LazyLock::new(|| pattern(r"\.\s*exchange(?:_upgrade)?\s*\("));
+/// A write method named or set: a `Method` constant or conversion, a `Request` shortcut, a
+/// method setter or a write method's name as a string.
+static WRITE_METHOD: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(
+        r"\bMethod\s*::\s*(?:POST|PUT|DELETE|PATCH|from_\w+)\b|\bRequest\s*::\s*(?:post|put|delete|patch)\b|\bmethod_mut\s*\(|\.method\s*\(\s*[^)\s]|\x22(?:POST|PUT|DELETE|PATCH)\x22",
+    )
+});
+/// The launcher's write engine, by module path or by type.
+static WRITE_ENGINE: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(
+        r"\blauncher\s*::\s*(?:engine\b|Engine\b|EngineApi\b|\{[^}]*\bEngine)|\bEngineApi\b|\bEngine\s*::",
+    )
+});
+/// The launcher module, by path or in a `use`.
+static LAUNCHER_MODULE: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\blauncher\s*::|\buse\s[^;]*\blauncher\b"));
 
 /// The text without its line comments, so a comment naming the engine is not counted; the line
 /// numbers stay.
@@ -106,10 +130,9 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
 
     // The hooks: declared crate-private in the client, and nowhere else, called only by the
     // engine.
-    let declared = pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+exchange(?:_upgrade)?\b");
     let mut hooks = Vec::new();
     for (path, text) in &files {
-        for found in declared.find_iter(text) {
+        for found in HOOK_DECLARED.find_iter(text) {
             let site = format!(
                 "{path}:{}: {}",
                 line_of(text, found.start()),
@@ -128,32 +151,26 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
             "write hooks declared: {hooks:?}; want exchange and exchange_upgrade"
         ));
     }
-    let calls = pattern(r"\.\s*exchange(?:_upgrade)?\s*\(");
-    for site in found_in(&files, &calls, |path| path == ENGINE) {
+    for site in found_in(&files, &HOOK_CALLED, |path| path == ENGINE) {
         problems.push(format!("{site}: only {ENGINE} calls the write hooks"));
     }
 
     // HTTP methods: outside the client, only the engine sets one or names a write method.
-    let methods = pattern(
-        r"\bMethod\s*::\s*(?:POST|PUT|DELETE|PATCH|from_\w+)\b|\bRequest\s*::\s*(?:post|put|delete|patch)\b|\bmethod_mut\s*\(|\.method\s*\(\s*[^)\s]|\x22(?:POST|PUT|DELETE|PATCH)\x22",
-    );
-    for site in found_in(&files, &methods, |path| {
+    for site in found_in(&files, &WRITE_METHOD, |path| {
         path == ENGINE || path.starts_with("src/docker/")
     }) {
         problems.push(format!("{site}: only {ENGINE} names a write method"));
     }
 
     // The engine itself: named only under src/launcher.
-    let engine = pattern(
-        r"\blauncher\s*::\s*(?:engine\b|Engine\b|EngineApi\b|\{[^}]*\bEngine)|\bEngineApi\b|\bEngine\s*::",
-    );
-    for site in found_in(&files, &engine, |path| path.starts_with("src/launcher/")) {
+    for site in found_in(&files, &WRITE_ENGINE, |path| {
+        path.starts_with("src/launcher/")
+    }) {
         problems.push(format!("{site}: only src/launcher names the write engine"));
     }
 
     // The launcher itself: reached only from the CLI entry.
-    let launcher = pattern(r"\blauncher\s*::|\buse\s[^;]*\blauncher\b");
-    for site in found_in(&files, &launcher, |path| {
+    for site in found_in(&files, &LAUNCHER_MODULE, |path| {
         path.starts_with("src/launcher/")
             || CLI_ENTRY.iter().any(|entry| entry_matches(entry, path))
     }) {

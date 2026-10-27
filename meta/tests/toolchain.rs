@@ -306,14 +306,14 @@ fn rust_line_reading() {
 fn hook_version_problem(
     tool: &str,
     hooks: &str,
-    hook_pattern: &str,
+    hook_pattern: &Regex,
     action: &str,
-    action_pattern: &str,
+    action_pattern: &Regex,
 ) -> Option<String> {
-    let hook = regex(hook_pattern)
+    let hook = hook_pattern
         .captures(hooks)
         .map(|captures| captures[1].to_owned());
-    let installed = regex(action_pattern)
+    let installed = action_pattern
         .captures(action)
         .map(|captures| captures[1].to_owned());
     match (hook, installed) {
@@ -327,10 +327,14 @@ fn hook_version_problem(
     }
 }
 
-const SHELLCHECK_HOOK: &str =
-    r"repo: https://github\.com/shellcheck-py/shellcheck-py\s+rev:\s*(v\d+\.\d+\.\d+)";
+/// The shellcheck-py hook's rev in .pre-commit-config.yaml, capturing the ShellCheck release.
+static SHELLCHECK_HOOK: LazyLock<Regex> = LazyLock::new(|| {
+    regex(r"repo: https://github\.com/shellcheck-py/shellcheck-py\s+rev:\s*(v\d+\.\d+\.\d+)")
+});
 const SHELLCHECK_ACTION: &str = ".github/actions/setup-shellcheck/action.yaml";
-const SHELLCHECK_PIN: &str = r#"SHELLCHECK_VERSION:\s*["']?(v[\d.]+)"#;
+/// The ShellCheck release setup-shellcheck installs.
+static SHELLCHECK_PIN: LazyLock<Regex> =
+    LazyLock::new(|| regex(r#"SHELLCHECK_VERSION:\s*["']?(v[\d.]+)"#));
 
 const SETUP_ZIGBUILD: &str = ".github/actions/setup-zigbuild/action.yaml";
 const RUST_RELEASE_FRAGMENT: &str = ".mk/rust-release.mk";
@@ -340,7 +344,7 @@ const RUST_RELEASE_FRAGMENT: &str = ".mk/rust-release.mk";
 struct PinSource<'content> {
     file: &'content str,
     content: &'content str,
-    pattern: &'content str,
+    pattern: &'content Regex,
 }
 
 /// SSE's `expect_one_value`, as a function of the contents: a problem for every source that does
@@ -349,9 +353,8 @@ fn one_value_problems(what: &str, sources: &[PinSource<'_>]) -> Vec<String> {
     let mut found: BTreeMap<String, Vec<&str>> = BTreeMap::new();
     let mut problems = Vec::new();
     for source in sources {
-        let pattern = regex(source.pattern);
         let mut matched = false;
-        for captures in pattern.captures_iter(source.content) {
+        for captures in source.pattern.captures_iter(source.content) {
             matched = true;
             found
                 .entry(captures[1].to_owned())
@@ -360,8 +363,8 @@ fn one_value_problems(what: &str, sources: &[PinSource<'_>]) -> Vec<String> {
         }
         if !matched {
             problems.push(format!(
-                "{what}: {} does not write it ({pattern})",
-                source.file
+                "{what}: {} does not write it ({})",
+                source.file, source.pattern
             ));
         }
     }
@@ -381,26 +384,30 @@ fn one_value_problems(what: &str, sources: &[PinSource<'_>]) -> Vec<String> {
 
 /// The zig and cargo-zigbuild pins of the action and the release fragment: each version, and the
 /// digest of the `x86_64` archive both name, as (what, action pattern, fragment pattern).
-const ZIGBUILD_PINS: [(&str, &str, &str); 4] = [
+static ZIGBUILD_PINS: [(&str, LazyLock<Regex>, LazyLock<Regex>); 4] = [
     (
         "zig",
-        r#"(?m)^\s*ZIG_VERSION:\s*"?(\d+\.\d+\.\d+)"?\s*$"#,
-        r"(?m)^RUST_RELEASE_ZIG_VERSION := (\S+)$",
+        LazyLock::new(|| regex(r#"(?m)^\s*ZIG_VERSION:\s*"?(\d+\.\d+\.\d+)"?\s*$"#)),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_ZIG_VERSION := (\S+)$")),
     ),
     (
         "zig x86_64 sha256",
-        r"(?m)^\s*ZIG_SHA256:\s*([0-9a-f]{64})\s*$",
-        r"(?m)^RUST_RELEASE_ZIG_SHA256_x86_64 := ([0-9a-f]{64})$",
+        LazyLock::new(|| regex(r"(?m)^\s*ZIG_SHA256:\s*([0-9a-f]{64})\s*$")),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_ZIG_SHA256_x86_64 := ([0-9a-f]{64})$")),
     ),
     (
         "cargo-zigbuild",
-        r#"(?m)^\s*CARGO_ZIGBUILD_VERSION:\s*"?(\d+\.\d+\.\d+)"?\s*$"#,
-        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_VERSION := (\S+)$",
+        LazyLock::new(|| regex(r#"(?m)^\s*CARGO_ZIGBUILD_VERSION:\s*"?(\d+\.\d+\.\d+)"?\s*$"#)),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_VERSION := (\S+)$")),
     ),
     (
         "cargo-zigbuild x86_64 sha256",
-        r"(?m)^\s*CARGO_ZIGBUILD_SHA256:\s*([0-9a-f]{64})\s*$",
-        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := ([0-9a-f]{64})$",
+        LazyLock::new(|| regex(r"(?m)^\s*CARGO_ZIGBUILD_SHA256:\s*([0-9a-f]{64})\s*$")),
+        LazyLock::new(|| {
+            regex(
+                r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := ([0-9a-f]{64})$",
+            )
+        }),
     ),
 ];
 
@@ -498,51 +505,63 @@ fn zigbuild_pin_rules() {
 
 /// The Dockerfile's copies of the release fragment's pins, as (what, Dockerfile pattern, fragment
 /// pattern): each version, and the digest of every archive the build stage downloads.
-const DOCKERFILE_PINS: [(&str, &str, &str); 9] = [
+static DOCKERFILE_PINS: [(&str, LazyLock<Regex>, LazyLock<Regex>); 9] = [
     (
         "zig",
-        r"(?m)^ARG ZIG_VERSION=(\S+)$",
-        r"(?m)^RUST_RELEASE_ZIG_VERSION := (\S+)$",
+        LazyLock::new(|| regex(r"(?m)^ARG ZIG_VERSION=(\S+)$")),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_ZIG_VERSION := (\S+)$")),
     ),
     (
         "zig x86_64 sha256",
-        r"amd64\) zig_arch=x86_64; zig_sha256=(\S+) ;;",
-        r"(?m)^RUST_RELEASE_ZIG_SHA256_x86_64 := (\S+)$",
+        LazyLock::new(|| regex(r"amd64\) zig_arch=x86_64; zig_sha256=(\S+) ;;")),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_ZIG_SHA256_x86_64 := (\S+)$")),
     ),
     (
         "zig aarch64 sha256",
-        r"arm64\) zig_arch=aarch64; zig_sha256=(\S+) ;;",
-        r"(?m)^RUST_RELEASE_ZIG_SHA256_aarch64 := (\S+)$",
+        LazyLock::new(|| regex(r"arm64\) zig_arch=aarch64; zig_sha256=(\S+) ;;")),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_ZIG_SHA256_aarch64 := (\S+)$")),
     ),
     (
         "cargo-zigbuild",
-        r"(?m)^ARG CARGO_ZIGBUILD_VERSION=(\S+)$",
-        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_VERSION := (\S+)$",
+        LazyLock::new(|| regex(r"(?m)^ARG CARGO_ZIGBUILD_VERSION=(\S+)$")),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_VERSION := (\S+)$")),
     ),
     (
         "cargo-zigbuild x86_64 sha256",
-        r"amd64\) zigbuild_asset=x86_64-unknown-linux-musl; zigbuild_sha256=(\S+) ;;",
-        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := (\S+)$",
+        LazyLock::new(|| {
+            regex(r"amd64\) zigbuild_asset=x86_64-unknown-linux-musl; zigbuild_sha256=(\S+) ;;")
+        }),
+        LazyLock::new(|| {
+            regex(r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := (\S+)$")
+        }),
     ),
     (
         "cargo-zigbuild aarch64 sha256",
-        r"arm64\) zigbuild_asset=aarch64-unknown-linux-gnu; zigbuild_sha256=(\S+) ;;",
-        r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_aarch64-unknown-linux-gnu := (\S+)$",
+        LazyLock::new(|| {
+            regex(r"arm64\) zigbuild_asset=aarch64-unknown-linux-gnu; zigbuild_sha256=(\S+) ;;")
+        }),
+        LazyLock::new(|| {
+            regex(r"(?m)^RUST_RELEASE_CARGO_ZIGBUILD_SHA256_aarch64-unknown-linux-gnu := (\S+)$")
+        }),
     ),
     (
         "rust-std",
-        r"(?m)^ARG RUST_VERSION=(\S+)$",
-        r"(?m)^RUST_RELEASE_RUST_STD_VERSION := (\S+)$",
+        LazyLock::new(|| regex(r"(?m)^ARG RUST_VERSION=(\S+)$")),
+        LazyLock::new(|| regex(r"(?m)^RUST_RELEASE_RUST_STD_VERSION := (\S+)$")),
     ),
     (
         "rust-std x86_64 sha256",
-        r"amd64\) triple=x86_64-unknown-linux-musl; std_sha256=(\S+) ;;",
-        r"(?m)^RUST_RELEASE_RUST_STD_SHA256_x86_64-unknown-linux-musl := (\S+)$",
+        LazyLock::new(|| regex(r"amd64\) triple=x86_64-unknown-linux-musl; std_sha256=(\S+) ;;")),
+        LazyLock::new(|| {
+            regex(r"(?m)^RUST_RELEASE_RUST_STD_SHA256_x86_64-unknown-linux-musl := (\S+)$")
+        }),
     ),
     (
         "rust-std aarch64 sha256",
-        r"arm64\) triple=aarch64-unknown-linux-musl; std_sha256=(\S+) ;;",
-        r"(?m)^RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := (\S+)$",
+        LazyLock::new(|| regex(r"arm64\) triple=aarch64-unknown-linux-musl; std_sha256=(\S+) ;;")),
+        LazyLock::new(|| {
+            regex(r"(?m)^RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := (\S+)$")
+        }),
     ),
 ];
 
@@ -815,9 +834,9 @@ fn shellcheck_is_one_version() {
     let problem = hook_version_problem(
         "ShellCheck",
         &repo::read(PRE_COMMIT_CONFIG),
-        SHELLCHECK_HOOK,
+        &SHELLCHECK_HOOK,
         &repo::read(SHELLCHECK_ACTION),
-        SHELLCHECK_PIN,
+        &SHELLCHECK_PIN,
     );
     assert!(problem.is_none(), "{problem:?}");
 }
@@ -832,9 +851,9 @@ fn hook_version_rules() {
         hook_version_problem(
             "ShellCheck",
             hooks,
-            SHELLCHECK_HOOK,
+            &SHELLCHECK_HOOK,
             shellcheck,
-            SHELLCHECK_PIN
+            &SHELLCHECK_PIN
         ),
         None
     );
@@ -844,9 +863,9 @@ fn hook_version_rules() {
             hook_version_problem(
                 "ShellCheck",
                 hooks,
-                SHELLCHECK_HOOK,
+                &SHELLCHECK_HOOK,
                 "        SHELLCHECK_VERSION: v0.10.0\n",
-                SHELLCHECK_PIN,
+                &SHELLCHECK_PIN,
             ),
         ),
         (
@@ -854,14 +873,14 @@ fn hook_version_rules() {
             hook_version_problem(
                 "ShellCheck",
                 &hooks.replace("rev: v0.11.0.1", "rev: v0.12.0.1"),
-                SHELLCHECK_HOOK,
+                &SHELLCHECK_HOOK,
                 shellcheck,
-                SHELLCHECK_PIN,
+                &SHELLCHECK_PIN,
             ),
         ),
         (
             "a missing ShellCheck pin",
-            hook_version_problem("ShellCheck", hooks, SHELLCHECK_HOOK, "", SHELLCHECK_PIN),
+            hook_version_problem("ShellCheck", hooks, &SHELLCHECK_HOOK, "", &SHELLCHECK_PIN),
         ),
     ] {
         assert!(problem.is_some(), "{name} was accepted");
@@ -1078,15 +1097,19 @@ fn always_run_rules() {
     }
 }
 
+/// A tool looked up on `PATH`, or the Go tests' switch that turns a skip into a failure.
+static TOOL_LOOKUP: LazyLock<Regex> = LazyLock::new(|| {
+    regex(
+        r"\bsplit_paths\(|\bvar_os\(\s*\x22PATH\x22|Command::new\(\s*\x22which\x22|\bSDA_REQUIRE[_]TOOLS\b",
+    )
+});
+
 /// Go: `TestToolGateListIsClosed`. No meta-test may skip on a missing tool: none looks a tool up
 /// on `PATH`, since a skip on a missing tool is a pass CI cannot turn into a failure, and none
 /// reads the Go tests' switch that turns such a skip into a failure. A test that needs an
 /// external tool fails without it.
 #[test]
 fn no_meta_test_skips_on_a_missing_tool() {
-    let own_lookup = regex(
-        r"\bsplit_paths\(|\bvar_os\(\s*\x22PATH\x22|Command::new\(\s*\x22which\x22|\bSDA_REQUIRE[_]TOOLS\b",
-    );
     let sources = repo::files_under("meta", &[".rs"]);
     assert!(
         sources.iter().any(|path| path == "meta/tests/toolchain.rs"),
@@ -1094,7 +1117,7 @@ fn no_meta_test_skips_on_a_missing_tool() {
     );
     for path in &sources {
         assert!(
-            !own_lookup.is_match(&repo::read(path)),
+            !TOOL_LOOKUP.is_match(&repo::read(path)),
             "{path} looks a tool up on PATH or reads a skip switch; a meta-test needing a tool \
              must fail without it"
         );
@@ -1107,6 +1130,9 @@ fn no_meta_test_skips_on_a_missing_tool() {
         concat!("Command::new(\x22wh", "ich\x22)"),
         concat!("env::var(\x22SDA_REQUIRE", "_TOOLS\x22)"),
     ] {
-        assert!(own_lookup.is_match(sample), "{sample:?} was not recognised");
+        assert!(
+            TOOL_LOOKUP.is_match(sample),
+            "{sample:?} was not recognised"
+        );
     }
 }

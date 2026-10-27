@@ -40,6 +40,8 @@
 //!
 //! The checks are functions of the text, and each is also run on input built to break it.
 
+use std::sync::LazyLock;
+
 use meta::repo;
 use regex::Regex;
 
@@ -61,6 +63,9 @@ fn pattern(text: &str) -> Regex {
     Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
 }
 
+/// A function declaration, capturing its name.
+static FUNCTION_NAME: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bfn\s+(\w+)"));
+
 /// The text without its line comments, so a comment naming a method is not counted; the line
 /// numbers stay.
 fn code(text: &str) -> String {
@@ -78,7 +83,7 @@ fn code(text: &str) -> String {
 
 /// The name of the function whose body holds byte `offset`: the last `fn` declared before it.
 fn enclosing_fn(text: &str, offset: usize) -> String {
-    pattern(r"\bfn\s+(\w+)")
+    FUNCTION_NAME
         .captures_iter(&text[..offset])
         .last()
         .map(|captures| captures[1].to_owned())
@@ -130,32 +135,39 @@ fn exactly_once(
     )]
 }
 
+/// A request being built: a `Request` constructor or the `request::Builder` type.
+static REQUEST_BUILT: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\bRequest\s*::\s*\w+|\brequest\s*::\s*Builder\b"));
+/// The `GET` method constant.
+static METHOD_GET: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bMethod\s*::\s*GET\b"));
+/// The `HEAD` method constant.
+static METHOD_HEAD: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bMethod\s*::\s*HEAD\b"));
+/// Any item named through `Method`.
+static METHOD_ITEM: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bMethod\s*::\s*\w+"));
+/// The end of a `Method` item that is one of the two read-only constants.
+static READ_ONLY_METHOD_END: LazyLock<Regex> = LazyLock::new(|| pattern(r"::\s*(?:GET|HEAD)$"));
+/// A method setter, with the value it assigns when there is one.
+static METHOD_SETTER: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\bmethod_mut\s*\(\s*\)(?:\s*=\s*[^;]*)?"));
+/// A method set another way: a builder's `.method(..)`, a `Parts` field, a parsed name, an
+/// alias or a write method's name as a string.
+static OTHER_METHOD: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(
+        r"\.method\s*\(\s*[^)\s]|\.method\s*=[^=]|\.parse\s*::\s*<\s*Method|\bMethod\s+as\b|\x22(?:POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE)\x22",
+    )
+});
+
 /// The method rules: one builder, `GET` in it, `HEAD` in the ping, nothing else.
 fn method_problems(files: &[(String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
     // One request built, in one place.
-    problems.extend(exactly_once(
-        files,
-        &pattern(r"\bRequest\s*::\s*\w+|\brequest\s*::\s*Builder\b"),
-        CLIENT,
-        "request",
-    ));
-    problems.extend(exactly_once(
-        files,
-        &pattern(r"\bMethod\s*::\s*GET\b"),
-        CLIENT,
-        "request",
-    ));
-    problems.extend(exactly_once(
-        files,
-        &pattern(r"\bMethod\s*::\s*HEAD\b"),
-        CLIENT,
-        "ping",
-    ));
+    problems.extend(exactly_once(files, &REQUEST_BUILT, CLIENT, "request"));
+    problems.extend(exactly_once(files, &METHOD_GET, CLIENT, "request"));
+    problems.extend(exactly_once(files, &METHOD_HEAD, CLIENT, "ping"));
     // No other method is named: only the two constants, so no conversion (`try_from`,
     // `from_bytes`) and no other constant.
-    for (path, line, function, text) in sites(files, &pattern(r"\bMethod\s*::\s*\w+")) {
-        if !pattern(r"::\s*(?:GET|HEAD)$").is_match(&text) {
+    for (path, line, function, text) in sites(files, &METHOD_ITEM) {
+        if !READ_ONLY_METHOD_END.is_match(&text) {
             problems.push(format!(
                 "{path}:{line} in {function}: {text}: not a read-only method"
             ));
@@ -164,9 +176,7 @@ fn method_problems(files: &[(String, String)]) -> Vec<String> {
     // Exactly two method setters, each assigning its constant: `GET` in the builder and `HEAD`
     // in the ping. A setter fed from a parameter would let a caller choose the method.
     let mut setters = Vec::new();
-    for (path, line, function, text) in
-        sites(files, &pattern(r"\bmethod_mut\s*\(\s*\)(?:\s*=\s*[^;]*)?"))
-    {
+    for (path, line, function, text) in sites(files, &METHOD_SETTER) {
         let assigned = text
             .split_once('=')
             .map(|(_, value)| value.trim().to_owned());
@@ -195,10 +205,7 @@ fn method_problems(files: &[(String, String)]) -> Vec<String> {
         ));
     }
     // Nor set another way: a builder's `.method(..)`, a `Parts` field, a parsed name, an alias.
-    let other_method = pattern(
-        r"\.method\s*\(\s*[^)\s]|\.method\s*=[^=]|\.parse\s*::\s*<\s*Method|\bMethod\s+as\b|\x22(?:POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE)\x22",
-    );
-    for (path, line, function, text) in sites(files, &other_method) {
+    for (path, line, function, text) in sites(files, &OTHER_METHOD) {
         problems.push(format!(
             "{path}:{line} in {function}: {text}: not a read-only method"
         ));
@@ -206,16 +213,20 @@ fn method_problems(files: &[(String, String)]) -> Vec<String> {
     problems
 }
 
+/// A request path: an API call's path argument or a path joined onto the version prefix.
+static REQUEST_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(
+        r#"(?:\b(?:get_list|get_object|get)\(\s*(?:&format!\(\s*)?|join_path\(&\[(?:[^\]]*,\s*)?)"(/[^"]*)""#,
+    )
+});
+
 /// The path rule: only the daemon's paths, and the pattern still sees them.
 fn path_problems(files: &[(String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
     // Only the daemon's paths.
-    let request_path = pattern(
-        r#"(?:\b(?:get_list|get_object|get)\(\s*(?:&format!\(\s*)?|join_path\(&\[(?:[^\]]*,\s*)?)"(/[^"]*)""#,
-    );
     let mut paths = 0;
     for (path, text) in files {
-        for captures in request_path.captures_iter(text) {
+        for captures in REQUEST_PATH.captures_iter(text) {
             paths += 1;
             if !PATHS.contains(&&captures[1]) {
                 problems.push(format!(
@@ -235,6 +246,13 @@ fn path_problems(files: &[(String, String)]) -> Vec<String> {
     problems
 }
 
+/// An environment read or a TCP dial: anything but the configured unix socket.
+static ENV_OR_TCP: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\benv\s*::\s*var|\bTcpStream\b|DOCKER_"));
+/// The `DockerApi` trait's block, up to its closing brace.
+static DOCKER_API_TRAIT: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(?s)pub trait DockerApi\b.*?\n\}"));
+
 /// What is wrong with the client's sources, given as `(path, text)` pairs.
 fn problems(sources: &[(String, String)]) -> Vec<String> {
     let files: Vec<(String, String)> = sources
@@ -245,8 +263,7 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     problems.extend(method_problems(&files));
     problems.extend(path_problems(&files));
     // Neither the environment nor TCP.
-    let outside = pattern(r"\benv\s*::\s*var|\bTcpStream\b|DOCKER_");
-    for (path, line, function, text) in sites(&files, &outside) {
+    for (path, line, function, text) in sites(&files, &ENV_OR_TCP) {
         problems.push(format!(
             "{path}:{line} in {function}: {text}: dials only the unix socket"
         ));
@@ -256,10 +273,10 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     // The trait's calls.
     match files.iter().find(|(path, _)| path == API) {
         Some((_, text)) => {
-            let declared: Vec<String> = pattern(r"(?s)pub trait DockerApi\b.*?\n\}")
+            let declared: Vec<String> = DOCKER_API_TRAIT
                 .find(text)
                 .map(|block| {
-                    pattern(r"\bfn\s+(\w+)")
+                    FUNCTION_NAME
                         .captures_iter(block.as_str())
                         .map(|captures| captures[1].to_owned())
                         .collect()
@@ -276,13 +293,15 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     problems
 }
 
+/// The SDK or the harness, by name.
+static SDK_OR_HARNESS: LazyLock<Regex> = LazyLock::new(|| pattern(r"\b(bollard|testenv)\b"));
+
 /// Files under `src/` that name the SDK or the harness, in code or in a comment.
 fn sdk_problems(files: &[(String, String)]) -> Vec<String> {
-    let sdk = pattern(r"\b(bollard|testenv)\b");
     let mut problems = Vec::new();
     for (path, text) in files {
         for (index, line) in text.lines().enumerate() {
-            if let Some(found) = sdk.find(line) {
+            if let Some(found) = SDK_OR_HARNESS.find(line) {
                 problems.push(format!("{path}:{}: names {}", index + 1, found.as_str()));
             }
         }

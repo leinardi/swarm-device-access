@@ -25,6 +25,8 @@
 //! under `src/processor/` lands a phase earlier and publishes nothing. The checks are functions of the text, each also run on input built to
 //! break it.
 
+use std::sync::LazyLock;
+
 use meta::repo;
 use regex::Regex;
 
@@ -37,9 +39,12 @@ const PUBLISHER: &str = "fn publish_and_reconcile(";
 /// Where `publish` is defined; the scan must read it.
 const DEFINITION: &str = "src/config/mod.rs";
 
-fn reference() -> Regex {
-    Regex::new(r"(?:\.|::)\s*publish\b").unwrap_or_else(|error| panic!("pattern: {error}"))
+fn pattern(text: &str) -> Regex {
+    Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
 }
+
+/// A reference to `publish`, as a method or a path.
+static PUBLISH_REFERENCE: LazyLock<Regex> = LazyLock::new(|| pattern(r"(?:\.|::)\s*publish\b"));
 
 /// Whether a Rust file is test code: unit-test modules in their own file, integration tests,
 /// and the test-only crates.
@@ -55,13 +60,10 @@ fn is_test_code(path: &str) -> bool {
 /// and character literals are blanked first, so neither a comment nor a `//` inside a string
 /// hides or fakes a reference.
 fn references(text: &str) -> Vec<usize> {
-    // Compiled once per file, not per line: a debug-build regex compile costs far more than
-    // matching every line of the file.
-    let reference = reference();
     code_only(text)
         .lines()
         .enumerate()
-        .filter(|(_, line)| reference.is_match(line))
+        .filter(|(_, line)| PUBLISH_REFERENCE.is_match(line))
         .map(|(index, _)| index + 1)
         .collect()
 }

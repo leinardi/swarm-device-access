@@ -34,6 +34,7 @@
 //! The checks are functions of the text, and each is also run on input built to break it.
 
 use std::fs;
+use std::sync::LazyLock;
 
 use meta::repo;
 use regex::Regex;
@@ -52,21 +53,23 @@ const ALLOWLIST: &[&str] = &["src/cgroup/bpf_sys.rs"];
 /// (`rustflags`) and the make targets that run cargo (`RUSTFLAGS`). A missing file is fine.
 const LEVEL_OVERRIDES: &[&str] = &[".cargo/config.toml", ".cargo/config", "Makefile"];
 
-fn word() -> Regex {
-    Regex::new(&format!(r"\b{LINT}\b")).unwrap_or_else(|error| panic!("lint pattern: {error}"))
+fn pattern(text: &str) -> Regex {
+    Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
 }
 
+/// The lint's name as a whole word.
+static LINT_WORD: LazyLock<Regex> = LazyLock::new(|| pattern(&format!(r"\b{LINT}\b")));
+
 /// The one form the allowlisted module may use: a file-level expect with a non-empty reason.
-fn file_level_expect() -> Regex {
-    Regex::new(&format!(
+static FILE_LEVEL_EXPECT: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(&format!(
         r#"(?m)^#!\[expect\(\s*{LINT}\s*,\s*reason\s*=\s*"[^"]+"\s*\)\]"#
     ))
-    .unwrap_or_else(|error| panic!("expect pattern: {error}"))
-}
+});
 
 /// What is wrong with how one Rust file names the lint, if anything.
 fn file_problems(path: &str, text: &str) -> Vec<String> {
-    let mentions: Vec<usize> = word()
+    let mentions: Vec<usize> = LINT_WORD
         .find_iter(text)
         .map(|found| text[..found.start()].matches('\n').count() + 1)
         .collect();
@@ -79,7 +82,7 @@ fn file_problems(path: &str, text: &str) -> Vec<String> {
             .map(|line| format!("{path}:{line}: names {LINT}, which only {ALLOWLIST:?} may lift"))
             .collect();
     }
-    let expects = file_level_expect().find_iter(text).count();
+    let expects = FILE_LEVEL_EXPECT.find_iter(text).count();
     if expects == 1 && mentions.len() == 1 {
         return Vec::new();
     }
@@ -91,17 +94,15 @@ fn file_problems(path: &str, text: &str) -> Vec<String> {
 }
 
 /// A use of the `libc` crate in code: a path through it, an import or an `extern crate`.
-fn libc_use() -> Regex {
-    Regex::new(r"\blibc\s*::|\buse\s+libc\b|\bextern\s+crate\s+libc\b")
-        .unwrap_or_else(|error| panic!("libc pattern: {error}"))
-}
+static LIBC_USE: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\blibc\s*::|\buse\s+libc\b|\bextern\s+crate\s+libc\b"));
 
 /// Where a Rust file outside the allowlist uses `libc`, if it does.
 fn libc_problems(path: &str, text: &str) -> Vec<String> {
     if ALLOWLIST.contains(&path) {
         return Vec::new();
     }
-    libc_use()
+    LIBC_USE
         .find_iter(text)
         .map(|found| {
             let line = text[..found.start()].matches('\n').count() + 1;
@@ -156,7 +157,7 @@ fn nothing_outside_the_manifest_names_the_lint() {
             continue;
         };
         assert!(
-            !word().is_match(&text),
+            !LINT_WORD.is_match(&text),
             "{file} names {LINT}: rustflags must not change its level"
         );
     }
@@ -183,7 +184,7 @@ fn only_the_allowlisted_module_calls_libc() {
     let files = repo::tracked_or_new(&["*.rs"]);
     let allowed = ALLOWLIST[0];
     assert!(
-        libc_use().is_match(&repo::read(allowed)),
+        LIBC_USE.is_match(&repo::read(allowed)),
         "{allowed} no longer calls libc: the scan would pass on nothing"
     );
     // This file names libc in its fixtures; it calls nothing.
