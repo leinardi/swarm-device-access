@@ -210,3 +210,54 @@ fn ci_structure_rules() {
         "a workflow without ci-result: {problems:?}"
     );
 }
+
+/// Rustdoc warnings must fail both the local verify target and the required Rust CI job.
+fn rustdoc_gate_present(fragment: &str, workflow: &str) -> bool {
+    let verify = fragment.lines().any(|line| {
+        line.starts_with("verify-rust:")
+            && line.split_whitespace().any(|target| target == "rust-doc")
+    });
+    let recipe = fragment.contains(
+        "rust-doc: ## Check Rust documentation, warnings as errors\n\tRUSTDOCFLAGS=\"$(RUSTDOCFLAGS) -D warnings\" $(CARGO) doc --workspace --all-features --no-deps --locked\n",
+    );
+    let workflow: Value = serde_yaml_ng::from_str(workflow)
+        .unwrap_or_else(|error| panic!("parse the CI workflow: {error}"));
+    let ci = workflow
+        .get("jobs")
+        .and_then(|jobs| jobs.get("rust"))
+        .and_then(|job| job.get("steps"))
+        .and_then(Value::as_sequence)
+        .is_some_and(|steps| {
+            steps.iter().any(|step| {
+                step.get("run").and_then(Value::as_str) == Some("make rust-doc")
+                    && step.get("if").is_none()
+                    && step.get("continue-on-error").is_none()
+            })
+        });
+    verify && recipe && ci
+}
+
+#[test]
+fn rust_documentation_is_a_required_gate() {
+    assert!(rustdoc_gate_present(
+        &repo::read(".mk/rust.mk"),
+        &repo::read(CI_WORKFLOW),
+    ));
+}
+
+/// Negative controls: a gate absent from verify or CI, or one allowing warnings, must fail.
+#[test]
+fn weakened_rustdoc_gates_are_refused() {
+    let fragment = repo::read(".mk/rust.mk");
+    let workflow = repo::read(CI_WORKFLOW);
+    for broken in [
+        fragment.replace("rust-test rust-doc", "rust-test"),
+        fragment.replace(" -D warnings", ""),
+    ] {
+        assert!(!rustdoc_gate_present(&broken, &workflow));
+    }
+    assert!(!rustdoc_gate_present(
+        &fragment,
+        &workflow.replace("run: make rust-doc", "run: echo missing documentation gate"),
+    ));
+}

@@ -24,7 +24,7 @@
 //! 1. Identify the launcher's own container from its mount table, and its content-addressed
 //!    image ID (a tag would let the daemon run a different image than the launcher).
 //! 2. Remove the daemon a previous launcher left behind, only when its owner is confirmed gone
-//!    ([`stale`]).
+//!    (`stale`).
 //! 3. Create the daemon from [`spec::daemon_spec`], attach to its output and start copying it,
 //!    register the wait for its removal, and only then start it, in the order the `docker run`
 //!    CLI uses: nothing the daemon prints, nor its exit, is missed.

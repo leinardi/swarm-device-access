@@ -53,17 +53,20 @@ pub enum LaunchError {
     /// `start daemon container: <cause>`.
     Start(Error),
     /// Go's `abandon`: `errors.Join(cause, removeErr)` of a setup failure whose daemon could not
-    /// be removed.
+    /// be removed. [`std::error::Error::source`] exposes `cause`; `remove` retains the cleanup
+    /// failure separately.
     Abandoned {
         cause: Box<LaunchError>,
         remove: RemoveError,
     },
-    /// Go's `errLogStream`, joined with the shutdown's error.
+    /// Go's `errLogStream`, joined with the shutdown's error. The stream failure is text only;
+    /// [`std::error::Error::source`] exposes the typed shutdown error, when present.
     LogStream {
         copy: String,
         shutdown: Option<Box<LaunchError>>,
     },
-    /// Go's `errWaitStream`, joined with the removal's error.
+    /// Go's `errWaitStream`, joined with the removal's error. The stream failure is text only;
+    /// [`std::error::Error::source`] exposes the typed removal error, when present.
     WaitStream {
         wait: String,
         removal: Option<BudgetExceeded>,
@@ -120,7 +123,29 @@ impl fmt::Display for LaunchError {
     }
 }
 
-impl std::error::Error for LaunchError {}
+impl std::error::Error for LaunchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Identify(source) => Some(source),
+            Self::InspectSelf { source, .. }
+            | Self::List(source)
+            | Self::Create(source)
+            | Self::Start(source) => Some(source),
+            Self::Stale(source) => Some(source),
+            Self::RemoveStale { source, .. } => Some(source),
+            Self::Attach(source) | Self::Wait(source) => Some(source),
+            Self::Abandoned { cause, .. } => Some(cause.as_ref()),
+            Self::LogStream { shutdown, .. } => shutdown
+                .as_deref()
+                .map(|error| error as &dyn std::error::Error),
+            Self::WaitStream { removal, .. } => removal
+                .as_ref()
+                .map(|error| error as &dyn std::error::Error),
+            Self::Budget(source) => Some(source),
+            Self::NoImageId(_) => None,
+        }
+    }
+}
 
 /// Why a daemon container found by name was left alone.
 #[derive(Debug)]
@@ -175,7 +200,17 @@ impl fmt::Display for StaleError {
     }
 }
 
-impl std::error::Error for StaleError {}
+impl std::error::Error for StaleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InspectOwner { source, .. } => Some(source),
+            Self::Foreign { .. }
+            | Self::NoOwner { .. }
+            | Self::OwnerState { .. }
+            | Self::OwnedByRunningLauncher { .. } => None,
+        }
+    }
+}
 
 /// `remove container <short>: <cause>`.
 #[derive(Debug)]
@@ -195,7 +230,11 @@ impl fmt::Display for RemoveError {
     }
 }
 
-impl std::error::Error for RemoveError {}
+impl std::error::Error for RemoveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
 
 /// Why a stream was not established.
 #[derive(Debug)]
@@ -218,7 +257,15 @@ impl fmt::Display for EstablishError {
     }
 }
 
-impl std::error::Error for EstablishError {}
+impl std::error::Error for EstablishError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Canceled(source) => Some(source),
+            Self::Failed(source) => Some(source),
+            Self::Timeout => None,
+        }
+    }
+}
 
 /// Go's `errShutdownBudget`, `daemon not removed within the shutdown budget (<budget>)`, joined
 /// with the last inspect's error when the last inspect of the removal failed: a permission or
@@ -254,4 +301,115 @@ fn write_joined<const N: usize>(
     formatter.write_str(&errors::join(parts).unwrap_or_default())
 }
 
-impl std::error::Error for BudgetExceeded {}
+impl std::error::Error for BudgetExceeded {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.last_inspect
+            .as_ref()
+            .map(|error| error as &dyn std::error::Error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use super::*;
+
+    #[test]
+    fn launch_errors_expose_their_typed_sources_without_changing_text() {
+        let error = LaunchError::RemoveStale {
+            id: "daemon".to_owned(),
+            source: RemoveError {
+                id: "daemon".to_owned(),
+                source: Error::deadline_exceeded(),
+            },
+        };
+        assert_eq!(
+            error.to_string(),
+            "remove stale daemon daemon: remove container daemon: context deadline exceeded"
+        );
+        let remove = error
+            .source()
+            .unwrap()
+            .downcast_ref::<RemoveError>()
+            .unwrap();
+        let source = remove.source().unwrap().downcast_ref::<Error>().unwrap();
+        assert_eq!(source.kind(), crate::docker::ErrorKind::DeadlineExceeded);
+        assert!(EstablishError::Timeout.source().is_none());
+        assert!(LaunchError::NoImageId("tag".to_owned()).source().is_none());
+        for cause in [ContextError::Canceled, ContextError::DeadlineExceeded] {
+            let error = EstablishError::Canceled(cause);
+            let source = error
+                .source()
+                .unwrap()
+                .downcast_ref::<ContextError>()
+                .unwrap();
+            assert_eq!(*source, cause);
+            assert_eq!(source.to_string(), cause.text());
+        }
+    }
+
+    #[test]
+    fn abandoned_launch_keeps_primary_and_cleanup_causes() {
+        let error = LaunchError::Abandoned {
+            cause: Box::new(LaunchError::Start(Error::deadline_exceeded())),
+            remove: RemoveError {
+                id: "daemon".to_owned(),
+                source: Error::context(ContextError::Canceled),
+            },
+        };
+        assert!(matches!(
+            error.source().unwrap().downcast_ref::<LaunchError>(),
+            Some(LaunchError::Start(_))
+        ));
+        let LaunchError::Abandoned { remove, .. } = &error else {
+            panic!("expected abandoned launch");
+        };
+        assert_eq!(remove.source().unwrap().to_string(), "context canceled");
+        assert_eq!(
+            error.to_string(),
+            "start daemon container: context deadline exceeded\nremove container daemon: context canceled"
+        );
+    }
+
+    #[test]
+    fn owner_stream_and_budget_failures_retain_typed_causes() {
+        let owner = StaleError::InspectOwner {
+            owner: "launcher".to_owned(),
+            id: "daemon".to_owned(),
+            source: Error::deadline_exceeded(),
+        };
+        assert!(owner.source().unwrap().is::<Error>());
+        let stream = EstablishError::Failed(Error::deadline_exceeded());
+        assert!(stream.source().unwrap().is::<Error>());
+
+        let budget = BudgetExceeded {
+            budget: Duration::from_secs(20),
+            last_inspect: Some(Error::deadline_exceeded()),
+        };
+        assert!(budget.source().unwrap().is::<Error>());
+        let wait = LaunchError::WaitStream {
+            wait: "EOF".to_owned(),
+            removal: Some(budget),
+        };
+        assert!(wait.source().unwrap().is::<BudgetExceeded>());
+        let log = LaunchError::LogStream {
+            copy: "EOF".to_owned(),
+            shutdown: Some(Box::new(LaunchError::Start(Error::deadline_exceeded()))),
+        };
+        assert!(log.source().unwrap().is::<LaunchError>());
+        let without_cleanup = LaunchError::LogStream {
+            copy: "EOF".to_owned(),
+            shutdown: None,
+        };
+        assert!(without_cleanup.source().is_none());
+        assert!(
+            BudgetExceeded {
+                budget: Duration::from_secs(20),
+                last_inspect: None,
+            }
+            .source()
+            .is_none()
+        );
+    }
+}

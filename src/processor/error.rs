@@ -33,7 +33,8 @@ pub enum Error {
     /// Go's `ErrContainerGone`: Docker does not know the container and nothing is left to revoke;
     /// `container no longer exists: <inspect error>`.
     ContainerGone(Box<Error>),
-    /// Go's `errors.Join`: the texts on separate lines.
+    /// Go's `errors.Join`: the texts on separate lines. [`std::error::Error::source`] exposes the
+    /// first error; this variant retains every branch for callers that need to inspect them all.
     Joined(Vec<Error>),
     /// `container "<id>": pidfd_open(<pid>): <errno>`.
     Pin { id: String, source: PinError },
@@ -80,6 +81,7 @@ pub enum Error {
         source: Box<Error>,
     },
     /// `container "<id>" (reason incomplete_device_set, retryable): <the device errors joined>`.
+    /// [`std::error::Error::source`] exposes the first device error; `errors` retains them all.
     Incomplete {
         id: String,
         errors: Vec<DeviceError>,
@@ -282,4 +284,98 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Inspect { source, .. } => Some(source),
+            Self::ContainerGone(source) | Self::Retryable { source, .. } => Some(source.as_ref()),
+            Self::Joined(errors) => errors.first().map(|error| error as &dyn std::error::Error),
+            Self::Pin { source, .. } | Self::PinnedGone { source, .. } => Some(source),
+            Self::ProcCgroup { source, .. } => Some(source),
+            Self::OpenCgroup(source) | Self::RevokeOpen { source, .. } => Some(source),
+            Self::SetRules(source)
+            | Self::Revoke { source, .. }
+            | Self::RevokeMoved { source, .. } => Some(source.as_ref()),
+            Self::Verify { cause, .. } => match cause {
+                VerifyCause::Inspect(source) => Some(source.as_ref()),
+                VerifyCause::Membership(source) => Some(source),
+            },
+            Self::Incomplete { errors, .. } => {
+                errors.first().map(|error| error as &dyn std::error::Error)
+            }
+            Self::LifecycleChanged { .. } | Self::NotInCgroup { .. } | Self::Canceled => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use super::*;
+
+    #[test]
+    fn wrapped_errors_expose_their_typed_sources_without_changing_text() {
+        let error = Error::ContainerGone(Box::new(Error::Inspect {
+            id: "container".to_owned(),
+            source: docker::Error::deadline_exceeded(),
+        }));
+        assert_eq!(
+            error.to_string(),
+            "container no longer exists: inspect container \"container\": context deadline exceeded"
+        );
+        let inspect = error.source().unwrap().downcast_ref::<Error>().unwrap();
+        let source = inspect
+            .source()
+            .unwrap()
+            .downcast_ref::<docker::Error>()
+            .unwrap();
+        assert_eq!(source.kind(), ErrorKind::DeadlineExceeded);
+        assert!(Error::Canceled.source().is_none());
+    }
+
+    #[test]
+    fn joined_errors_expose_the_first_cause_and_retain_all_branches() {
+        let error = Error::Joined(vec![
+            Error::Canceled,
+            Error::NotInCgroup {
+                id: "container".to_owned(),
+                pid: 42,
+            },
+        ]);
+        assert!(matches!(
+            error.source().unwrap().downcast_ref::<Error>(),
+            Some(Error::Canceled)
+        ));
+        assert!(error.is_not_in_cgroup());
+        assert!(Error::Joined(Vec::new()).source().is_none());
+    }
+
+    #[test]
+    fn verification_and_incomplete_errors_expose_their_first_cause() {
+        let verify = Error::Verify {
+            id: "container".to_owned(),
+            cause: VerifyCause::Inspect(Box::new(Error::Canceled)),
+        };
+        assert!(matches!(
+            verify.source().unwrap().downcast_ref::<Error>(),
+            Some(Error::Canceled)
+        ));
+        let incomplete = Error::Incomplete {
+            id: "container".to_owned(),
+            errors: vec![DeviceError::MountSourceGone("/dev/missing".to_owned())],
+        };
+        assert!(matches!(
+            incomplete.source().unwrap().downcast_ref::<DeviceError>(),
+            Some(DeviceError::MountSourceGone(path)) if path == "/dev/missing"
+        ));
+        assert!(
+            Error::Incomplete {
+                id: "container".to_owned(),
+                errors: Vec::new(),
+            }
+            .source()
+            .is_none()
+        );
+    }
+}

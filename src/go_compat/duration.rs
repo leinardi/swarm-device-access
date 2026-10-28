@@ -17,7 +17,7 @@
 // Adapted from swarm-scheduler-exporter/src/go_compat/duration.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! Go's `time.Duration`: [`format`] is `Duration.String` (`1h2m3.5s`, `1.5µs`, `0s`) and
+//! Go's `time.Duration`: [`format()`] is `Duration.String` (`1h2m3.5s`, `1.5µs`, `0s`) and
 //! [`parse`] is `time.ParseDuration`. A duration is an `i64` of nanoseconds, as Go's is; the whole
 //! range prints and parses, `-2562047h47m16.854775808s` included.
 

@@ -219,6 +219,96 @@ async fn reload_invalid_keeps_store_and_logger() {
     assert!(env.logger_config().is_empty());
 }
 
+/// A writer must not wait forever if a future loader rejects the FIFO without opening it.
+fn open_fifo_writer(
+    path: &std::path::Path,
+    timeout: std::time::Duration,
+) -> std::io::Result<std::fs::File> {
+    use rustix::fs::{Mode, OFlags};
+    use rustix::io::Errno;
+    use tokio::time::Instant;
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        match rustix::fs::open(
+            path,
+            OFlags::WRONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        ) {
+            Ok(fd) => return Ok(std::fs::File::from(fd)),
+            Err(Errno::NXIO) => {
+                if Instant::now() >= deadline {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("no reader opened FIFO {}", path.display()),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+/// A config read waiting on I/O must not stop timers on the current-thread runtime.
+#[tokio::test]
+async fn reload_keeps_async_work_running_during_a_blocked_read() {
+    use std::io::Write as _;
+    use std::time::Duration;
+
+    let dir = crate::test_support::TempDir::new();
+    let fifo = dir.path().join("config.fifo");
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        &fifo,
+        rustix::fs::FileType::Fifo,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        0,
+    )
+    .unwrap();
+    let mut env = ReloadEnv::new(&default_settings(), &[], "policy-mode: all\n");
+    env.reloader.path = fifo.to_str().unwrap().to_owned();
+    let (opened, reader_ready) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        let mut file = open_fifo_writer(&fifo, Duration::from_secs(5)).unwrap();
+        opened.send(()).unwrap();
+        // Release even with the old blocking implementation, so its negative control fails
+        // instead of hanging the test process forever.
+        let responsive = released.recv_timeout(Duration::from_secs(5)).is_ok();
+        file.write_all(b"policy-mode: opt-in\n").unwrap();
+        responsive
+    });
+    let heartbeat = async {
+        reader_ready.await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = release.send(());
+    };
+    let (result, ()) = tokio::join!(env.reloader.reload(), heartbeat);
+    result.unwrap();
+    assert!(
+        writer.join().unwrap(),
+        "config I/O blocked the async worker"
+    );
+    assert_eq!(env.store.load().policy.mode(), Mode::OptIn);
+}
+
+#[test]
+fn fifo_writer_times_out_without_a_reader() {
+    let dir = crate::test_support::TempDir::new();
+    let fifo = dir.path().join("no-reader.fifo");
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        &fifo,
+        rustix::fs::FileType::Fifo,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        0,
+    )
+    .unwrap();
+    let error = open_fifo_writer(&fifo, std::time::Duration::ZERO).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+}
+
 /// The rejection texts are Go's.
 #[tokio::test]
 async fn reload_errors_read_as_go_s() {
