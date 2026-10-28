@@ -69,8 +69,8 @@ commit when a reused component changes or an upstream fix is taken.
 Log lines, error texts, exit codes, metrics and Docker Engine requests are those of 1.x. A change
 that cannot keep one adds a numbered entry to the README's
 [Migrating from 1.x](README.md#-migrating-from-1x) table in the same commit. `AGENTS.md` lists the
-project skills (`rust-style-guide`, `trust-boundary`, `adversarial-review`) that hold the coding,
-fail-closed and review rules.
+project skills (`trust-boundary`, `adversarial-review`) that hold the fail-closed and review rules.
+General Rust coding guidance lives in the maintainer's user-level skills.
 
 ## Commit messages
 

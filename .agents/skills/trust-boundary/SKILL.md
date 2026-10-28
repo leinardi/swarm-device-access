@@ -31,8 +31,8 @@ not widen it in the meantime.
 
 ## Invariants of the Rust code
 
-Load `rust-style-guide` beside this skill for a `.rs` file. The rules below are the 1.x rules (the
-README's *Migrating from 1.x* lists the only intended differences); the Rust code reaches the
+Use user-level Rust skills alongside this skill for a `.rs` file. The rules below are the 1.x rules
+(the README's *Migrating from 1.x* lists the only intended differences); the Rust code reaches the
 kernel and the Engine directly, where the 1.x Go libraries hid it, so it adds these:
 
 - **No `unsafe` outside `src/cgroup/bpf_sys.rs`.** The workspace denies `unsafe_code`, that one
