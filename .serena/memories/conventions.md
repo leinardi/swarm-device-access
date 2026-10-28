@@ -12,7 +12,7 @@
   `disallowed_methods` for wall-clock reads, `allow_attributes`). `-D warnings` in the gates.
 - Only `#[expect(lint, reason = "...")]`; counted against `.suppressions-baseline`
   (`scripts/check-suppressions.sh --update`, committed with the change).
-- Full rules: the `rust-style-guide` skill.
+- Project rules: `AGENTS.md`; general guidance: user-level Rust skills.
 
 ## Copyright header
 

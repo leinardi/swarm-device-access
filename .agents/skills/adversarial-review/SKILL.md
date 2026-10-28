@@ -3,7 +3,7 @@ name: adversarial-review
 description: >
   Adversarial code review of changes to swarm-device-access — working tree, staged
   diff, a branch vs master, a commit range, or a PR — in any language (Rust, bash,
-  YAML, Dockerfile, Makefile, docs). Loads rust-style-guide for Rust and
+  YAML, Dockerfile, Makefile, docs). Uses user-level Rust skills for Rust and loads
   trust-boundary for config, policy, label, launcher and deployment paths, hunts for
   real defects, device-access widening and drift from the 1.x contract, checks the
   reuse ledger in docs/rust-port.md, then reports ranked findings with a verdict. Use when
@@ -73,13 +73,13 @@ green. Load only what the diff touches.
 
 | Changed path | Load skill | It owns |
 | --- | --- | --- |
-| any `**/*.rs`, `Cargo.toml` (any member), `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `rust-style-guide`, and `docs/rust-port.md` (decisions, crates, reuse ledger) | the lint set, `#[expect]` and the ratchet, the single unsafe module, error and log text as the 1.x contract, the Docker read/write split, the blocking transaction, Go test provenance, the reuse ledger |
+| any `**/*.rs`, `Cargo.toml` (any member), `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | user-level Rust skills, `AGENTS.md`, and `docs/rust-port.md` (decisions, crates, reuse ledger) | the lint set, `#[expect]` and the ratchet, the single unsafe module, error and log text as the 1.x contract, the Docker read/write split, the blocking transaction, Go test provenance, the reuse ledger |
 | `src/config/**`, `src/policy/**`, `src/processor/**` (label handling, rule collection), the CLI and `SIGHUP` reload path (`src/cli.rs`, `src/cli/settings.rs`, `src/run.rs`), `src/launcher/**`, the HTTP server (`src/server.rs`, `src/server/**`), `deployments/**` (including `deployments/docker/Dockerfile`), `examples/**` | `trust-boundary` | fail-closed config and mode, label parsing, `/dev`-only rules, reload safety, image privilege, listeners |
-| `src/cgroup/**` | `rust-style-guide` + the note below | NVIDIA-derived BPF/cgroup code; `src/cgroup/bpf_sys.rs` is the one audited `unsafe` module |
-| `meta/**`, `testenv/**` | `rust-style-guide` (§14); the comment heading each test | a meta-test that can skip or pass on nothing is a finding; the integration harness's image identity check |
+| `src/cgroup/**` | user-level Rust skills, `AGENTS.md` + the note below | NVIDIA-derived BPF/cgroup code; `src/cgroup/bpf_sys.rs` is the one audited `unsafe` module |
+| `meta/**`, `testenv/**` | `AGENTS.md`; the comment heading each test | a meta-test that can skip or pass on nothing is a finding; the integration harness's image identity check |
 | `tests/testdata/**` | `docs/rust-port.md` (Go golden captures) | frozen 1.x captures: an edited or regenerated one is a finding unless it comes from running the 1.x code |
 | `scripts/check-*.sh` | the script's header comment and its meta-test (`meta/tests/suppressions.rs`, `meta/tests/license_headers.rs`) | the check still fails on what it exists to stop |
-| `.pre-commit-config.yaml`, `droast.toml`, `.suppressions-baseline`, `[workspace.lints]`, `clippy.toml` | `rust-style-guide` (§1, §2, the ratchet); `meta/tests/toolchain.rs`, `meta/tests/vacuous_flags.rs`, `meta/tests/ci_gates.rs`, `meta/tests/dockerfiles.rs`, `meta/tests/workspace_lints.rs` | no lint disabled or narrowed, no hook dropped; §5 (c) |
+| `.pre-commit-config.yaml`, `droast.toml`, `.suppressions-baseline`, `[workspace.lints]`, `clippy.toml` | `AGENTS.md` (coding rules and the ratchet); `meta/tests/toolchain.rs`, `meta/tests/vacuous_flags.rs`, `meta/tests/ci_gates.rs`, `meta/tests/dockerfiles.rs`, `meta/tests/workspace_lints.rs` | no lint disabled or narrowed, no hook dropped; §5 (c) |
 
 **`src/cgroup/{api,ebpf,v1,v2}.rs` port NVIDIA-derived code** (from libnvidia-container, Apache
 2.0). Touch it with care. They keep NVIDIA's block verbatim, the crun and runc provenance
@@ -246,10 +246,9 @@ in this repo (copied from another project) is a finding too.
 ### (d) Cross-file duplication
 
 Before accepting a new helper, search for the one that already exists in the workspace (`src/**`,
-`meta/**`, `testenv/**`), by *behavior*, not by the name the author chose. The *Reuse before
-writing* table in `rust-style-guide` (§7) lists the helpers that already exist (the logger, the
+`meta/**`, `testenv/**`), by *behavior*, not by the name the author chose. Check the logger, the
 `/dev` mount check, the injected clock, backoff, the metrics recorder and its no-op form, test
-waits, the `go_compat` ports), and the reuse ledger in `docs/rust-port.md` lists the SSE and SRD
+waits and the `go_compat` ports. The reuse ledger in `docs/rust-port.md` lists the SSE and SRD
 code a component must start from. Two implementations of the same rule drift apart, and the one the
 reviewer did not read is the one that keeps the bug.
 

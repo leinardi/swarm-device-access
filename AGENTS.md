@@ -209,23 +209,20 @@ symlink.
 Skills live in `.agents/skills/` (symlinked as `.claude/skills`). Load them before the work, not
 after review:
 
-- `rust-style-guide` — before any `.rs` edit, and before editing a Cargo manifest, `clippy.toml`,
-  `rustfmt.toml`, `rust-toolchain.toml` or `deny.toml`. It must be loaded before the Rust edit,
-  not after clippy fails.
 - `trust-boundary` — before touching `src/config`, `src/policy`, label parsing or rule collection
   in `src/processor`, the CLI and `SIGHUP` reload path (`src/cli.rs`, `src/cli/settings.rs`,
   `src/run.rs`), `src/launcher`, the HTTP server (`src/server.rs`, `src/server/`),
   `deployments/docker/Dockerfile` or anything else under `deployments/**`, or `examples/**`.
 - `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
 
-`rust-style-guide` and `adversarial-review` point at [`docs/rust-port.md`](docs/rust-port.md) as
+`adversarial-review` points at [`docs/rust-port.md`](docs/rust-port.md) as
 the reuse ledger, with the crates, the design decisions and the provenance of every component
 reused from swarm-scheduler-exporter or swarm-rootless-docker. Check the ledger, and update its row
 in the same commit, when a reused component changes or an upstream fix is taken.
 
 ## Quality rules not enforced by tooling
 
-- **Reuse before writing.** Check `rust-style-guide` §7 and the reuse ledger in
+- **Reuse before writing.** Check the workspace and the reuse ledger in
   [`docs/rust-port.md`](docs/rust-port.md) for an existing helper or component (the `LogHandle`,
   `processor::rules::is_mount_source`, the injected `Clock`, the backoff constants, the `Recorder`
   and its no-op form, `go_compat`, `test_support`) before adding one.
@@ -258,7 +255,7 @@ Run before considering an edit done. `make check` applies to every row.
 
 | You edited | Run |
 | --- | --- |
-| `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify` (load `rust-style-guide` first), then `make check-stage` |
+| `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify`, then `make check-stage` |
 | `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
 | `tests/testdata/**` (the Go golden captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, Go golden captures): never regenerate one by hand |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | `make verify`, `make rust-deny` (network) |
@@ -267,7 +264,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `scripts/check-suppressions.sh`, `.suppressions-baseline` | `cargo test --locked -p meta --test suppressions` |
 | `scripts/check-license-headers.sh` | `cargo test --locked -p meta --test license_headers` |
 | `.github/scripts/**` | `bash .github/scripts/binary-attestation-status.test.sh`, shellcheck (in `make check`) |
-| `meta/**` | `make verify` (load `rust-style-guide` first) |
+| `meta/**` | `make verify` |
 | `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, platforms, vacuous flags, required gates and skipped hooks) |
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |

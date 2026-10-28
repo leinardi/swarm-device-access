@@ -14,9 +14,9 @@ captures the ports are checked against, and the upstream candidates.
   which the README's [Migrating from 1.x](../README.md#-migrating-from-1x) section lists. **Any
   other difference is a defect.** 1.x, as its captures and the published v1.0.3 record it, is the
   behavioural authority.
-- The [`rust-style-guide`](../.agents/skills/rust-style-guide/SKILL.md) skill holds the coding
-  rules. The porting traps found along the way were collected in a `go-to-rust-port` skill kept in
-  this repository during the port and moved back to the maintainer's user skills after the field
+- General Rust coding guidance lives in the maintainer's user-level skills; `AGENTS.md` records
+  project rules. The porting traps found along the way were collected in a `go-to-rust-port` skill
+  kept in this repository during the port and moved back to the maintainer's user skills after the field
   test.
 
 ## Contents
@@ -105,7 +105,7 @@ Binding for every phase of the port, and for later changes to a reused component
   new), each adaptation, and the reason for every departure. The same commit brings the source's
   tests along; this project's parity and regression tests are added on top.
 - No feature has two implementations unless this file records the technical reason. The
-  `rust-style-guide` and `adversarial-review` skills check this.
+  `adversarial-review` skill checks this.
 - No shared crate is extracted during the port. Fixes worth sending back upstream go to the
   upstream-candidates list below.
 - This project's Go code stays the behavioural authority. A reference implementation never
