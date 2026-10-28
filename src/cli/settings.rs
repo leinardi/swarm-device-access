@@ -35,6 +35,7 @@ use crate::go_compat::errors;
 use crate::logger::{Attr, LogHandle};
 use crate::policy::Global;
 use crate::server;
+use crate::task::finish;
 
 /// Go's `errDryRunEnable`.
 const DRY_RUN_ENABLE: &str = "dry-run cannot be enabled on a running daemon; to stop enforcing, \
@@ -213,6 +214,9 @@ pub enum ReloadError {
     Invalid(InvalidSettings),
     /// The reload would turn dry-run on.
     DryRunEnable,
+    /// The runtime shut down before the config-loading task started; nothing was applied.
+    // Unreachable in production: runtime shutdown drops watch_sighup before cancelling queued loads.
+    Canceled,
 }
 
 impl fmt::Display for ReloadError {
@@ -221,6 +225,7 @@ impl fmt::Display for ReloadError {
             Self::Load(error) => write!(formatter, "config reload failed: {error}"),
             Self::Invalid(error) => write!(formatter, "config reload: invalid setting: {error}"),
             Self::DryRunEnable => write!(formatter, "config reload: {DRY_RUN_ENABLE}"),
+            Self::Canceled => formatter.write_str("config reload failed: context canceled"),
         }
     }
 }
@@ -230,7 +235,7 @@ impl std::error::Error for ReloadError {
         match self {
             Self::Load(error) => Some(error),
             Self::Invalid(error) => Some(error),
-            Self::DryRunEnable => None,
+            Self::DryRunEnable | Self::Canceled => None,
         }
     }
 }
@@ -270,9 +275,15 @@ impl Reloader {
     /// # Errors
     ///
     /// [`ReloadError`] when the file cannot be loaded, the merged settings are invalid, or the
-    /// reload would turn dry-run on.
+    /// reload would turn dry-run on, or the runtime shuts down before loading starts.
     pub async fn reload(&mut self) -> Result<(), ReloadError> {
-        let file = config::load_file(&self.path).map_err(ReloadError::Load)?;
+        let path = self.path.clone();
+        let file = finish(tokio::task::spawn_blocking(move || {
+            config::load_file(&path)
+        }))
+        .await
+        .ok_or(ReloadError::Canceled)?
+        .map_err(ReloadError::Load)?;
         let mut next = Settings::merge(&self.flags, &self.cli_set, &file);
         let runtime = next.validate().map_err(ReloadError::Invalid)?;
         if next.dry_run && !self.current.dry_run {

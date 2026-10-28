@@ -70,6 +70,72 @@ fn registry_registers_each_name_once() {
         .expect("b_gauge was not registered by the refused collector");
 }
 
+/// Describing a collector may inspect its registry, without a registry lock held by the caller.
+#[test]
+fn registration_allows_reentrant_descriptors() {
+    struct Reentrant {
+        registry: std::sync::Weak<Registry>,
+        desc: Arc<Desc>,
+    }
+
+    impl Collector for Reentrant {
+        fn descs(&self) -> Vec<Arc<Desc>> {
+            let registry = self.registry.upgrade().unwrap();
+            let _ = registry.described_names();
+            vec![Arc::clone(&self.desc)]
+        }
+
+        fn collect(&self, _families: &mut Vec<Family>) {}
+    }
+
+    let registry = Arc::new(Registry::new());
+    let worker_registry = Arc::clone(&registry);
+    let (sent, received) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        for name in ["first", "second"] {
+            worker_registry
+                .register(Arc::new(Reentrant {
+                    registry: Arc::downgrade(&worker_registry),
+                    desc: Desc::new(name, "h", Kind::Gauge, &[]).unwrap(),
+                }))
+                .unwrap();
+        }
+        sent.send(()).unwrap();
+    });
+    received
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("collector descriptors deadlocked on the registry");
+    worker.join().unwrap();
+    assert_eq!(
+        registry.described_names(),
+        ["first".to_owned(), "second".to_owned()].into()
+    );
+}
+
+/// Descriptor callbacks run outside the lock, but duplicate checking and insertion are atomic.
+#[test]
+fn concurrent_registrations_keep_names_unique() {
+    let registry = Arc::new(Registry::new());
+    let barrier = Arc::new(std::sync::Barrier::new(8));
+    let workers: Vec<_> = (0..8)
+        .map(|_| {
+            let registry = Arc::clone(&registry);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let gauge = Gauge::new(Desc::new("shared", "h", Kind::Gauge, &[]).unwrap());
+                barrier.wait();
+                registry.register(Arc::new(gauge)).is_ok()
+            })
+        })
+        .collect();
+    let successes = workers
+        .into_iter()
+        .map(|worker| usize::from(worker.join().unwrap()))
+        .sum::<usize>();
+    assert_eq!(successes, 1, "exactly one registration must succeed");
+    assert_eq!(registry.gather().len(), 1);
+}
+
 /// The Prometheus Go client's `NewDesc` and `NewHistogram` checks, as errors.
 #[test]
 fn desc_refuses_what_the_go_client_refuses() {

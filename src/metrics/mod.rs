@@ -204,7 +204,7 @@ pub struct Family {
 
 /// Something that produces families at scrape time, the Prometheus Go client's `Collector`.
 pub trait Collector: Send + Sync {
-    /// The descriptors of every family it may produce.
+    /// The descriptors of every family it may produce. Names are fixed at registration.
     fn descs(&self) -> Vec<Arc<Desc>>;
 
     /// Appends its families, as they are now.
@@ -254,7 +254,13 @@ pub struct Gathered {
 /// A set of collectors, gathered together.
 #[derive(Default)]
 pub struct Registry {
-    collectors: Mutex<Vec<Arc<dyn Collector>>>,
+    collectors: Mutex<Vec<Registered>>,
+}
+
+/// Descriptors are a registration-time snapshot: callbacks never run under the registry lock.
+struct Registered {
+    collector: Arc<dyn Collector>,
+    names: Vec<String>,
 }
 
 impl fmt::Debug for Registry {
@@ -273,35 +279,33 @@ impl Registry {
         Self::default()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Arc<dyn Collector>>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Registered>> {
         self.collectors
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Adds a collector.
+    /// Adds a collector, snapshotting its descriptor names before locking the registry.
     ///
     /// # Errors
     ///
     /// [`RegisterError`] when one of its family names is already registered (the Prometheus Go
     /// client's `MustRegister` panics there instead; the daemon registers each family once).
     pub fn register(&self, collector: Arc<dyn Collector>) -> Result<(), RegisterError> {
-        let mut collectors = self.lock();
         let names: Vec<String> = collector
             .descs()
             .iter()
             .map(|desc| desc.name().to_owned())
             .collect();
+        let mut collectors = self.lock();
         let taken = collectors
             .iter()
-            .flat_map(|registered| registered.descs())
-            .find(|desc| names.iter().any(|name| name == desc.name()));
-        if let Some(desc) = taken {
-            return Err(RegisterError {
-                name: desc.name().to_owned(),
-            });
+            .flat_map(|registered| &registered.names)
+            .find(|name| names.contains(name));
+        if let Some(name) = taken {
+            return Err(RegisterError { name: name.clone() });
         }
-        collectors.push(collector);
+        collectors.push(Registered { collector, names });
         Ok(())
     }
 
@@ -310,11 +314,9 @@ impl Registry {
     /// gather.
     #[must_use]
     pub fn described_names(&self) -> BTreeSet<String> {
-        let collectors: Vec<Arc<dyn Collector>> = self.lock().clone();
-        collectors
+        self.lock()
             .iter()
-            .flat_map(|collector| collector.descs())
-            .map(|desc| desc.name().to_owned())
+            .flat_map(|registered| registered.names.iter().cloned())
             .collect()
     }
 
@@ -324,7 +326,11 @@ impl Registry {
     #[must_use]
     pub fn gather(&self) -> Vec<Gathered> {
         // Collect outside the lock: a collector may take its own.
-        let collectors: Vec<Arc<dyn Collector>> = self.lock().clone();
+        let collectors: Vec<Arc<dyn Collector>> = self
+            .lock()
+            .iter()
+            .map(|registered| Arc::clone(&registered.collector))
+            .collect();
         let mut families = Vec::new();
         for collector in &collectors {
             collector.collect(&mut families);

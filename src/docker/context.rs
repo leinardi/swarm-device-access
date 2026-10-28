@@ -55,6 +55,14 @@ impl ContextError {
     }
 }
 
+impl std::fmt::Display for ContextError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.text())
+    }
+}
+
+impl std::error::Error for ContextError {}
+
 /// A cancellation and an optional deadline. Cloning shares the context; [`CallContext::with_timeout`]
 /// and [`CallContext::with_deadline`] derive a child, which its parent's cancellation reaches and
 /// whose own cancellation does not reach the parent.

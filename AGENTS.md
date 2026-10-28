@@ -20,13 +20,14 @@ differences from it (Q1 and later), are listed in the README's
 Build / test / lint — uses Make wrappers around `cargo`:
 
 ```bash
-make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test (meta-tests included)
+make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test, rust-doc
 make verify        # verify-rust: every check a change has to pass
 make rust-build    # cargo build --workspace --all-targets --all-features --locked, with the version stamps
 make rust-test     # cargo test --workspace --locked (meta-tests included)
 make rust-clippy   # cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 make rust-fmt      # cargo fmt --all
 make rust-fmt-check  # cargo fmt --all --check
+make rust-doc      # cargo doc --workspace --all-features --no-deps --locked, warnings as errors
 make rust-deny     # cargo deny --workspace check (network required)
 make audit-deps    # cargo deny --workspace check advisories (network required)
 make rust-release-binaries  # static musl amd64 and arm64 release binaries and checksums.txt into dist/ (pinned zig and cargo-zigbuild on PATH)
