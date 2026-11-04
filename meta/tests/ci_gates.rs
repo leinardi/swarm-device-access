@@ -218,7 +218,7 @@ fn rustdoc_gate_present(fragment: &str, workflow: &str) -> bool {
             && line.split_whitespace().any(|target| target == "rust-doc")
     });
     let recipe = fragment.contains(
-        "rust-doc: ## Check Rust documentation, warnings as errors\n\tRUSTDOCFLAGS=\"$(RUSTDOCFLAGS) -D warnings\" $(CARGO) doc --workspace --all-features --no-deps --locked\n",
+        "rust-doc: ## Check the Rust documentation, warnings as errors\n\tRUSTDOCFLAGS=\"$(RUSTDOCFLAGS) -D warnings\" $(CARGO) doc --workspace $(RUST_FEATURES) --no-deps --locked\n",
     );
     let workflow: Value = serde_yaml_ng::from_str(workflow)
         .unwrap_or_else(|error| panic!("parse the CI workflow: {error}"));

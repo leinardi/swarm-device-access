@@ -76,7 +76,7 @@ bash, never skip, and carry a negative control each. The `docs-links` hook runs
 
 ### Generated or vendored: never hand-edit
 
-- `.mk/{docker,help,password,pre-commit}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
+- `.mk/{docker,help,password,pre-commit,rust}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
   make-common (under its MIT license) and refreshed with `make mk-common-update`; a change is
   ported upstream.
 - `src/cgroup/{api,ebpf,v1,v2}.rs` are not vendored, but keep NVIDIA's copyright header
@@ -182,9 +182,10 @@ symlink.
   confined to `src/cgroup/bpf_sys.rs`, which a meta-test pins.
 - Version strings (`VERSION`, `COMMIT`, `DATE`) live in `src/version.rs` and are read at compile
   time from `SWARM_DEVICE_ACCESS_VERSION`, `SWARM_DEVICE_ACCESS_COMMIT` and
-  `SWARM_DEVICE_ACCESS_DATE`, which `RUST_VERSION_ENV` in `.mk/rust.mk` sets from git and the clock
-  (`make rust-build`, `make rust-release-binaries`) and the Dockerfile sets from its `VERSION`,
-  `COMMIT` and `DATE` build arguments; unset, they read `dev`, `none` and `unknown`.
+  `SWARM_DEVICE_ACCESS_DATE`, which `RUST_VERSION_ENV` in make-common's `.mk/rust.mk` sets from
+  git and the clock under the Makefile's `RUST_STAMP_PREFIX` (`make rust-build`,
+  `make rust-release-binaries`) and the Dockerfile sets from its `VERSION`, `COMMIT` and `DATE`
+  build arguments; unset, they read `dev`, `none` and `unknown`.
 - `src/cgroup/{api,ebpf,v1,v2}.rs` retain NVIDIA's original copyright header (Apache 2.0). Don't
   relicense or reformat that block.
 - The README is the source of truth for the user-facing story; keep the flag tables

@@ -22,7 +22,7 @@ or swarm-rootless-docker add the provenance line from `docs/rust-port.md`, never
 
 ## Makefile
 
-- Shared `.mk/{docker,help,password,pre-commit}.mk` fetched from `leinardi/make-common@v1` — never
+- Shared `.mk/{docker,help,password,pre-commit,rust}.mk` fetched from `leinardi/make-common@v1` — never
   hand-edit; repo-local targets in their own `.mk/<fragment>.mk` listed in `MK_LOCAL_FILES`.
 
 ## CLI flags
