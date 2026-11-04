@@ -40,6 +40,8 @@ const DROAST_CONFIG: &str = "droast.toml";
 const BINARY: &str = "/usr/local/bin/swarm-device-access";
 const CREATED_LABEL: &str = "org.opencontainers.image.created";
 const STAMP_FRAGMENT: &str = ".mk/rust.mk";
+const STAMP_MAKEFILE: &str = "Makefile";
+const STAMP_PREFIX: &str = "SWARM_DEVICE_ACCESS";
 const WORKFLOWS_DIR: &str = ".github/workflows";
 const WANT_PLATFORMS: &str = "linux/amd64,linux/arm64";
 
@@ -270,11 +272,34 @@ fn build_stage_rules() {
 
 /// What is wrong with the version stamps: `version_rs` must read each of the three variables at
 /// compile time, `build` (the build stage's instructions) must set each from its build argument,
-/// and `make` (the make fragment) must set each.
-fn stamp_problems(version_rs: &str, build: &str, make: &str) -> Vec<String> {
+/// `makefile` must set make-common's `RUST_STAMP_PREFIX` to the variables' prefix, and `fragment`
+/// (make-common's rust.mk) must stamp each `$(RUST_STAMP_PREFIX)_<field>` and prefix the
+/// `rust-build` recipe with them.
+fn stamp_problems(version_rs: &str, build: &str, makefile: &str, fragment: &str) -> Vec<String> {
     let mut problems = Vec::new();
+    let prefix_set = makefile.lines().any(|line| {
+        line.strip_prefix("RUST_STAMP_PREFIX")
+            .and_then(|rest| rest.trim_start().strip_prefix(":="))
+            .is_some_and(|value| value.trim() == STAMP_PREFIX)
+    });
+    if !prefix_set {
+        problems.push(format!(
+            "{STAMP_MAKEFILE} does not set RUST_STAMP_PREFIX := {STAMP_PREFIX}"
+        ));
+    }
+    if !fragment.contains("\nrust-build:")
+        || !fragment
+            .split("\nrust-build:")
+            .nth(1)
+            .and_then(|rest| rest.lines().nth(1))
+            .is_some_and(|recipe| recipe.starts_with("\t$(RUST_VERSION_ENV) "))
+    {
+        problems.push(format!(
+            "{STAMP_FRAGMENT}: the rust-build recipe does not start with $(RUST_VERSION_ENV)"
+        ));
+    }
     for field in ["VERSION", "COMMIT", "DATE"] {
-        let variable = format!("SWARM_DEVICE_ACCESS_{field}");
+        let variable = format!("{STAMP_PREFIX}_{field}");
         if !version_rs.contains(&format!("option_env!(\x22{variable}\x22)")) {
             problems.push(format!("src/version.rs does not read {variable}"));
         }
@@ -283,8 +308,10 @@ fn stamp_problems(version_rs: &str, build: &str, make: &str) -> Vec<String> {
                 "the build stage does not stamp {variable} from ${field}"
             ));
         }
-        if !make.contains(&format!("{variable}=")) {
-            problems.push(format!("{STAMP_FRAGMENT} does not stamp {variable}"));
+        if !fragment.contains(&format!("$(RUST_STAMP_PREFIX)_{field}=")) {
+            problems.push(format!(
+                "{STAMP_FRAGMENT} does not stamp $(RUST_STAMP_PREFIX)_{field}"
+            ));
         }
     }
     problems
@@ -299,13 +326,14 @@ fn version_is_stamped() {
     let problems = stamp_problems(
         &repo::read("src/version.rs"),
         &stage(shipped_stages(), "build").joined(),
+        &repo::read(STAMP_MAKEFILE),
         &repo::read(STAMP_FRAGMENT),
     );
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// The negative control of the stamp rules: a stamp dropped from each of the three places is a
-/// problem.
+/// The negative control of the stamp rules: a stamp dropped from each place, another prefix and
+/// a build recipe that does not stamp are each a problem.
 #[test]
 fn stamp_rules() {
     let version_rs = "stamp(option_env!(\x22SWARM_DEVICE_ACCESS_VERSION\x22))\n\
@@ -314,18 +342,42 @@ fn stamp_rules() {
     let build = "SWARM_DEVICE_ACCESS_VERSION=\x22${VERSION}\x22 \
                  SWARM_DEVICE_ACCESS_COMMIT=\x22${COMMIT}\x22 \
                  SWARM_DEVICE_ACCESS_DATE=\x22${DATE}\x22";
-    let make = "SWARM_DEVICE_ACCESS_VERSION=x SWARM_DEVICE_ACCESS_COMMIT=x \
-                SWARM_DEVICE_ACCESS_DATE=x";
+    let makefile = "BIN_NAME ?= x\nRUST_STAMP_PREFIX := SWARM_DEVICE_ACCESS\n";
+    let fragment = "RUST_VERSION_ENV = $(if $(strip $(RUST_STAMP_PREFIX)), \\\n\
+                    \x20 $(RUST_STAMP_PREFIX)_VERSION=\x22$(GIT_VERSION)\x22 \\\n\
+                    \x20 $(RUST_STAMP_PREFIX)_COMMIT=\x22$(GIT_COMMIT)\x22 \\\n\
+                    \x20 $(RUST_STAMP_PREFIX)_DATE=\x22$(BUILD_DATE)\x22)\n\
+                    \n\
+                    rust-build: ## Build\n\
+                    \t$(RUST_VERSION_ENV) $(CARGO) build --workspace\n";
     assert_eq!(
-        stamp_problems(version_rs, build, make),
+        stamp_problems(version_rs, build, makefile, fragment),
         Vec::<String>::new()
     );
     let problems = stamp_problems(
         &version_rs.replace("ACCESS_DATE", "ACCESS_WHEN"),
         &build.replace("${COMMIT}", "none"),
-        &make.replace("SWARM_DEVICE_ACCESS_VERSION=x ", ""),
+        makefile,
+        &fragment.replace("$(RUST_STAMP_PREFIX)_VERSION=", "VERSION="),
     );
     assert_eq!(problems.len(), 3, "{problems:#?}");
+    for broken_makefile in [
+        makefile.replace(":= SWARM_DEVICE_ACCESS", ":= SDA"),
+        makefile.replace("RUST_STAMP_PREFIX := SWARM_DEVICE_ACCESS\n", ""),
+        makefile.replace("RUST_STAMP_PREFIX :=", "# RUST_STAMP_PREFIX :="),
+    ] {
+        assert_eq!(
+            stamp_problems(version_rs, build, &broken_makefile, fragment).len(),
+            1,
+            "{broken_makefile:?} was accepted"
+        );
+    }
+    let unstamped = fragment.replace("\t$(RUST_VERSION_ENV) $(CARGO)", "\t$(CARGO)");
+    assert_eq!(
+        stamp_problems(version_rs, build, makefile, &unstamped).len(),
+        1,
+        "a rust-build recipe without the stamps was accepted"
+    );
 }
 
 /// What is wrong with the runtime stage: from dhi.io/static on the target platform, no shell to

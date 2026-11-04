@@ -27,10 +27,11 @@ MK_LOCAL_AUDIT_DEPS_INCLUDED := 1
 # deny.toml change (the cargo-deny hook, with every check), on every pull request (CI's rust job)
 # and every release (the release workflow's audit job), and deliberately here. --workspace: the
 # root is a package as well as the workspace, and cargo-deny would otherwise check its graph alone.
-# CARGO comes from rust.mk; rust-deny there runs every cargo-deny check, this only the advisories.
+# CARGO and RUST_DENY_ARGS (--workspace) come from make-common's rust.mk; rust-deny there runs
+# every cargo-deny check, this only the advisories.
 
 .PHONY: audit-deps
 audit-deps: ## Check every Rust dependency against the RustSec advisories (cargo-deny; network required)
-	$(CARGO) deny --workspace check advisories
+	$(CARGO) deny $(RUST_DENY_ARGS) check advisories
 
 endif  # MK_LOCAL_AUDIT_DEPS_INCLUDED

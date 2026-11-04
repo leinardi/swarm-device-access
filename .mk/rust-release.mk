@@ -65,7 +65,8 @@ RUST_RELEASE_RUSTC_HASH = $(shell cd "$(REPO_ROOT)" && rustc -vV | sed -n 's/^co
 RUST_RELEASE_RUSTFLAGS  = --remap-path-prefix=$(REPO_ROOT)=/src \
   --remap-path-prefix=$(RUST_RELEASE_CARGO_HOME)=/cargo \
   --remap-path-prefix=$(RUST_RELEASE_RUST_SRC)=/rustc/$(RUST_RELEASE_RUSTC_HASH)
-# $(call rust_static_build,<Rust target>)
+# $(call rust_static_build,<Rust target>). CARGO and RUST_VERSION_ENV (the version stamps) come
+# from make-common's rust.mk.
 rust_static_build = RUSTFLAGS="$(RUST_RELEASE_RUSTFLAGS)" $(RUST_VERSION_ENV) \
   $(CARGO) zigbuild --release --locked --target $(1) --bin $(BIN_NAME)
 
