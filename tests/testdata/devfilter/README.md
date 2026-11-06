@@ -1,7 +1,7 @@
 # Device filter goldens
 
 What the Go daemon's cgroup v2 device filter code produces, for the Rust port to reproduce byte
-for byte (`docs/rust-port.md`, "Go golden captures"). `TestGoldenDevfilter` and `TestGoldenAsm`
+for byte (`docs/rust-port.md`, "1.x fixtures"). `TestGoldenDevfilter` and `TestGoldenAsm`
 (`internal/cgroup/golden_capture_test.go`, behind the `goldencapture` tag) wrote every file here.
 They are frozen 1.x captures: the Go code and its capture tests were removed at the cutover, and
 are in the git history at the parent of the commit that deleted `go.mod` (`git log -1 -- go.mod`

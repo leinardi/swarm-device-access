@@ -318,7 +318,7 @@ Run before considering an edit done. `make check` applies to every row.
 | --- | --- |
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify`, then `make check-stage` |
 | `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
-| `tests/testdata/**` (the Go golden captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, Go golden captures): never regenerate one by hand |
+| `tests/testdata/**` (the 1.x captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, 1.x fixtures): never regenerate one by hand |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `tag` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
