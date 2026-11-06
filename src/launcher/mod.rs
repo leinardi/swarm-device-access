@@ -63,15 +63,15 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 use tokio::task::JoinHandle;
 
 use crate::daemon::DOCKER_CALL_TIMEOUT;
 use crate::docker::{self, CallContext, Client, Error, with_context};
-use go_slog::{Attr, LogHandle};
+use tracing::{error, info, warn};
 
 /// The `component` attribute of every launcher log line.
-const COMPONENT: &str = "launcher";
+pub(crate) const COMPONENT: &str = "launcher";
 
 /// The prefix of a content-addressed image ID.
 const IMAGE_ID_PREFIX: &str = "sha256:";
@@ -145,16 +145,10 @@ pub async fn run(
     context: &CallContext,
     client: Client,
     options: Options,
-    log: &LogHandle,
 ) -> Result<i64, LaunchError> {
-    Launch::new(
-        Arc::new(Engine::new(client)),
-        options,
-        Console::process(),
-        log,
-    )
-    .run(context)
-    .await
+    Launch::new(Arc::new(Engine::new(client)), options, Console::process())
+        .run(context)
+        .await
 }
 
 /// One launch: what it needs from outside, injected so the tests can drive it.
@@ -169,22 +163,18 @@ pub struct Launch<E> {
     pub self_id: SelfId,
     /// The step bounds.
     pub timing: Timing,
-    /// The launcher's log, every line with `component=launcher`.
-    pub log: LogHandle,
 }
 
 impl<E: EngineApi> Launch<E> {
-    /// Go's `Run` with its defaults: the mount table, the Go timing, `log` with the launcher's
-    /// component.
+    /// Go's `Run` with its defaults: the mount table, the Go timing.
     #[must_use]
-    pub fn new(engine: Arc<E>, options: Options, console: Console, log: &LogHandle) -> Self {
+    pub fn new(engine: Arc<E>, options: Options, console: Console) -> Self {
         Self {
             engine,
             options,
             console,
             self_id: Box::new(self_id::self_id_from_mountinfo),
             timing: Timing::default(),
-            log: log.with_attrs(&[Attr::string("component", COMPONENT)]),
         }
     }
 
@@ -203,13 +193,11 @@ impl<E: EngineApi> Launch<E> {
             console,
             self_id,
             timing,
-            log,
         } = self;
         Runner {
             engine,
             self_id,
             timing,
-            log,
         }
         .run(context, &options, console)
         .await
@@ -221,7 +209,6 @@ struct Runner<E> {
     engine: Arc<E>,
     self_id: SelfId,
     timing: Timing,
-    log: LogHandle,
 }
 
 impl<E: EngineApi> Runner<E> {
@@ -242,10 +229,7 @@ impl<E: EngineApi> Runner<E> {
         .await
         .map_err(LaunchError::Create)?;
         for warning in &created.warnings {
-            self.log.warn(
-                "docker warning on daemon create",
-                &[Attr::string("warning", warning.as_str())],
-            );
+            warn!(component = COMPONENT, warning = %warning.as_str(), "docker warning on daemon create");
         }
 
         let mut session = match self.prepare(context, &created.id, console).await {
@@ -261,14 +245,7 @@ impl<E: EngineApi> Runner<E> {
         if let Err(source) = started {
             return Err(self.abandon(&created.id, LaunchError::Start(source)).await);
         }
-        self.log.info(
-            "daemon started",
-            &[
-                Attr::string("id", short_id(&created.id)),
-                Attr::string("image", image_id.as_str()),
-                Attr::string("launcher", short_id(&launcher_id)),
-            ],
-        );
+        info!(component = COMPONENT, id = %short_id(&created.id), image = %image_id.as_str(), launcher = %short_id(&launcher_id), "daemon started");
         self.supervise(context, &mut session).await
     }
 
@@ -294,7 +271,7 @@ impl<E: EngineApi> Runner<E> {
     /// Removes a daemon container whose setup failed, so a failed launcher never leaves a
     /// daemon behind: Go's `errors.Join(cause, removeErr)`.
     async fn abandon(&self, container_id: &str, cause: LaunchError) -> LaunchError {
-        match self.remove_container(container_id).await {
+        match self.remove_by_id(container_id).await {
             Ok(()) => cause,
             Err(remove) => LaunchError::Abandoned {
                 cause: Box::new(cause),
@@ -346,20 +323,14 @@ impl<E: EngineApi> Runner<E> {
                         return Ok(self.finish(session, &drain, &response).await);
                     }
                     Err(wait_error) => {
-                        self.log.error(
-                            "daemon wait stream failed; stopping the daemon",
-                            &[Attr::string("err", wait_error.as_str())],
-                        );
+                        error!(component = COMPONENT, error = %wait_error.as_str(), "daemon wait stream failed; stopping the daemon");
                         return self.shutdown(session, Some(wait_error)).await;
                     }
                 },
                 copied = session.pump.ended(), if session.pump.running() => {
                     // The end of the stream: the daemon is exiting; its status follows.
                     let Err(copy_error) = copied else { continue };
-                    self.log.error(
-                        "daemon log stream lost; stopping the daemon",
-                        &[Attr::string("err", copy_error.as_str())],
-                    );
+                    error!(component = COMPONENT, error = %copy_error.as_str(), "daemon log stream lost; stopping the daemon");
                     let shutdown = self.shutdown(session, None).await.err();
                     return Err(LaunchError::LogStream {
                         copy: copy_error,
@@ -367,10 +338,7 @@ impl<E: EngineApi> Runner<E> {
                     });
                 }
                 _ = context.done() => {
-                    self.log.info(
-                        "stopping daemon",
-                        &[Attr::string("id", short_id(&session.id))],
-                    );
+                    info!(component = COMPONENT, id = %short_id(&session.id), "stopping daemon");
                     return self.shutdown(session, None).await;
                 }
             }
@@ -455,13 +423,7 @@ impl<E: EngineApi> Runner<E> {
         if let Err(error) = stopped
             && !error.is_not_found()
         {
-            self.log.warn(
-                "stop daemon failed",
-                &[
-                    Attr::string("id", short_id(container_id)),
-                    Attr::error("err", &error),
-                ],
-            );
+            warn!(component = COMPONENT, id = %short_id(container_id), error = %error, "stop daemon failed");
         }
     }
 
@@ -476,18 +438,9 @@ impl<E: EngineApi> Runner<E> {
         if let Some(error) = &response.error
             && !error.message.is_empty()
         {
-            self.log.warn(
-                "daemon wait reported an error",
-                &[Attr::string("err", error.message.as_str())],
-            );
+            warn!(component = COMPONENT, error = %error.message.as_str(), "daemon wait reported an error");
         }
-        self.log.info(
-            "daemon exited",
-            &[
-                Attr::string("id", short_id(&session.id)),
-                Attr::int("status", response.status_code),
-            ],
-        );
+        info!(component = COMPONENT, id = %short_id(&session.id), status = response.status_code, "daemon exited");
         response.status_code
     }
 
@@ -496,17 +449,11 @@ impl<E: EngineApi> Runner<E> {
         if session.pump.running() {
             tokio::select! {
                 _ = session.pump.ended() => {}
-                _ = deadline.done() => self.log.warn(
-                    "daemon log stream not drained before timeout",
-                    &[Attr::string("id", short_id(&session.id))],
-                ),
+                _ = deadline.done() => warn!(component = COMPONENT, id = %short_id(&session.id), "daemon log stream not drained before timeout"),
             }
         }
         if let Some(Err(copy_error)) = &session.pump.outcome {
-            self.log.warn(
-                "daemon log stream ended with an error",
-                &[Attr::string("err", copy_error.as_str())],
-            );
+            warn!(component = COMPONENT, error = %copy_error.as_str(), "daemon log stream ended with an error");
         }
     }
 }
@@ -550,7 +497,7 @@ impl Pump {
         } = console;
         Self {
             task: tokio::spawn(async move {
-                docker::std_copy(&mut stdout, &mut stderr, &mut attached).await
+                copy_output(&mut attached, &mut stdout, &mut stderr).await
             }),
             outcome: None,
         }
@@ -583,6 +530,30 @@ impl Drop for Pump {
         // Go closes the hijacked connection, which ends the copy.
         self.task.abort();
     }
+}
+
+/// Copies the daemon's output to the console, each piece written whole and flushed before the next
+/// is read, as Go's unbuffered writes are: the bytes copied once the stream ends, or the text of
+/// the error that broke the stream or a writer.
+async fn copy_output(
+    attached: &mut Attached,
+    stdout: &mut Output,
+    stderr: &mut Output,
+) -> Result<u64, String> {
+    let mut copied: u64 = 0;
+    while let Some(piece) = attached.recv().await {
+        let (writer, bytes) = match piece.map_err(|error| error.to_string())? {
+            docker::attach::Output::Stdout(bytes) => (&mut *stdout, bytes),
+            docker::attach::Output::Stderr(bytes) => (&mut *stderr, bytes),
+        };
+        writer
+            .write_all(&bytes)
+            .await
+            .map_err(|error| error.to_string())?;
+        writer.flush().await.map_err(|error| error.to_string())?;
+        copied += u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    }
+    Ok(copied)
 }
 
 /// The first 12 characters of a container ID.

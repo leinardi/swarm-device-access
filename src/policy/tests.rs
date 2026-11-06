@@ -327,9 +327,9 @@ fn parse_container() {
             Some(container(Some(false), &[], &[])),
         ),
         (
-            "enable=1 (truthy)",
+            "enable=1 is not a boolean and fails closed",
             vec![(LABEL_ENABLE, "1")],
-            Some(container(Some(true), &[], &[])),
+            None,
         ),
         (
             "enable=invalid fails closed",
@@ -485,7 +485,7 @@ fn errors_read_as_go() {
         Global::new("all", Some(strings(&["/dev/["])), None)
             .unwrap_err()
             .to_string(),
-        r#"device-allow: invalid glob pattern "/dev/[": syntax error in pattern"#
+        r#"device-allow: invalid glob pattern "/dev/[": syntax error in pattern: missing ]"#
     );
     assert_eq!(
         Global::new("all", None, Some(strings(&["/dev/x/"])))
@@ -505,4 +505,100 @@ fn errors_read_as_go() {
             .to_string(),
         r#"invalid glob in label "swarm-device-access.device-deny": glob pattern must start with /dev/: "/etc""#
     );
+}
+
+/// Deny wins: over every combination of one allow and one deny glob, global and per container,
+/// a path a deny glob matches is never allowed, whatever the allow globs say.
+#[test]
+fn a_denied_path_is_never_allowed() {
+    let globs = [
+        "/dev/*",
+        "/dev/sd[a-c]",
+        "/dev/sd[^a-c]",
+        "/dev/nvidia?",
+        "/dev/dri/*",
+    ];
+    let paths = [
+        "/dev/sda",
+        "/dev/sdd",
+        "/dev/nvidia0",
+        "/dev/dri/card0",
+        "/dev/null",
+    ];
+    for allow in globs {
+        for deny in globs {
+            for (global_deny, container_deny) in [(deny, "/dev/none"), ("/dev/none", deny)] {
+                let policy = global(Mode::All, &[allow], &[global_deny]);
+                let subject = container(Some(true), &["/dev/*"], &[container_deny]);
+                for path in paths {
+                    let denied = glob::matches(deny, path);
+                    if denied {
+                        assert!(
+                            !policy.device_allowed(&subject, path),
+                            "allow {allow} deny {deny}: {path} was allowed"
+                        );
+                        assert!(!policy.explicitly_allowed(&subject, path), "{path}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The spellings the Go matcher and the glob crate read differently are refused when the config
+/// or the label is loaded, so no pattern changes meaning: the pattern is a fail-closed error.
+#[test]
+fn globs_that_read_differently_from_go_are_refused_at_load() {
+    for pattern in [
+        "/dev/**",
+        "/dev/**/x",
+        "/dev/sd[!a-c]",
+        "/dev/sd\\*",
+        "/dev/sd\\",
+        "/dev/[]a]",
+        "/dev/sd[a-]",
+        "/dev/sd[-a]",
+        "/dev/sd[a-b-c]",
+        "/dev/sd[a-c",
+        "/dev/sd[",
+        "/dev/sd[^]",
+        // A class that could match `/` matched it in Go and cannot here: refused, because a
+        // deny glob like `/dev[^a]*` would otherwise stop denying `/dev/null`.
+        "/dev[^a]*",
+        "/dev/sd[^a-c]",
+        "/dev/sd[^x]",
+        "[^x]",
+        "/dev[+-9]null",
+        "/dev[/]null",
+        "/dev[ -/]null",
+    ] {
+        let error = validate_globs(&[pattern.to_owned()]).unwrap_err();
+        assert!(
+            matches!(error, GlobError::BadPattern { .. }),
+            "{pattern}: {error}"
+        );
+        // Through each place a glob is read: the flags and the file, and the labels.
+        assert!(Global::new("all", Some(vec![pattern.to_owned()]), None).is_err());
+        assert!(Global::new("all", None, Some(vec![pattern.to_owned()])).is_err());
+        let found = Container::parse(&labels(&[(LABEL_DEVICE_DENY, pattern)]));
+        assert!(found.is_err(), "{pattern}");
+    }
+}
+
+/// Booleans are `true` and `false` only; the other spellings Go's `ParseBool` read fail closed.
+#[test]
+fn booleans_are_true_or_false_only() {
+    assert_eq!(parse_bool("true"), Some(true));
+    assert_eq!(parse_bool("false"), Some(false));
+    for value in [
+        "1", "0", "t", "f", "T", "F", "TRUE", "True", "FALSE", "False", "", " true", "yes",
+    ] {
+        assert_eq!(parse_bool(value), None, "{value:?}");
+        let error = Container::parse(&labels(&[(LABEL_ENABLE, value)])).unwrap_err();
+        let text = error.to_string();
+        assert!(
+            text.contains(LABEL_ENABLE) && text.contains(&format!("{value:?}")),
+            "{text}"
+        );
+    }
 }

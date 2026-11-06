@@ -122,7 +122,7 @@ fn load_file_unreadable_path() {
     assert_eq!(
         error,
         format!(
-            "read config file {}: open {missing}: no such file or directory",
+            "read config file {}: open {missing}: No such file or directory (os error 2)",
             quote(missing)
         )
     );
@@ -131,7 +131,7 @@ fn load_file_unreadable_path() {
     assert_eq!(
         error,
         format!(
-            "read config file {}: read {directory_path}: is a directory",
+            "read config file {}: read {directory_path}: Is a directory (os error 21)",
             quote(directory_path)
         )
     );
@@ -294,7 +294,13 @@ fn load_file_log_time_absent_vs_null() {
 /// Go: `TestValidateEnums`
 #[test]
 fn validate_enums_cases() {
-    assert_eq!(validate_enums("plain", "warn", "opt-in", "flag"), Ok(()));
+    assert_eq!(validate_enums("json", "warn", "opt-in", "flag"), Ok(()));
+    // The plain format of 1.x is gone: it names the formats left.
+    let error = validate_enums("plain", "warn", "opt-in", "flag").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "flag \"log-format\": unknown value \"plain\", must be one of [text json]"
+    );
     assert_eq!(validate_enums("", "", "", "flag"), Ok(()));
     for alias in ["warning", "fatal", "panic"] {
         let error = validate_enums("", alias, "", "flag")

@@ -27,7 +27,7 @@ use super::self_id::SelfIdError;
 use super::short_id;
 use super::spec::DAEMON_NAME;
 use crate::docker::{ContextError, Error};
-use go_compat::{duration, errors, quote::quote};
+use crate::text::quote;
 
 /// The launcher failed; it then exits with status 1.
 #[derive(Debug)]
@@ -278,7 +278,7 @@ pub struct BudgetExceeded {
 
 impl fmt::Display for BudgetExceeded {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let budget = duration::format(i64::try_from(self.budget.as_nanos()).unwrap_or(i64::MAX));
+        let budget = format!("{:?}", self.budget);
         write_joined(
             formatter,
             [
@@ -298,7 +298,7 @@ fn write_joined<const N: usize>(
     formatter: &mut fmt::Formatter<'_>,
     parts: [Option<String>; N],
 ) -> fmt::Result {
-    formatter.write_str(&errors::join(parts).unwrap_or_default())
+    formatter.write_str(&parts.into_iter().flatten().collect::<Vec<_>>().join("\n"))
 }
 
 impl std::error::Error for BudgetExceeded {
@@ -334,7 +334,7 @@ mod tests {
             .downcast_ref::<RemoveError>()
             .unwrap();
         let source = remove.source().unwrap().downcast_ref::<Error>().unwrap();
-        assert_eq!(source.kind(), crate::docker::ErrorKind::DeadlineExceeded);
+        assert_eq!(source.kind(), crate::docker::ErrorKind::Timeout);
         assert!(EstablishError::Timeout.source().is_none());
         assert!(LaunchError::NoImageId("tag".to_owned()).source().is_none());
         for cause in [ContextError::Canceled, ContextError::DeadlineExceeded] {

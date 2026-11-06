@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use crate::docker::context::{self, ContextError};
 use crate::docker::types::{ContainerInspect, ContainerSummary, Event};
 use crate::docker::{DockerApi, Error, EventStream, Filters, StreamError, StreamErrorKind};
-use go_clock::Clock;
+use clock::Clock;
 
 /// What one fake event stream yields: an event, or the error that ends the stream.
 pub(crate) type FakeEvent = Result<Event, StreamError>;
@@ -198,7 +198,7 @@ impl DockerApi for FakeDocker {
             })
             .is_ok();
         let reply = if failing {
-            Err(Error::connection_failed("list failed".to_owned()))
+            Err(Error::unavailable("list failed".to_owned()))
         } else {
             if !self.list_blocks
                 && let Some(on_list) = &self.on_list

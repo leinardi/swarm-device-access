@@ -27,6 +27,8 @@ pub mod config;
 pub mod daemon;
 pub mod docker;
 pub mod launcher;
+mod lexpath;
+pub mod logging;
 pub mod metrics;
 pub mod policy;
 pub mod processor;
@@ -36,4 +38,5 @@ pub mod systemd;
 mod task;
 #[cfg(test)]
 mod test_support;
+mod text;
 pub mod version;

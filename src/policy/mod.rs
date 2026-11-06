@@ -26,6 +26,10 @@
 //! Every list keeps Go's nil apart from an empty one (`None` against `Some(vec![])`), since the
 //! two log differently in JSON.
 
+pub mod glob;
+
+pub use glob::BadPattern;
+
 #[cfg(test)]
 mod tests;
 
@@ -33,10 +37,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::BuildHasher;
 
-use go_compat::filepath::{self, BadPattern};
-use go_compat::parse_bool::parse_bool;
-use go_compat::quote::quote;
-use go_compat::strings::trim_space;
+use crate::lexpath;
+use crate::text::quote;
 
 /// The prefix of every policy label.
 pub const LABEL_PREFIX: &str = "swarm-device-access.";
@@ -98,11 +100,11 @@ pub fn parse_mode(mode: &str) -> Result<Mode, PolicyError> {
 /// which for a deny means a device the operator meant to deny stays grantable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobError {
-    /// `filepath.Match` refuses the pattern.
+    /// The glob matcher refuses the pattern.
     BadPattern {
         /// The pattern.
         pattern: String,
-        /// `filepath.ErrBadPattern`.
+        /// Why.
         source: BadPattern,
     },
     /// `filepath.Clean` would change the pattern.
@@ -228,13 +230,13 @@ impl std::error::Error for PolicyError {
 /// The first pattern that fails, with what is wrong with it.
 pub fn validate_globs(patterns: &[String]) -> Result<(), GlobError> {
     for pattern in patterns {
-        if let Err(source) = filepath::matches(pattern, "") {
+        if let Err(source) = glob::compile(pattern) {
             return Err(GlobError::BadPattern {
                 pattern: pattern.clone(),
                 source,
             });
         }
-        if filepath::clean(pattern) != *pattern {
+        if lexpath::clean(pattern) != *pattern {
             return Err(GlobError::NotClean {
                 pattern: pattern.clone(),
             });
@@ -344,6 +346,18 @@ impl Global {
     }
 }
 
+/// `true` or `false`, the only two spellings of a boolean setting or label: Go's `ParseBool` also
+/// read `1`, `t`, `T`, `TRUE`, `True`, `0`, `f`, `F`, `FALSE` and `False`, which are refused now
+/// (README Q17). A label that is not one fails closed: the container is not enabled.
+#[must_use]
+pub fn parse_bool(value: &str) -> Option<bool> {
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
 /// The per-container policy, from the container's labels.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Container {
@@ -359,13 +373,13 @@ impl Container {
     ///
     /// # Errors
     ///
-    /// [`PolicyError::NotABoolean`] for an `enable` value that is not a `strconv.ParseBool`
+    /// [`PolicyError::NotABoolean`] for an `enable` value that is not a `true` or `false`
     /// spelling, the empty one included, else [`PolicyError::LabelGlob`] for the first bad glob of
     /// `device-allow`, then of `device-deny`. The caller must then fail closed.
     pub fn parse<S: BuildHasher>(labels: &HashMap<String, String, S>) -> Result<Self, PolicyError> {
         let enable = match labels.get(LABEL_ENABLE) {
             None => None,
-            Some(value) => Some(parse_bool(value).map_err(|_| PolicyError::NotABoolean {
+            Some(value) => Some(parse_bool(value).ok_or_else(|| PolicyError::NotABoolean {
                 label: LABEL_ENABLE,
                 value: value.clone(),
             })?),
@@ -416,7 +430,7 @@ fn parse_glob_list<S: BuildHasher>(
 /// Go's `splitAndTrim`: split on commas, `strings.TrimSpace` each part, drop the empty ones.
 fn split_and_trim(raw: &str) -> Vec<String> {
     raw.split(',')
-        .map(trim_space)
+        .map(str::trim)
         .filter(|part| !part.is_empty())
         .map(str::to_owned)
         .collect()
@@ -427,7 +441,7 @@ fn match_any(patterns: Option<&[String]>, path: &str) -> bool {
     patterns
         .unwrap_or_default()
         .iter()
-        .any(|pattern| filepath::matches(pattern, path) == Ok(true))
+        .any(|pattern| glob::matches(pattern, path))
 }
 
 /// `len(list) == 0`, for a nil or an empty list alike.

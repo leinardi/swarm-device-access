@@ -29,14 +29,14 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
+use tracing::warn;
 
 use self::events::{Listener, subscribe};
 use crate::docker::{CallContext, DockerApi};
 use crate::metrics::Recorder;
 use crate::processor::{Inspector, Processor};
 use crate::systemd::{self, OnReload};
-use go_clock::Clock;
-use go_slog::{Attr, LogHandle};
+use clock::Clock;
 
 /// The first delay of a retry: a failed container, a failed list, a lost event stream.
 pub const MIN_BACKOFF: Duration = Duration::from_secs(1);
@@ -78,7 +78,6 @@ pub struct Options<D, I> {
     /// tests).
     pub call_timeout: Duration,
     pub clock: Arc<dyn Clock>,
-    pub log: LogHandle,
 }
 
 /// The systemd watcher's callback on each successful subscription.
@@ -96,11 +95,7 @@ where
     D: DockerApi + 'static,
     I: Inspector,
 {
-    let log = options.log.clone();
-    run_with(context, options, move |cancel, on_reload, on_subscribed| {
-        systemd::supervise(cancel, log, on_reload, on_subscribed)
-    })
-    .await;
+    run_with(context, options, systemd::supervise).await;
 }
 
 /// [`run`] with the systemd watcher a test replaces: Go's `startWatcher` seam.
@@ -118,9 +113,9 @@ where
         readiness,
         call_timeout,
         clock,
-        log,
     } = options;
     let since = clock.now();
+    let listener_clock = Arc::clone(&clock);
 
     // Events that arrive during the enumeration below wait, with backpressure on the socket,
     // until the listener reads them. A failed subscription leaves none; the listener then
@@ -128,10 +123,7 @@ where
     let stream = match subscribe(context, &docker, since, call_timeout).await {
         Ok(stream) => Some(stream),
         Err(error) => {
-            log.warn(
-                "could not subscribe to docker events; will retry",
-                &[Attr::error("err", &error)],
-            );
+            warn!(error = %error, "could not subscribe to docker events; will retry");
             None
         }
     };
@@ -142,7 +134,6 @@ where
         metrics: metrics.clone(),
         timeout: call_timeout,
         clock,
-        log: log.clone(),
     });
     // Every later publication goes to the coordinator; installed before the startup request,
     // so no generation published from here on is missed.
@@ -188,8 +179,8 @@ where
         coordinator: &coordinator,
         metrics: &metrics,
         readiness: &readiness,
-        log: &log,
         timeout: call_timeout,
+        clock: listener_clock.as_ref(),
     };
     listener.listen_events(context, since, stream).await;
 

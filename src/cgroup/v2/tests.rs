@@ -313,12 +313,12 @@ fn a_query_failure_is_wrapped() {
 
 // The texts below are the Go daemon's, printed by its setDeviceRules over the Go fake whose
 // injected errors carry the text of the kernel errors this fake returns.
-const REPLACE_FAILED: &str = "device filter change 1 of 1: unable to replace device filters program: failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, flags BPF_F_ALLOW_MULTI): attach program: input/output error";
-const ATTACH_FAILED_1_OF_2: &str = "device filter change 1 of 2: unable to attach new device filters program: failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, flags BPF_F_ALLOW_MULTI): attach program: input/output error";
-const ATTACH_FAILED_2_OF_2: &str = "device filter change 2 of 2: unable to attach new device filters program: failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, flags BPF_F_ALLOW_MULTI): attach program: input/output error";
-const DETACH_FAILED: &str = "device filter change 1 of 1: unable to detach original device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: input/output error";
-const ROLLBACK_FAILED: &str = "device filter change 1 of 1: unable to detach original device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: input/output error\nroll back new device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: device or resource busy";
-const DETACH_FAILED_2_OF_2: &str = "device filter change 2 of 2: unable to detach original device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: input/output error";
+const REPLACE_FAILED: &str = "device filter change 1 of 1: unable to replace device filters program: failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, flags BPF_F_ALLOW_MULTI): attach program: Input/output error (os error 5)";
+const ATTACH_FAILED_1_OF_2: &str = "device filter change 1 of 2: unable to attach new device filters program: failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, flags BPF_F_ALLOW_MULTI): attach program: Input/output error (os error 5)";
+const ATTACH_FAILED_2_OF_2: &str = "device filter change 2 of 2: unable to attach new device filters program: failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, flags BPF_F_ALLOW_MULTI): attach program: Input/output error (os error 5)";
+const DETACH_FAILED: &str = "device filter change 1 of 1: unable to detach original device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: Input/output error (os error 5)";
+const ROLLBACK_FAILED: &str = "device filter change 1 of 1: unable to detach original device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: Input/output error (os error 5)\nroll back new device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: Device or resource busy (os error 16)";
+const DETACH_FAILED_2_OF_2: &str = "device filter change 2 of 2: unable to detach original device filters program: failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: Input/output error (os error 5)";
 const UNSUPPORTED_EXCLUSIVE: &str =
     "device filter attached without BPF_F_ALLOW_MULTI: attach mode none (exclusive)";
 const UNSUPPORTED_OVERRIDE: &str =
@@ -326,6 +326,5 @@ const UNSUPPORTED_OVERRIDE: &str =
 const INACCESSIBLE_1_OF_2: &str =
     "device filters attached to the cgroup cannot be accessed: 1 of 2 programs";
 const FILTER_MISSING: &str = "no device filter attached to the cgroup";
-const LOAD_FAILED: &str =
-    "unable to create new device filters program: load program: cannot allocate memory";
-const QUERY_FAILED: &str = "unable to find any existing device filters attached to the cgroup: bpf_prog_query(BPF_CGROUP_DEVICE) failed: operation not permitted";
+const LOAD_FAILED: &str = "unable to create new device filters program: load program: Cannot allocate memory (os error 12)";
+const QUERY_FAILED: &str = "unable to find any existing device filters attached to the cgroup: bpf_prog_query(BPF_CGROUP_DEVICE) failed: Operation not permitted (os error 1)";

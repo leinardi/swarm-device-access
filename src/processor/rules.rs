@@ -29,11 +29,11 @@ use rustix::io::Errno;
 use super::devfs::{DEV_ROOT, DevFs, DevNode, DeviceId, NodeKind, SysError, WalkControl};
 use crate::cgroup::DeviceRule;
 use crate::docker::types::MountPoint;
+use crate::lexpath as filepath;
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global};
-use go_compat::filepath;
-use go_compat::quote::quote;
-use go_slog::{Attr, LogHandle};
+use crate::text::quote;
+use tracing::{debug, info, warn};
 
 /// Bounds the names enumerated under one directory mount. A walk that cannot see every name
 /// cannot know that no alias denies a device it did see, so overflow is an error, not a cutoff.
@@ -118,12 +118,11 @@ fn rel_to_dev(path: &str) -> &str {
     path.strip_prefix("/dev/").unwrap_or(path)
 }
 
-/// The policy a collection judges by, and where it logs.
+/// The policy a collection judges by.
 #[derive(Clone, Copy)]
 pub struct Judge<'policy> {
     pub global: &'policy Global,
     pub container: &'policy Container,
-    pub log: &'policy LogHandle,
 }
 
 /// Evaluates the mount source and, for a directory, every entry below it. Each name goes through
@@ -193,31 +192,20 @@ fn walk_mount(
         .filter(|candidate| candidate.decision.granted())
         .count();
     if granted == 0 && state.policy_excluded > 0 && state.result.errs.is_empty() {
-        let globs = |global: Option<&[String]>, container: Option<&[String]>, key: &str| {
+        // Nothing configured at either level is `None`, not an empty list.
+        fn globs<'globs>(
+            global: Option<&'globs [String]>,
+            container: Option<&'globs [String]>,
+        ) -> Option<Vec<&'globs String>> {
             let joined: Vec<&String> = global.into_iter().chain(container).flatten().collect();
-            // Go's slices.Concat of nothing is nil.
-            if joined.is_empty() {
-                Attr::nil_strings(key)
-            } else {
-                Attr::strings(key, joined)
-            }
-        };
-        judge.log.warn(
+            (!joined.is_empty()).then_some(joined)
+        }
+        warn!(
+            path = %source,
+            children_seen = ?state.children_seen,
+            allow_globs = ?globs(judge.global.device_allow(), judge.container.device_allow()),
+            deny_globs = ?globs(judge.global.device_deny(), judge.container.device_deny()),
             "mount excluded: no children matched allow/deny policy",
-            &[
-                Attr::string("path", source),
-                Attr::strings("children_seen", &state.children_seen),
-                globs(
-                    judge.global.device_allow(),
-                    judge.container.device_allow(),
-                    "allow_globs",
-                ),
-                globs(
-                    judge.global.device_deny(),
-                    judge.container.device_deny(),
-                    "deny_globs",
-                ),
-            ],
         );
     }
     state.result
@@ -271,7 +259,6 @@ impl MountWalkState<'_> {
         }
 
         let found = evaluate_candidate(self.dev, &alias, self.judge);
-        let log = self.judge.log;
         if let Some(error) = found.err {
             self.result.errs.push(error);
             return WalkControl::Continue;
@@ -285,20 +272,11 @@ impl MountWalkState<'_> {
         }
         match found.candidate.kind {
             NodeKind::Dir => {
-                log.debug(
-                    "symlink to directory skipped",
-                    &[
-                        Attr::string("path", alias.as_str()),
-                        Attr::string("target", found.candidate.resolved.as_str()),
-                    ],
-                );
+                debug!(path = %alias.as_str(), target = %found.candidate.resolved.as_str(), "symlink to directory skipped");
                 self.result.add_skip(SKIP_NOT_DEVICE);
             }
             NodeKind::Other => {
-                log.debug(
-                    "non-device entry skipped",
-                    &[Attr::string("path", alias.as_str())],
-                );
+                debug!(path = %alias.as_str(), "non-device entry skipped");
                 self.result.add_skip(SKIP_NOT_DEVICE);
             }
             NodeKind::Device(_) => {
@@ -351,13 +329,7 @@ pub fn evaluate_candidate(dev: &dyn DevFs, alias: &str, judge: Judge<'_>) -> Eva
         err: None,
     };
     if !under_dev(alias) {
-        judge.log.warn(
-            "device path resolves outside /dev",
-            &[
-                Attr::string("path", alias),
-                Attr::string("reason", SKIP_OUTSIDE_DEV),
-            ],
-        );
+        warn!(path = %alias, reason = %SKIP_OUTSIDE_DEV, "device path resolves outside /dev");
         found.skip = Some(SKIP_OUTSIDE_DEV);
         return found;
     }
@@ -495,8 +467,11 @@ fn escape_hop(dev: &dyn DevFs, rel: &str) -> Result<Hop, SysError> {
 /// is a clean relative path without `..`.
 fn canonical_name(dev: &dyn DevFs, id: DeviceId) -> Result<String, Cause> {
     let data = dev.read_uevent(id).map_err(Cause::Sys)?;
-    let names: Vec<String> = go_compat::scanner::lines(&data)
-        .map_while(Result::ok)
+    let lines = crate::text::lines(&data)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| Cause::BadDevname(BadDevname::LineTooLong))?;
+    let names: Vec<String> = lines
+        .into_iter()
         .filter_map(|line| {
             String::from_utf8_lossy(line)
                 .strip_prefix("DEVNAME=")
@@ -547,14 +522,10 @@ pub fn evaluate_identity(
 /// Logs a dangling name: a warning when an explicit allow glob names it, since the operator
 /// expected a device there.
 fn skip_unresolvable(alias: &str, judge: Judge<'_>) {
-    let attrs = [Attr::string("path", alias)];
     if judge.global.explicitly_allowed(judge.container, alias) {
-        judge.log.warn(
-            "device symlink matches allow policy but cannot be resolved",
-            &attrs,
-        );
+        warn!(path = %alias, "device symlink matches allow policy but cannot be resolved");
     } else {
-        judge.log.debug("unresolvable symlink skipped", &attrs);
+        debug!(path = %alias, "unresolvable symlink skipped");
     }
 }
 
@@ -563,15 +534,10 @@ fn skip_unresolvable(alias: &str, judge: Judge<'_>) {
 /// such links (`/dev/stdin -> /proc/self/fd/0`, `/dev/log -> /run/systemd/journal/dev-log`), and
 /// a warning for each of them on every pass buries the warnings that matter.
 fn skip_outside(alias: &str, target: &str, judge: Judge<'_>) {
-    let attrs = [
-        Attr::string("path", alias),
-        Attr::string("target", target),
-        Attr::string("reason", SKIP_OUTSIDE_DEV),
-    ];
     if judge.global.explicitly_allowed(judge.container, alias) {
-        judge.log.warn("device path resolves outside /dev", &attrs);
+        warn!(path = %alias, target = %target, reason = SKIP_OUTSIDE_DEV, "device path resolves outside /dev");
     } else {
-        judge.log.debug("device path resolves outside /dev", &attrs);
+        debug!(path = %alias, target = %target, reason = SKIP_OUTSIDE_DEV, "device path resolves outside /dev");
     }
 }
 
@@ -613,30 +579,23 @@ impl Aggregation {
 
     /// The rules for every device that is authorized and has no deny vote, in the order devices
     /// were first seen, and how many candidates were not granted.
-    fn emit(&self, container_id: &str, log: &LogHandle) -> (Vec<DeviceRule>, usize) {
+    fn emit(&self, container_id: &str) -> (Vec<DeviceRule>, usize) {
         let mut rules = Vec::new();
         let mut skipped = 0;
         for device in &self.order {
             let votes = &self.votes[device];
-            let id = Attr::string("id", container_id);
-            let named = Attr::string("device", device.to_string());
+            let named = device.to_string();
             match (&votes.denied_by, votes.authorized) {
                 (Some(denied_by), true) => {
-                    log.info(
-                        "device denied by policy under one of its names",
-                        &[id, named, Attr::string("denied_by", denied_by.as_str())],
-                    );
+                    info!(id = %container_id, device = %named, denied_by = %denied_by, "device denied by policy under one of its names");
                     skipped += votes.candidates;
                 }
                 (Some(denied_by), false) => {
-                    log.debug(
-                        "device excluded by policy",
-                        &[id, named, Attr::string("denied_by", denied_by.as_str())],
-                    );
+                    debug!(id = %container_id, device = %named, denied_by = %denied_by, "device excluded by policy");
                     skipped += votes.candidates;
                 }
                 (None, false) => {
-                    log.debug("device not in the allow list", &[id, named]);
+                    debug!(id = %container_id, device = %named, "device not in the allow list");
                     skipped += votes.candidates;
                 }
                 (None, true) => rules.push(DeviceRule {
@@ -685,15 +644,7 @@ pub fn collect_container_rules(
     let mut devices = Aggregation::default();
     for mount in mounts.iter().filter(|mount| is_device_mount(mount)) {
         result.dev_mounts += 1;
-        judge.log.debug(
-            "device mount detected",
-            &[
-                Attr::string("id", container_id),
-                Attr::int("pid", pid),
-                Attr::string("source", mount.source.as_str()),
-                Attr::string("destination", mount.destination.as_str()),
-            ],
-        );
+        debug!(id = %container_id, pid = pid, source = %mount.source.as_str(), destination = %mount.destination.as_str(), "device mount detected");
         let mount_result = collect_mount_rules(dev, &mount.source, judge);
         result.skipped += mount_result.skipped;
         result.device_errs.extend(mount_result.errs);
@@ -704,7 +655,7 @@ pub fn collect_container_rules(
             devices.add(candidate);
         }
     }
-    let (granted, excluded) = devices.emit(container_id, judge.log);
+    let (granted, excluded) = devices.emit(container_id);
     result.granted = granted;
     result.skipped += excluded;
     result
@@ -831,6 +782,8 @@ pub enum BadDevname {
     Count(usize),
     /// A value that is not a clean relative path without `..`.
     Invalid(String),
+    /// A line over the cap: the uevent is not read in part.
+    LineTooLong,
 }
 
 impl fmt::Display for BadDevname {
@@ -839,6 +792,7 @@ impl fmt::Display for BadDevname {
         match self {
             Self::Count(count) => write!(formatter, "{count} DEVNAME lines"),
             Self::Invalid(name) => formatter.write_str(&quote(name)),
+            Self::LineTooLong => formatter.write_str("a line longer than 65536 bytes"),
         }
     }
 }

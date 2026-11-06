@@ -16,19 +16,20 @@
 
 //! Only the launcher reaches the Docker write calls (`docs/rust-port.md`, the Docker launcher
 //! path; the `trust-boundary` skill): the privileged daemon can create, start, stop or remove
-//! nothing. The write calls are the launcher's engine, `src/launcher/engine.rs`, sent through
-//! the two write calls of rust-common's docker-engine client, its sanctioned `pub`
-//! `Client::exchange` and `Client::exchange_upgrade` (the crate's `write` and `attach`, which
-//! only the root package enables: `docker_boundary.rs`). The daemon's `docker::Client` hands
-//! that client out through one crate-private hook, `Client::transport`. This pins it on the text
-//! of the non-test sources under `src/`:
+//! nothing. The write calls are the launcher's engine, `src/launcher/engine.rs`, made on bollard's
+//! client (through rust-common's docker-client, whose `attach` feature only the root package
+//! enables: `docker_boundary.rs`). The daemon's `docker::Client` hands that client out through one
+//! crate-private hook, `Client::transport`. This pins it on the text of the non-test sources under
+//! `src/`:
 //!
 //! - the hook stays `pub(crate)`, declared once in `src/docker/api.rs`, and only
-//!   `src/launcher/engine.rs` calls it or a write call; nothing in-tree declares a function of
-//!   the write calls' names, so no wrapper can widen them;
+//!   `src/launcher/engine.rs` (and the client file, for its own reads) calls it; only the engine
+//!   calls a write (one of bollard's verbs, or docker-client's `attach::attach` and
+//!   `attach::wait`), and no other crate-visible function hands out bollard's client, so no
+//!   wrapper can widen them;
 //! - only `src/launcher/engine.rs` sets a request's method or names a write method (`POST`,
 //!   `PUT`, `DELETE`, `PATCH`, or one parsed from text): `src/docker` names no method at all
-//!   (`docker_boundary.rs`), and the metrics server (`src/server.rs`, on go-http) neither;
+//!   (`docker_boundary.rs`);
 //! - outside `src/launcher`, nothing names the engine: its module, `Engine`, `EngineApi`, or a
 //!   launcher path to them;
 //! - outside `src/launcher` and the CLI entry modules that run the `launch` subcommand
@@ -60,19 +61,28 @@ fn pattern(text: &str) -> Regex {
     Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
 }
 
-/// A function of a write call's name or of the hook's, with its visibility.
+/// A function of the hook's name, with its visibility.
 static HOOK_DECLARED: LazyLock<Regex> =
-    LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+(?:exchange(?:_upgrade)?|transport)\b"));
-/// A function handing out docker-engine's client (whatever its name), or the client renamed so
-/// one could hand it out under another type name.
+    LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+transport\b"));
+/// A function named as the streaming hook, `Client::streaming`, which hands out the config the
+/// streaming calls (the events read, the launcher's wait) are made with.
+static STREAMING_DECLARED: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+streaming\b"));
+/// A use of the streaming hook: a method call or a path to it.
+static STREAMING_CALLED: LazyLock<Regex> = LazyLock::new(|| pattern(r"(?:\.|::)\s*streaming\b"));
+/// A crate-visible function handing out bollard's client `Docker` (whatever its name), or the
+/// client renamed so one could hand it out under another type name.
 static CLIENT_HANDED_OUT: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(r"\bpub(?:\([^)]*\))?\s+(?:async\s+)?fn\s+\w+[^{;]*->[^{;]*\bDocker\b|\bDocker\s+as\b")
+});
+/// A write call: one of bollard's verbs on anything, or docker-client's attach and wait pumps.
+static WRITE_CALL: LazyLock<Regex> = LazyLock::new(|| {
     pattern(
-        r"\bfn\s+\w+[^{;]*->[^{;]*\bdocker_engine\s*::\s*Client\b|\bdocker_engine\s*::\s*(?:\{[^}]*\b)?Client\s+as\b",
+        r"\.\s*(?:create|start|stop|restart|kill|pause|unpause|remove|rename|update|prune|attach|wait|resize|upload|commit|exec|build|push|pull|tag|import|connect|disconnect|join|leave|init|delete)_(?:containers?|exec|images?|networks?|volumes?|services?|swarm|nodes?|secrets?|configs?|plugins?|tasks?)\s*\(|\battach\s*::\s*(?:attach|wait)\b",
     )
 });
-/// A use of a write call or of the hook: a method call or a path to it.
-static HOOK_CALLED: LazyLock<Regex> =
-    LazyLock::new(|| pattern(r"(?:\.|::)\s*(?:exchange(?:_upgrade)?|transport)\b"));
+/// A use of the hook: a method call or a path to it.
+static HOOK_CALLED: LazyLock<Regex> = LazyLock::new(|| pattern(r"(?:\.|::)\s*transport\b"));
 /// A write method named or set: a `Method` constant or conversion, a `Request` shortcut, a
 /// method setter or a write method's name as a string.
 static WRITE_METHOD: LazyLock<Regex> = LazyLock::new(|| {
@@ -130,17 +140,17 @@ fn found_in(
         .collect()
 }
 
-/// What hands out docker-engine's client besides `transport` in the client file.
+/// What hands out bollard's client besides `transport` in the client file.
 fn handout_problems(files: &[(String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut handed_out = 0;
     for (path, text) in files {
         for found in CLIENT_HANDED_OUT.find_iter(text) {
-            if path == CLIENT && found.as_str().starts_with("fn transport(") {
+            if path == CLIENT && found.as_str().starts_with("pub(crate) async fn transport(") {
                 handed_out += 1;
             } else {
                 problems.push(format!(
-                    "{path}:{}: {}: only transport in {CLIENT} hands out docker-engine's client",
+                    "{path}:{}: {}: only transport in {CLIENT} hands out bollard's client",
                     line_of(text, found.start()),
                     found.as_str()
                 ));
@@ -149,7 +159,7 @@ fn handout_problems(files: &[(String, String)]) -> Vec<String> {
     }
     if handed_out != 1 {
         problems.push(format!(
-            "transport in {CLIENT} hands out docker-engine's client {handed_out} times, want once"
+            "transport in {CLIENT} hands out bollard's client {handed_out} times, want once"
         ));
     }
     problems
@@ -173,9 +183,9 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
                 line_of(text, found.start()),
                 found.as_str()
             );
-            if path != CLIENT || found.as_str() != "pub(crate) fn transport" {
+            if path != CLIENT || found.as_str() != "pub(crate) async fn transport" {
                 problems.push(format!(
-                    "{site}: only the hook is declared, pub(crate) fn transport in {CLIENT}"
+                    "{site}: only the hook is declared, pub(crate) async fn transport in {CLIENT}"
                 ));
             }
             hooks.push(found.as_str().to_owned());
@@ -184,11 +194,30 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     if hooks.len() != 1 {
         problems.push(format!("hooks declared: {hooks:?}; want transport alone"));
     }
-    problems.extend(handout_problems(&files));
-    for site in found_in(&files, &HOOK_CALLED, |path| path == ENGINE) {
+    // The streaming hook: declared in the client alone, called by the client's reads and the
+    // engine only.
+    for site in found_in(&files, &STREAMING_DECLARED, |path| path == CLIENT) {
         problems.push(format!(
-            "{site}: only {ENGINE} takes the transport and calls the writes"
+            "{site}: the streaming hook is declared in {CLIENT} alone"
         ));
+    }
+    for site in found_in(&files, &STREAMING_CALLED, |path| {
+        path == ENGINE || path.starts_with("src/docker/")
+    }) {
+        problems.push(format!(
+            "{site}: only {ENGINE} and src/docker take the streaming config"
+        ));
+    }
+    problems.extend(handout_problems(&files));
+    for site in found_in(&files, &HOOK_CALLED, |path| {
+        path == ENGINE || path == CLIENT
+    }) {
+        problems.push(format!(
+            "{site}: only {ENGINE} (and {CLIENT}, for its reads) takes the transport"
+        ));
+    }
+    for site in found_in(&files, &WRITE_CALL, |path| path == ENGINE) {
+        problems.push(format!("{site}: only {ENGINE} calls a write"));
     }
 
     // HTTP methods: only the engine sets one or names a write method.
@@ -265,7 +294,7 @@ fn a_write_call_outside_the_launcher_is_refused() {
     let mut widened = files.clone();
     for (path, text) in &mut widened {
         if path == CLIENT {
-            *text = client.replace("pub(crate) fn transport", "pub fn transport");
+            *text = client.replace("pub(crate) async fn transport", "pub async fn transport");
         }
     }
     assert_ne!(widened, files, "the hook moved");
@@ -273,15 +302,15 @@ fn a_write_call_outside_the_launcher_is_refused() {
         widened,
         with(
             CLIENT,
-            "\npub(crate) async fn exchange(&self) {\n    self.inner.exchange(\"/x\", \"\", |_| {}).await;\n}\n",
+            "\npub(crate) async fn start_container(&self) {\n    self.docker().start_container(\"x\", None).await;\n}\n",
         ),
         with(
             "src/daemon/mod.rs",
-            "\nfn raw(client: &Client) -> &docker_engine::Client {\n    client.transport()\n}\n",
+            "\nasync fn raw(client: &Client) -> Docker {\n    client.transport().await\n}\n",
         ),
         with(
             "src/processor/reconcile.rs",
-            "\nasync fn kill(client: &Client) {\n    docker_engine::Client::exchange(client.transport(), \"/x\", \"\", |_| {}).await;\n}\n",
+            "\nasync fn kill(client: &Client) {\n    client.transport().await.kill_container(\"x\", None).await;\n}\n",
         ),
         with(
             "src/docker/api.rs",
@@ -289,11 +318,27 @@ fn a_write_call_outside_the_launcher_is_refused() {
         ),
         with(
             "src/processor/reconcile.rs",
-            "\nasync fn kill(client: &Client) {\n    client.exchange(\"/containers/x/kill\", \"\", |_| {}).await;\n}\n",
+            "\nasync fn kill(docker: Docker) {\n    docker.kill_container(\"x\", None).await;\n}\n",
         ),
         with(
             "src/daemon/mod.rs",
-            "\nasync fn attach(client: &Client) {\n    client.exchange_upgrade(\"/x\", \"\", |_| {}).await;\n}\n",
+            "\nasync fn attach(docker: Docker) {\n    attach::attach(&docker, \"x\", timeout, 8, cancel).await;\n}\n",
+        ),
+        with(
+            "src/processor/reconcile.rs",
+            "\nasync fn wait(config: &Config) {\n    let _ = attach::wait(config, \"x\", WaitCondition::Removed, timeout, cancel).await;\n}\n",
+        ),
+        with(
+            "src/processor/reconcile.rs",
+            "\nasync fn peek(client: &Client) {\n    let _ = client.streaming().await;\n}\n",
+        ),
+        with(
+            "src/daemon/mod.rs",
+            "\npub(crate) async fn streaming() {}\n",
+        ),
+        with(
+            "src/docker/api.rs",
+            "\nasync fn stop(docker: Docker) {\n    docker.stop_container(\"x\", None).await;\n}\n",
         ),
         with(
             "src/daemon/mod.rs",
@@ -315,6 +360,27 @@ fn a_write_call_outside_the_launcher_is_refused() {
             "src/daemon/mod.rs",
             "\nfn remove() -> Builder {\n    Request::delete(\"/containers/x\")\n}\n",
         ),
+    ];
+    for (index, case) in cases.iter().enumerate() {
+        assert!(!problems(case).is_empty(), "case {index} was not refused");
+    }
+}
+
+/// Negative control: each way for code outside the launcher to name the write engine or the
+/// launcher itself is refused.
+#[test]
+fn naming_the_engine_or_the_launcher_outside_it_is_refused() {
+    let files = sources();
+    assert!(problems(&files).is_empty());
+    let with = |path: &str, extra: &str| -> Vec<(String, String)> {
+        let mut changed = files.clone();
+        match changed.iter_mut().find(|(name, _)| name == path) {
+            Some((_, text)) => text.push_str(extra),
+            None => changed.push((path.to_owned(), extra.to_owned())),
+        }
+        changed
+    };
+    let cases = [
         with("src/daemon/mod.rs", "\nuse crate::launcher::Engine;\n"),
         with(
             "src/daemon/coordinator.rs",
@@ -344,15 +410,16 @@ fn a_write_call_outside_the_launcher_is_refused() {
     }
 }
 
-/// Negative control: a second function handing out docker-engine's client from the client
-/// file, under another name or through a renamed import, is refused.
+/// Negative control: a second function handing out bollard's client from the client file, under
+/// another name or through a renamed import, is refused.
 #[test]
 fn a_second_handout_of_the_client_is_refused() {
     let files = sources();
     assert!(problems(&files).is_empty());
     for extra in [
-        "\npub(crate) fn raw(&self) -> &docker_engine::Client {\n    &self.inner\n}\n",
-        "\nuse docker_engine::Client as Transport;\nfn raw(client: &Client) -> &Transport {\n    &client.inner\n}\n",
+        "\npub(crate) fn raw(&self) -> Docker {\n    self.snapshot()\n}\n",
+        "\npub async fn raw(&self) -> Result<Docker, Error> {\n    Ok(self.snapshot())\n}\n",
+        "\nuse docker_client::bollard::Docker as Transport;\n",
     ] {
         let mut changed = files.clone();
         let Some((_, text)) = changed.iter_mut().find(|(path, _)| path == CLIENT) else {

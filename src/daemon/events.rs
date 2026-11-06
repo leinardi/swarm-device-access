@@ -42,7 +42,8 @@ use crate::docker::{
     with_context,
 };
 use crate::metrics::Recorder;
-use go_slog::{Attr, LogHandle};
+use clock::Clock;
+use tracing::{debug, error, info, warn};
 
 /// The event actions subscribed to: `start` and `unpause` reconcile a container, `die` and
 /// `destroy` end a run and clean up after it.
@@ -82,7 +83,8 @@ pub(super) async fn sleep_ctx(context: &CallContext, duration: Duration) {
 #[derive(Debug)]
 pub(super) enum Subscription<S> {
     Open(S),
-    /// The connect failed; the stream's first and only item is the error.
+    /// The engine refused the subscription; the stream's first and only item is the error. The
+    /// daemon is not ready on it.
     Refused(docker::Error),
 }
 
@@ -94,6 +96,12 @@ pub(super) enum StreamEnd {
 }
 
 impl StreamEnd {
+    /// A record of the stream that is not an event this program can read (an unknown enum value,
+    /// say): nothing a retry from the same point would change.
+    fn is_undecodable(&self) -> bool {
+        matches!(self, Self::Stream(error) if error.kind() == StreamErrorKind::Decode)
+    }
+
     /// The source of the events went away without an error: Go's closed message channel.
     fn is_closed(&self) -> bool {
         matches!(self, Self::Stream(error) if error.kind() == StreamErrorKind::Closed)
@@ -145,11 +153,11 @@ impl std::error::Error for SubscribeError {}
 
 /// Opens the Docker event stream with a bounded establishment.
 ///
-/// The `events` call does not resolve until dockerd has sent the response headers, so a hung
-/// dockerd would block the caller with nothing able to act as a watchdog, and a deadline on the
-/// stream itself would also cut it once established. The call is therefore raced against a timer
-/// here and dropped, which ends the attempt, when the timer or `context` wins; the stream it
-/// returns has no deadline.
+/// The `events` call does not resolve until dockerd has sent the response headers (the stream is
+/// established, not lazy), so a hung dockerd would block the caller with nothing able to act as a
+/// watchdog, and a deadline on the stream itself would also cut it once established. The call is
+/// therefore raced against a timer here and dropped, which ends the attempt, when the timer or
+/// `context` wins; the stream it returns has no deadline.
 pub(super) async fn subscribe<D: DockerApi>(
     context: &CallContext,
     docker: &D,
@@ -177,8 +185,9 @@ pub(super) struct Listener<'run, D, L, R> {
     pub(super) coordinator: &'run Arc<Coordinator<L, R>>,
     pub(super) metrics: &'run Recorder,
     pub(super) readiness: &'run Readiness,
-    pub(super) log: &'run LogHandle,
     pub(super) timeout: Duration,
+    /// The wall clock: a record the stream cannot decode moves the resubscription to now.
+    pub(super) clock: &'run dyn Clock,
 }
 
 impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
@@ -213,33 +222,37 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                 .await;
                 match resubscribed {
                     Ok(current) => {
-                        // since only replays what dockerd still buffers, and a restarted dockerd
-                        // has nothing buffered, so events of the gap can be lost: re-list and
-                        // reconcile every running container. The coordinator's processed map
-                        // skips replayed start events the pass already covered.
-                        self.log.info(
-                            "docker event stream re-subscribed; reconciling running containers",
-                            &[],
-                        );
-                        self.coordinator.request_reenumeration();
+                        // A refused subscription is no stream: nothing was re-established, so
+                        // neither the log nor a pass applies (it fails on its first item and
+                        // backs off).
+                        if matches!(current, Subscription::Open(_)) {
+                            // since only replays what dockerd still buffers, and a restarted
+                            // dockerd has nothing buffered, so events of the gap can be lost:
+                            // re-list and reconcile every running container. The coordinator's
+                            // processed map skips replayed start events the pass already covered.
+                            info!(
+                                "docker event stream re-subscribed; reconciling running containers"
+                            );
+                            self.coordinator.request_reenumeration();
+                        }
                         current
                     }
                     Err(error) => {
                         if context.err().is_some() {
                             return;
                         }
-                        self.log.error(
-                            "could not subscribe to docker events, retrying",
-                            &[Attr::error("err", &error), backoff_attr(backoff)],
-                        );
+                        error!(error = %error, backoff = ?backoff, "could not subscribe to docker events, retrying");
                         self.retry_after(context, &mut backoff).await;
                         continue;
                     }
                 }
             };
 
-            self.readiness.set(true);
-            self.log.debug("subscribed to docker events", &[]);
+            // Ready only once the engine answered the subscription: a refused one is no stream.
+            if matches!(current, Subscription::Open(_)) {
+                self.readiness.set(true);
+                debug!("subscribed to docker events");
+            }
 
             let disconnected = self
                 .consume_events(context, &mut current, &mut backoff, &mut last_event_nano)
@@ -277,18 +290,22 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                 // is a shutdown, not a stream failure.
                 Err(_) if context.err().is_some() => return false,
                 Err(end) if end.is_closed() => {
-                    self.log.warn(
-                        "docker events channel closed, reconnecting",
-                        &[backoff_attr(*backoff)],
-                    );
+                    warn!(backoff = ?*backoff, "docker events channel closed, reconnecting");
                     self.retry_after(context, backoff).await;
                     return context.err().is_none();
                 }
                 Err(end) => {
-                    self.log.error(
-                        "docker events stream error, reconnecting",
-                        &[Attr::error("err", &end), backoff_attr(*backoff)],
-                    );
+                    if end.is_undecodable() {
+                        // Resubscribing from the last event would replay the same record and
+                        // fail again for ever: the stream restarts from now, and the
+                        // re-enumeration every resubscription requests covers what the skipped
+                        // record may have announced.
+                        let now =
+                            i64::try_from(self.clock.now().as_nanosecond()).unwrap_or(i64::MAX);
+                        *last_event_nano = (*last_event_nano).max(now);
+                        warn!(error = %end, "docker event could not be decoded; skipping to now and re-enumerating on reconnect");
+                    }
+                    error!(error = %end, backoff = ?*backoff, "docker events stream error, reconnecting");
                     self.retry_after(context, backoff).await;
                     return context.err().is_none();
                 }
@@ -309,14 +326,6 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
         sleep_ctx(context, *backoff).await;
         *backoff = next_backoff(*backoff);
     }
-}
-
-/// The `backoff` attribute, as Go's `time.Duration` logs it.
-fn backoff_attr(backoff: Duration) -> Attr {
-    Attr::duration(
-        "backoff",
-        i64::try_from(backoff.as_nanos()).unwrap_or(i64::MAX),
-    )
 }
 
 #[cfg(test)]

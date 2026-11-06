@@ -23,7 +23,7 @@ use super::pin::{PinError, ProcCgroupError};
 use super::rules::DeviceError;
 use crate::cgroup::{self, HandleError};
 use crate::docker::{self, ErrorKind};
-use go_compat::quote::quote;
+use crate::text::quote;
 
 /// A failed reconcile, termination or revocation.
 #[derive(Debug)]
@@ -125,11 +125,18 @@ impl Error {
         self.any(&|error| matches!(error, Self::NotInCgroup { .. }))
     }
 
-    /// Whether it wraps a Docker error of `kind` (Go's `errors.Is` on `context.Canceled` or
-    /// `context.DeadlineExceeded`).
+    /// Whether it wraps a Docker error of `kind` (a deadline, Go's `context.DeadlineExceeded`,
+    /// is [`ErrorKind::Timeout`]).
     #[must_use]
     pub fn is_docker(&self, kind: ErrorKind) -> bool {
         self.any(&|error| matches!(error, Self::Inspect { source, .. } if source.kind() == kind))
+    }
+
+    /// Whether it wraps a Docker call the caller's context cancelled (Go's `errors.Is` on
+    /// `context.Canceled`).
+    #[must_use]
+    pub fn is_docker_canceled(&self) -> bool {
+        self.any(&|error| matches!(error, Self::Inspect { source, .. } if source.is_canceled()))
     }
 
     /// Whether it wraps a cgroup error `matches` accepts (`cgroup::Error::is_filter_missing` and
@@ -330,7 +337,7 @@ mod tests {
             .unwrap()
             .downcast_ref::<docker::Error>()
             .unwrap();
-        assert_eq!(source.kind(), ErrorKind::DeadlineExceeded);
+        assert_eq!(source.kind(), ErrorKind::Timeout);
         assert!(Error::Canceled.source().is_none());
     }
 

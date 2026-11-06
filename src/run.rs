@@ -38,19 +38,21 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::cgroup::rlimit;
-use crate::cli::settings::{self, Reloader, Settings, list_attr};
+use crate::cli::settings::{self, Reloader, Settings};
 use crate::cli::{self, LAUNCH_COMMAND};
 use crate::config::{self, Runtime};
 use crate::daemon::{self, DOCKER_CALL_TIMEOUT, Readiness};
-use crate::docker::{self, CallContext, Client};
+use crate::docker::{CallContext, Client};
 use crate::launcher::{self, spec};
+use crate::logging;
 use crate::metrics::Recorder;
 use crate::processor::{self, Processor, devfs};
 use crate::server::{self, App, MetricsServer};
 use crate::version::BUILD;
-use go_clock::{Clock, SystemClock};
-use go_slog::{Attr, LogHandle, PlainStyle};
+use clock::{Clock, SystemClock};
 use service_kit::runtime::Exit;
+use tracing::{error, info, warn};
+use tracing_setup::ReloadHandle;
 
 /// The time from the first shutdown signal to the exit: Docker's stop timeout, which the launcher
 /// gives the daemon ([`spec::STOP_TIMEOUT`]).
@@ -109,7 +111,7 @@ fn startup_settings(flags: &Settings, parsed: &cli::Parsed) -> Result<(Settings,
     Ok((effective, runtime))
 }
 
-/// Go's `run`, on `args` (the program name first) and the environment `getenv`, shutting down
+/// Go's `run`, on `args` (the program name first), shutting down
 /// when what `shutdown` returns resolves; `shutdown` registers the signals, and is called where Go
 /// calls `signal.NotifyContext`. `hangups` registers the `SIGHUP` channel; it is called once the
 /// flags are parsed, before anything slow, so a `SIGHUP` during startup is queued for the reload
@@ -117,7 +119,6 @@ fn startup_settings(flags: &Settings, parsed: &cli::Parsed) -> Result<(Settings,
 /// no `SIGHUP`.
 pub async fn run_with<I, T, F>(
     args: I,
-    getenv: impl Fn(&str) -> Option<String>,
     shutdown: impl FnOnce() -> F,
     hangups: impl FnOnce() -> mpsc::Receiver<()>,
 ) -> Exit<i32>
@@ -128,7 +129,7 @@ where
 {
     let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
     if args.get(1).is_some_and(|first| first == LAUNCH_COMMAND) {
-        return run_launch(&args[2..], &getenv, shutdown).await;
+        return run_launch(&args[2..], shutdown).await;
     }
     let parsed = match cli::parse(&args) {
         Ok(parsed) => parsed,
@@ -147,22 +148,25 @@ where
         }
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let log = LogHandle::stdout(Arc::clone(&clock), &getenv, PlainStyle::Raw);
-    log.configure(
-        &effective.log_format,
-        &effective.log_level,
+    let log_handle = logging::install_daemon(
+        logging::format(&effective.log_format),
+        logging::level(&effective.log_level),
         effective.log_time,
     );
     let (store, publisher) = config::new_store(runtime);
-    announce(&log, &parsed.args.config, &store.load());
+    announce(&parsed.args.config, &store.load());
 
     let (root, signalled) = watch_shutdown(shutdown);
 
     // API version negotiation runs lazily, on the first request, as moby's does.
-    let docker = match docker::Settings::unix(&effective.docker_socket) {
-        Ok(settings) => Arc::new(Client::new(settings)),
+    let docker = match Client::unix(
+        &effective.docker_socket,
+        DOCKER_CALL_TIMEOUT,
+        DOCKER_CALL_TIMEOUT,
+    ) {
+        Ok(client) => Arc::new(client),
         Err(error) => {
-            log.error("docker client init failed", &[Attr::error("err", &error)]);
+            error!(error = %error, "docker client init failed");
             return Exit::early(1);
         }
     };
@@ -170,13 +174,8 @@ where
     let readiness = Readiness::default();
 
     // Started before the main loop, so the endpoints are reachable during the startup pass.
-    let app = App::new(
-        readiness.clone(),
-        recorder.clone(),
-        Arc::clone(&clock),
-        log.clone(),
-    );
-    let Ok(server) = start_server(&root, &effective.metrics_addr, app, &log).await else {
+    let app = App::new(readiness.clone(), recorder.clone());
+    let Ok(server) = start_server(&root, &effective.metrics_addr, app).await else {
         return Exit::early(1);
     };
 
@@ -189,13 +188,12 @@ where
         proc_root: "/".to_owned(),
         call_timeout: Some(DOCKER_CALL_TIMEOUT),
         clock: Arc::clone(&clock),
-        log: log.clone(),
     });
 
     tokio::spawn(settings::watch_sighup(
         root.cancellation(),
         hangups,
-        reloader(&parsed, flags, effective, &processor, &root, &log),
+        reloader(&parsed, flags, effective, &processor, &root, log_handle),
     ));
 
     let run = daemon::run(
@@ -207,7 +205,6 @@ where
             readiness,
             call_timeout: DOCKER_CALL_TIMEOUT,
             clock,
-            log: log.clone(),
         },
     );
     let budget = async {
@@ -218,7 +215,7 @@ where
         () = run => {}
         () = budget => {}
     }
-    log.info("swarm-device-access shutting down", &[]);
+    info!("swarm-device-access shutting down");
     let deadline = deadline(&signalled);
     stop_server(server, deadline).await;
     Exit {
@@ -228,33 +225,27 @@ where
 }
 
 /// The start log, the dry-run warning and the `RLIMIT_MEMLOCK` removal, in Go's order.
-fn announce(log: &LogHandle, config_file: &str, current: &Runtime) {
-    log.info(
+fn announce(config_file: &str, current: &Runtime) {
+    info!(
+        version = BUILD.version,
+        commit = BUILD.commit,
+        date = BUILD.date,
+        config_file = %config_file,
+        dry_run = current.dry_run,
+        policy_mode = current.policy.mode().as_str(),
+        device_allow = ?current.policy.device_allow(),
+        device_deny = ?current.policy.device_deny(),
         "swarm-device-access starting",
-        &[
-            Attr::string("version", BUILD.version),
-            Attr::string("commit", BUILD.commit),
-            Attr::string("date", BUILD.date),
-            Attr::string("config_file", config_file),
-            Attr::bool("dry_run", current.dry_run),
-            Attr::string("policy_mode", current.policy.mode().as_str()),
-            list_attr("device_allow", current.policy.device_allow()),
-            list_attr("device_deny", current.policy.device_deny()),
-        ],
     );
     if current.dry_run {
         // Dry-run has no cgroup view and no saved ownership state, so it cannot even count what a
         // previous live run left behind.
-        log.warn(
-            "dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run",
-            &[],
+        warn!(
+            "dry-run: grants left by a previous live run cannot be detected or cleaned in dry-run"
         );
     }
     if let Err(error) = rlimit::remove_memlock() {
-        log.warn(
-            "could not remove RLIMIT_MEMLOCK; loading BPF device filters may fail",
-            &[Attr::error("err", &error)],
-        );
+        warn!(error = %error, "could not remove RLIMIT_MEMLOCK; loading BPF device filters may fail");
     }
 }
 
@@ -264,7 +255,6 @@ async fn start_server(
     root: &CallContext,
     address: &str,
     app: App,
-    log: &LogHandle,
 ) -> Result<Option<MetricsServer>, ()> {
     if address.is_empty() {
         return Ok(None);
@@ -272,13 +262,7 @@ async fn start_server(
     match server::start_metrics_server(&root.cancellation(), address, app).await {
         Ok(server) => Ok(Some(server)),
         Err(error) => {
-            log.error(
-                "could not start observability server",
-                &[Attr::string(
-                    "err",
-                    format!("start metrics server: {error}"),
-                )],
-            );
+            error!(error = %format!("start metrics server: {error}"), "could not start observability server");
             Err(())
         }
     }
@@ -304,9 +288,8 @@ fn reloader(
     current: Settings,
     processor: &Arc<Processor<Arc<Client>>>,
     root: &CallContext,
-    log: &LogHandle,
+    log_handle: ReloadHandle,
 ) -> Reloader {
-    let configure = log.clone();
     let processor = Arc::clone(processor);
     let context = root.clone();
     Reloader {
@@ -314,26 +297,22 @@ fn reloader(
         flags,
         cli_set: parsed.set.clone(),
         current,
-        configure_logger: Box::new(move |format, level, include_time| {
-            configure.configure(format, level, include_time);
+        configure_logger: Box::new(move |format, level| {
+            // Fails only when the subscriber is gone, which the process's default never is.
+            let _ = log_handle.reconfigure(logging::format(format), logging::level(level));
         }),
         publish_and_reconcile: Box::new(move |runtime| {
             let processor = Arc::clone(&processor);
             let context = context.clone();
             Box::pin(async move { processor.publish_and_reconcile(&context, runtime).await })
         }),
-        log: log.clone(),
     }
 }
 
 /// Go's `runLaunch`: the launcher, and its daemon's exit status, or 1 when the launcher itself
 /// fails. It skips everything only the daemon needs: the config file, the openat2 probe,
 /// `RLIMIT_MEMLOCK`, `SIGHUP` and the metrics server.
-async fn run_launch<F>(
-    arguments: &[OsString],
-    getenv: &impl Fn(&str) -> Option<String>,
-    shutdown: impl FnOnce() -> F,
-) -> Exit<i32>
+async fn run_launch<F>(arguments: &[OsString], shutdown: impl FnOnce() -> F) -> Exit<i32>
 where
     F: Future<Output = ()> + Send + 'static,
 {
@@ -344,29 +323,21 @@ where
             return Exit::early(exit.code);
         }
     };
-    let log = LogHandle::stdout(Arc::new(SystemClock), getenv, PlainStyle::Raw);
-    log.configure(&launch.args.log_format, &launch.args.log_level, false);
-    log.info(
-        "swarm-device-access launcher starting",
-        &[
-            Attr::string("component", LAUNCHER_COMPONENT),
-            Attr::string("version", BUILD.version),
-            Attr::string("commit", BUILD.commit),
-            Attr::string("date", BUILD.date),
-            Attr::strings("daemon_args", &launch.daemon_args),
-        ],
+    logging::install_launcher(
+        logging::format(&launch.args.log_format),
+        logging::level(&launch.args.log_level),
     );
+    info!(component = %LAUNCHER_COMPONENT, version = BUILD.version, commit = BUILD.commit, date = BUILD.date, daemon_args = ?&launch.daemon_args, "swarm-device-access launcher starting");
     let (context, _) = watch_shutdown(shutdown);
-    let client = match docker::Settings::unix(spec::CONTAINER_DOCKER_SOCKET) {
-        Ok(settings) => Client::new(settings),
+    // The headers of a stop come once the daemon stopped: up to the stop timeout, and a call.
+    let client = match Client::unix(
+        spec::CONTAINER_DOCKER_SOCKET,
+        DOCKER_CALL_TIMEOUT,
+        spec::STOP_TIMEOUT + DOCKER_CALL_TIMEOUT,
+    ) {
+        Ok(client) => client,
         Err(error) => {
-            log.error(
-                "docker client init failed",
-                &[
-                    Attr::string("component", LAUNCHER_COMPONENT),
-                    Attr::error("err", &error),
-                ],
-            );
+            error!(component = %LAUNCHER_COMPONENT, error = %error, "docker client init failed");
             return Exit::early(1);
         }
     };
@@ -377,17 +348,11 @@ where
         host_network: launch.args.host_network,
         daemon_args: Some(launch.daemon_args),
     };
-    match launcher::run(&context, client, options, &log).await {
+    match launcher::run(&context, client, options).await {
         // Go's os.Exit(status): the kernel keeps the low byte.
         Ok(status) => Exit::early(i32::try_from(status & 0xff).unwrap_or(1)),
         Err(error) => {
-            log.error(
-                "launcher failed",
-                &[
-                    Attr::string("component", LAUNCHER_COMPONENT),
-                    Attr::error("err", &error),
-                ],
-            );
+            error!(component = %LAUNCHER_COMPONENT, error = %error, "launcher failed");
             Exit::early(1)
         }
     }

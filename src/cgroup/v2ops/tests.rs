@@ -144,46 +144,55 @@ fn a_failed_load_is_retried_with_a_growing_log() {
 #[test]
 fn a_verifier_error_reads_as_cilium() {
     let cases = [
-        ("", "load program: invalid argument"),
+        ("", "load program: Invalid argument (os error 22)"),
         (
             "0: (b7) r0 = 0\n1: (95) exit\nR0 !read_ok\nprocessed 2 insns (limit 1000000) \
              max_states_per_insn 0\n",
-            "load program: invalid argument: 1: (95) exit: R0 !read_ok (2 line(s) omitted)",
+            "load program: Invalid argument (os error 22): 1: (95) exit: R0 !read_ok (2 line(s) omitted)",
         ),
         (
             "0: (61) r2 = *(u32 *)(r1 +12)\ninvalid bpf_context access off=12 size=4\n\
              processed 1 insns\n",
-            "load program: invalid argument: 0: (61) r2 = *(u32 *)(r1 +12): invalid \
+            "load program: Invalid argument (os error 22): 0: (61) r2 = *(u32 *)(r1 +12): invalid \
              bpf_context access off=12 size=4 (1 line(s) omitted)",
         ),
         (
             "func#0 @0\n0: R1=ctx() R10=fp0\n0: (85) call bpf_ktime_get_ns#5\n\tunknown func\n",
-            "load program: invalid argument: 0: (85) call bpf_ktime_get_ns#5: unknown func (2 \
+            "load program: Invalid argument (os error 22): 0: (85) call bpf_ktime_get_ns#5: unknown func (2 \
              line(s) omitted)",
         ),
         (
             "processed 1 insns (limit 1000000)\n",
-            "load program: invalid argument",
+            "load program: Invalid argument (os error 22)",
         ),
-        ("  \n\n\t ", "load program: invalid argument"),
+        ("  \n\n\t ", "load program: Invalid argument (os error 22)"),
         (
             "first line  \nsecond\t\n",
-            "load program: invalid argument: second (1 line(s) omitted)",
+            "load program: Invalid argument (os error 22): second (1 line(s) omitted)",
         ),
-        ("only line", "load program: invalid argument: only line"),
-        ("abc\0def", "load program: invalid argument: abc"),
+        (
+            "only line",
+            "load program: Invalid argument (os error 22): only line",
+        ),
+        (
+            "abc\0def",
+            "load program: Invalid argument (os error 22): abc",
+        ),
         (
             "one\ntwo\n   R1 type=ctx\n",
-            "load program: invalid argument: R1 type=ctx (2 line(s) omitted)",
+            "load program: Invalid argument (os error 22): R1 type=ctx (2 line(s) omitted)",
         ),
         (
             "one\nR1 type=ctx expected=fp\n",
-            "load program: invalid argument: one: R1 type=ctx expected=fp",
+            "load program: Invalid argument (os error 22): one: R1 type=ctx expected=fp",
         ),
-        ("R2 !read_ok", "load program: invalid argument: R2 !read_ok"),
+        (
+            "R2 !read_ok",
+            "load program: Invalid argument (os error 22): R2 !read_ok",
+        ),
         (
             "a\n\nb\n",
-            "load program: invalid argument: b (2 line(s) omitted)",
+            "load program: Invalid argument (os error 22): b (2 line(s) omitted)",
         ),
     ];
     for (log, want) in cases {
@@ -198,20 +207,20 @@ fn load_failures_carry_cilium_hints() {
     let cases = [
         (
             LoadError::from_failure(Errno::PERM, &[0; 16]),
-            "load program: operation not permitted (MEMLOCK may be too low, consider \
+            "load program: Operation not permitted (os error 1) (MEMLOCK may be too low, consider \
              rlimit.RemoveMemlock)",
         ),
         (
             LoadError::from_failure(Errno::PERM, b"denied\n"),
-            "load program: operation not permitted: denied",
+            "load program: Operation not permitted (os error 1): denied",
         ),
         (
             LoadError::from_failure(Errno::PERM, b""),
-            "load program: operation not permitted",
+            "load program: Operation not permitted (os error 1)",
         ),
         (
             LoadError::from_failure(Errno::FAULT, b"x"),
-            "load program: bad address (hit verifier bug, increase LogSizeStart to fit the log \
+            "load program: Bad address (os error 14) (hit verifier bug, increase LogSizeStart to fit the log \
              and check dmesg)",
         ),
         (
@@ -233,7 +242,7 @@ fn load_failures_carry_cilium_hints() {
         ),
         (
             LoadError::Attempts(Errno::NOSPC),
-            "load program: no space left on device (bug: hit 30 verifier attempts)",
+            "load program: No space left on device (os error 28) (bug: hit 30 verifier attempts)",
         ),
         (LoadError::Empty, "instructions cannot be empty"),
         (
@@ -255,7 +264,7 @@ fn ops_errors_read_as_go() {
     let cases = [
         (
             OpsError::Query(Errno::BADF),
-            "bpf_prog_query(BPF_CGROUP_DEVICE) failed: bad file descriptor",
+            "bpf_prog_query(BPF_CGROUP_DEVICE) failed: Bad file descriptor (os error 9)",
         ),
         (
             OpsError::IncompleteProgList,
@@ -263,16 +272,16 @@ fn ops_errors_read_as_go() {
         ),
         (
             OpsError::Fetch(FetchError::GetById(Errno::NOENT)),
-            "cannot fetch program from id: get program by id: no such file or directory",
+            "cannot fetch program from id: get program by id: No such file or directory (os error 2)",
         ),
         (
             OpsError::Fetch(FetchError::Discover(Errno::ACCESS)),
             "cannot fetch program from id: discover program type: getting object info: \
-             permission denied",
+             Permission denied (os error 13)",
         ),
         (
             OpsError::Load(LoadError::from_failure(Errno::INVAL, b"")),
-            "unable to create new device filters program: load program: invalid argument",
+            "unable to create new device filters program: load program: Invalid argument (os error 22)",
         ),
         (
             OpsError::Attach {
@@ -280,12 +289,12 @@ fn ops_errors_read_as_go() {
                 errno: Errno::INVAL,
             },
             "failed to call BPF_PROG_ATTACH (BPF_CGROUP_DEVICE, flags BPF_F_ALLOW_MULTI): \
-             attach program: invalid argument",
+             attach program: Invalid argument (os error 22)",
         ),
         (
             OpsError::Detach(Errno::NOENT),
-            "failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: no such \
-             file or directory",
+            "failed to call BPF_PROG_DETACH (BPF_CGROUP_DEVICE): can't detach program: No such \
+             file or directory (os error 2)",
         ),
         (
             OpsError::OldKernel,
@@ -294,11 +303,11 @@ fn ops_errors_read_as_go() {
         (
             OpsError::Info(InfoError::ObjInfo(Errno::INVAL)),
             "unable to get Info() of the original device filters program: getting object info: \
-             invalid argument",
+             Invalid argument (os error 22)",
         ),
         (
             OpsError::Info(InfoError::Xlated(Errno::FAULT)),
-            "unable to get Info() of the original device filters program: bad address",
+            "unable to get Info() of the original device filters program: Bad address (os error 14)",
         ),
         (
             OpsError::Instructions(InstructionsError::Restricted),

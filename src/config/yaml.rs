@@ -33,7 +33,7 @@ use super::resolve::{
     BINARY_TAG, MAP_TAG, MERGE_TAG, NULL_TAG, Resolved, SEQ_TAG, STR_TAG, decode_base64, resolve,
     short_tag,
 };
-use go_compat::quote::quote;
+use crate::text::quote;
 
 /// A YAML syntax error, as yaml.v3 reports a scanner or parser failure.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -18,11 +18,10 @@
 //! scalars are strings: a config value that resolves to anything else fails its key's shape. The
 //! numeric checks port what `resolve` asks of `strconv.ParseInt`, `ParseUint` and `ParseFloat`,
 //! and the timestamp check what it asks of `time.Parse` with its four layouts; only whether each
-//! succeeds matters here, never the value. `ParseInt`, `ParseUint` and `underscoreOK` are the
-//! shared ports in `go_compat`.
-
-use go_compat::parse_float::underscore_ok;
-use go_compat::parse_int::{parse_int, parse_uint};
+//! succeeds matters here, never the value. They are the standard library's parsers, which read
+//! fewer spellings than Go's: no `0x` hexadecimal, no `_` separators and no leading-zero octal
+//! (`0755` is the decimal 755), so a scalar spelled that way is a string here, where yaml.v3
+//! resolved it to a number (README Q17).
 
 /// `!!null`.
 pub(super) const NULL_TAG: &str = "!!null";
@@ -170,20 +169,20 @@ fn resolve_number(tag: &str, input: &str) -> Option<(&'static str, Resolved)> {
     if (tag.is_empty() || tag == TIMESTAMP_TAG) && is_timestamp(input) {
         return Some((TIMESTAMP_TAG, Resolved::Timestamp));
     }
-    let plain = input.replace('_', "");
+    let plain = input;
     let integer = |digits: &str, base: u32| {
-        if parse_int(digits, base).is_ok() {
+        if i64::from_str_radix(digits, base).is_ok() {
             Some((INT_TAG, Resolved::Int))
-        } else if parse_uint(digits, base).is_ok() {
+        } else if u64::from_str_radix(digits, base).is_ok() {
             Some((INT_TAG, Resolved::Uint))
         } else {
             None
         }
     };
-    if let Some(found) = integer(&plain, 0) {
+    if let Some(found) = integer(plain, 10) {
         return Some(found);
     }
-    if yaml_style_float(&plain) && decimal_is_finite(&plain) {
+    if yaml_style_float(plain) && decimal_is_finite(plain) {
         return Some((FLOAT_TAG, Resolved::Float));
     }
     for (prefix, negative_prefix, base) in [("0b", "-0b", 2), ("0o", "-0o", 8)] {
@@ -192,7 +191,7 @@ fn resolve_number(tag: &str, input: &str) -> Option<(&'static str, Resolved)> {
                 return Some(found);
             }
         } else if let Some(digits) = plain.strip_prefix(negative_prefix)
-            && parse_int(&format!("-{digits}"), base).is_ok()
+            && i64::from_str_radix(&format!("-{digits}"), base).is_ok()
         {
             return Some((INT_TAG, Resolved::Int));
         }
@@ -246,8 +245,7 @@ fn decimal_is_finite(text: &str) -> bool {
     text.parse::<f64>().is_ok_and(f64::is_finite)
 }
 
-/// `strconv.ParseFloat(in, 64)` succeeding, for the `.` branch: a decimal float in Go syntax,
-/// underscores between digits allowed, within range.
+/// `strconv.ParseFloat(in, 64)` succeeding, for the `.` branch: a decimal float, within range.
 fn go_float_syntax(text: &str) -> bool {
     let bytes = text.as_bytes();
     let mut index = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
@@ -256,7 +254,6 @@ fn go_float_syntax(text: &str) -> bool {
     while let Some(&byte) = bytes.get(index) {
         match byte {
             b'0'..=b'9' => digits = true,
-            b'_' => {}
             b'.' if !seen_point => seen_point = true,
             _ => break,
         }
@@ -271,16 +268,14 @@ fn go_float_syntax(text: &str) -> bool {
             index += 1;
         }
         let start = index;
-        while matches!(bytes.get(index), Some(b'0'..=b'9' | b'_')) {
+        while matches!(bytes.get(index), Some(b'0'..=b'9')) {
             index += 1;
         }
         if !bytes[start..index].iter().any(u8::is_ascii_digit) {
             return false;
         }
     }
-    index == bytes.len()
-        && underscore_ok(text.as_bytes())
-        && decimal_is_finite(&text.replace('_', ""))
+    index == bytes.len() && decimal_is_finite(text)
 }
 
 /// `parseTimestamp`: four digits and a dash, then one of yaml.v3's layouts as `time.Parse`
@@ -452,11 +447,11 @@ mod tests {
             // The parser, not resolve, tags a plain << as a merge: its first byte has no hint.
             ("<<", STR_TAG),
             ("9090", INT_TAG),
-            ("1_000", INT_TAG),
-            ("0x10", INT_TAG),
+            ("1_000", STR_TAG),
+            ("0x10", STR_TAG),
             ("0o17", INT_TAG),
             ("0777", INT_TAG),
-            ("09", FLOAT_TAG),
+            ("09", INT_TAG),
             ("0b101", INT_TAG),
             ("-0b101", INT_TAG),
             ("18446744073709551615", INT_TAG),
@@ -464,7 +459,7 @@ mod tests {
             ("1.5", FLOAT_TAG),
             ("1e999", STR_TAG),
             (".5", FLOAT_TAG),
-            (".5_5", FLOAT_TAG),
+            (".5_5", STR_TAG),
             ("._5", STR_TAG),
             (".inf", FLOAT_TAG),
             (".iNf", STR_TAG),

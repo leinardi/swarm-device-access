@@ -59,24 +59,26 @@ fn errors_read_as_go() {
     let missing = missing.to_str().unwrap();
     assert_eq!(
         CgroupHandle::open(missing).unwrap_err().to_string(),
-        format!(r#"open cgroup "{missing}": no such file or directory"#)
+        format!(r#"open cgroup "{missing}": No such file or directory (os error 2)"#)
     );
     let path = dir.path().to_str().unwrap();
     let handle = CgroupHandle::open(path).unwrap();
     assert_eq!(
         handle.has_process(1).unwrap_err().to_string(),
-        format!(r#"open cgroup.procs of "{path}": no such file or directory"#)
+        format!(r#"open cgroup.procs of "{path}": No such file or directory (os error 2)"#)
     );
     std::fs::create_dir(dir.path().join("cgroup.procs")).unwrap();
     assert_eq!(
         handle.has_process(1).unwrap_err().to_string(),
-        format!(r#"read cgroup.procs of "{path}": read cgroup.procs: is a directory"#)
+        format!(
+            r#"read cgroup.procs of "{path}": read cgroup.procs: Is a directory (os error 21)"#
+        )
     );
     let file = dir.path().join("file");
     std::fs::write(&file, "").unwrap();
     let file = file.to_str().unwrap();
     assert_eq!(
         CgroupHandle::open(file).unwrap_err().to_string(),
-        format!(r#"open cgroup "{file}": not a directory"#)
+        format!(r#"open cgroup "{file}": Not a directory (os error 20)"#)
     );
 }

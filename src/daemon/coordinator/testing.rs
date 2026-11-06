@@ -34,13 +34,14 @@ use crate::config::{Runtime, new_store};
 use crate::daemon::DOCKER_CALL_TIMEOUT;
 use crate::docker::types::{Actor, ContainerInspect, Event};
 use crate::docker::{self, CallContext};
-use crate::metrics::{Recorder, Value};
+use crate::metrics::Recorder;
+use crate::metrics::testing::Scrape;
 use crate::policy::Global;
 use crate::processor::{self, Inspector, Processor};
-use crate::test_support::capture_logs;
 use crate::test_support::fake_docker::FakeDocker;
-use go_clock::{Clock, TokioClock};
-use go_slog::{Level, LogHandle, MemorySink};
+use crate::test_support::{Logs, capture_logs};
+use clock::{Clock, TokioClock};
+use tracing::level_filters::LevelFilter;
 
 /// How long a wait for something the coordinator will do may take, in paused tokio time.
 pub(crate) const WITHIN: Duration = Duration::from_secs(300);
@@ -191,8 +192,7 @@ pub(crate) struct Harness<R = Arc<FakeReconciler>> {
     pub(crate) docker: Arc<FakeDocker>,
     pub(crate) reconciler: R,
     pub(crate) metrics: Recorder,
-    pub(crate) sink: MemorySink,
-    pub(crate) log: LogHandle,
+    captured: Logs,
     pub(crate) clock: Arc<dyn Clock>,
 }
 
@@ -200,22 +200,20 @@ impl<R: Reconciler + Clone> Harness<R> {
     pub(crate) fn with_clock(docker: FakeDocker, reconciler: R, clock: Arc<dyn Clock>) -> Self {
         let docker = Arc::new(docker);
         let metrics = Recorder::new();
-        let (log, sink) = capture_logs(Level::DEBUG);
+        let captured = capture_logs(LevelFilter::DEBUG);
         let coordinator = Coordinator::new(Settings {
             docker: Arc::clone(&docker),
             reconciler: reconciler.clone(),
             metrics: metrics.clone(),
             timeout: DOCKER_CALL_TIMEOUT,
             clock: Arc::clone(&clock),
-            log: log.clone(),
         });
         Self {
             coordinator,
             docker,
             reconciler,
             metrics,
-            sink,
-            log,
+            captured,
             clock,
         }
     }
@@ -254,7 +252,7 @@ impl<R: Reconciler + Clone> Harness<R> {
     }
 
     pub(crate) fn logs(&self) -> String {
-        self.sink.contents()
+        self.captured.contents()
     }
 
     /// The generation of every "config reload complete" line.
@@ -296,36 +294,17 @@ impl<R: Reconciler + Clone> Harness<R> {
     }
 
     pub(crate) fn scalar(&self, name: &str, labels: &[(&str, &str)]) -> f64 {
-        match self.value(name, labels) {
-            Some(Value::Scalar(value)) => value,
-            other @ (Some(Value::Histogram { .. }) | None) => panic!("{name}: {other:?}"),
-        }
+        self.value(name, labels)
+            .unwrap_or_else(|| panic!("{name} {labels:?}: no such sample"))
     }
 
-    pub(crate) fn samples(&self, name: &str) -> u64 {
-        match self.value(name, &[]) {
-            Some(Value::Histogram { count, .. }) => count,
-            other @ (Some(Value::Scalar(_)) | None) => panic!("{name}: {other:?}"),
-        }
+    /// How many observations the histogram `name` has.
+    pub(crate) fn samples(&self, name: &str) -> f64 {
+        self.scalar(&format!("{name}_count"), &[])
     }
 
-    pub(crate) fn value(&self, name: &str, labels: &[(&str, &str)]) -> Option<Value> {
-        self.metrics
-            .registry()
-            .unwrap()
-            .gather()
-            .into_iter()
-            .find(|family| family.name == name)?
-            .series
-            .into_iter()
-            .find(|series| {
-                series
-                    .labels
-                    .iter()
-                    .map(|(key, value)| (key.as_str(), value.as_str()))
-                    .eq(labels.iter().copied())
-            })
-            .map(|series| series.value)
+    pub(crate) fn value(&self, name: &str, labels: &[(&str, &str)]) -> Option<f64> {
+        Scrape::of(&self.metrics).value(name, labels)
     }
 
     /// The values `process_one` is responsible for (Go's `metricsSnapshot`).
@@ -339,10 +318,8 @@ impl<R: Reconciler + Clone> Harness<R> {
     }
 
     pub(crate) fn counter_or_zero(&self, result: &str) -> f64 {
-        match self.value("sda_rules_applied_total", &[("result", result)]) {
-            Some(Value::Scalar(value)) => value,
-            Some(Value::Histogram { .. }) | None => 0.0,
-        }
+        self.value("sda_rules_applied_total", &[("result", result)])
+            .unwrap_or(0.0)
     }
 }
 
@@ -357,7 +334,7 @@ impl Harness {
 pub(crate) struct Snapshot {
     pub(crate) applied_ok: f64,
     pub(crate) applied_error: f64,
-    pub(crate) duration_count: u64,
+    pub(crate) duration_count: f64,
     pub(crate) last_event: f64,
 }
 
@@ -376,12 +353,12 @@ pub(crate) fn assert_failure_reported(
         (after.applied_ok - before.applied_ok).abs() < f64::EPSILON,
         "rules_applied{{result=ok}} changed on failure: {before:?} -> {after:?}"
     );
-    assert_eq!(after.duration_count - before.duration_count, 1);
+    assert!((after.duration_count - before.duration_count - 1.0).abs() < f64::EPSILON);
     assert!(
         (after.last_event - before.last_event).abs() < f64::EPSILON,
         "last_event_timestamp changed on failure: {before:?} -> {after:?}"
     );
-    let line = format!("level=WARN {message} id=bad err=apply failed");
+    let line = format!("level=WARN {message} error=apply failed id=bad");
     assert!(
         logs.lines().any(|logged| logged == line),
         "want {line:?} in:\n{logs}"
@@ -441,6 +418,5 @@ pub(crate) fn hanging_processor() -> Arc<Processor<HangingInspector>> {
         proc_root: "/".to_owned(),
         call_timeout: None,
         clock: Arc::new(TokioClock::new(base())),
-        log: capture_logs(Level::DEBUG).0,
     })
 }

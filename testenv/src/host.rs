@@ -36,8 +36,8 @@ use bollard::query_parameters::{
     CreateContainerOptions, InspectContainerOptions, LogsOptions, StartContainerOptions,
     WaitContainerOptions,
 };
+use clock::{Clock as _, SystemClock};
 use futures_util::StreamExt as _;
-use go_clock::{Clock as _, SystemClock};
 use testenv_core::Error;
 use testenv_core::context::Context;
 use testenv_core::host::{HostSweep, sweep_rules};

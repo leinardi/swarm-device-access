@@ -24,10 +24,7 @@
 //! `cargo test --features privileged-tests --test bpf_privileged`.
 use std::error::Error;
 use std::path::Path;
-use std::sync::Arc;
 
-use go_clock::SystemClock;
-use go_slog::LogHandle;
 use swarm_device_access::cgroup::{
     DeviceRule, KernelOps, OWNED_PROGRAM_NAME, V2Ops as _, canonical_bytes, emit_owned,
     from_canonical,
@@ -60,7 +57,7 @@ fn read_fixture(name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
 }
 
 /// Loads `raw` as a device program named `name` and returns the kernel's dump of it.
-fn load_and_dump(ops: &KernelOps, raw: &[u8], name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+fn load_and_dump(ops: KernelOps, raw: &[u8], name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     let instructions = from_canonical(raw)?;
     let prog = ops.load(name, &instructions)?;
     let (dumped, meta) = ops.instructions(&prog)?;
@@ -71,21 +68,17 @@ fn load_and_dump(ops: &KernelOps, raw: &[u8], name: &str) -> Result<Vec<u8>, Box
 
 #[test]
 fn fixtures_load_and_dump_as_captured() -> Result<(), Box<dyn Error>> {
-    let ops = KernelOps::new(LogHandle::stdout(
-        Arc::new(SystemClock),
-        |_| None,
-        go_slog::PlainStyle::Raw,
-    ));
+    let ops = KernelOps;
     for name in ["runc", "crun", "systemd"] {
         let original = read_fixture(&format!("{name}.orig"))?;
         assert_eq!(
-            load_and_dump(&ops, &original, "")?,
+            load_and_dump(ops, &original, "")?,
             read_fixture(&format!("{name}.reloaded"))?,
             "{name}: the original reloaded"
         );
         let wrapper = emit_owned(&fixture_rules(), FIXTURE_NONCE, &original)?;
         assert_eq!(
-            load_and_dump(&ops, &wrapper, OWNED_PROGRAM_NAME)?,
+            load_and_dump(ops, &wrapper, OWNED_PROGRAM_NAME)?,
             read_fixture(&format!("{name}.wrapped"))?,
             "{name}: the wrapper"
         );

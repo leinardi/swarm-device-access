@@ -14,14 +14,31 @@
  * limitations under the License.
  */
 
-//! The metric registry and its exposition, rust-common's go-prom (the Prometheus Go client's
-//! registry, families, text format, promhttp negotiation as prometheus/common v0.70.1 does it, and
-//! the process collector), re-exported here, and the daemon's own [`Recorder`] of its `sda_*`
-//! families. The `go_*` runtime families have no Rust counterpart and are not served (Q3 in
-//! `docs/rust-port.md`).
-
-pub use go_prom::*;
+//! The daemon's metrics on prometheus-client: the [`Recorder`] of its `sda_*` families, with
+//! service-kit's `process_*` collector, exposed as OpenMetrics text. The `go_*` runtime families
+//! have no Rust counterpart and are not served (Q3 in `docs/rust-port.md`), and neither are
+//! promhttp's own `promhttp_metric_handler_*` families.
 
 mod recorder;
+#[cfg(test)]
+pub(crate) mod testing;
 
 pub use recorder::Recorder;
+
+/// The content type of the exposition: OpenMetrics text 1.0.0.
+pub const CONTENT_TYPE: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
+
+/// The upper bounds of `sda_apply_duration_seconds`, the Prometheus Go client's `DefBuckets`
+/// (the `+Inf` bucket is implicit).
+pub const DEF_BUCKETS: [f64; 11] = [
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+];
+
+/// What a scrape of `/metrics` is answered with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exposition {
+    /// The `Content-Type`.
+    pub content_type: &'static str,
+    /// The body.
+    pub body: Vec<u8>,
+}

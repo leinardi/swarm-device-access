@@ -66,6 +66,16 @@ pub fn text<'record>(record: &'record Record, key: &str) -> &'record str {
     record.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
+/// A record's message: `message` as 2.0 writes it, or `msg` as the 1.x Go daemon wrote it (the
+/// upgrade test runs both).
+pub fn message_of(record: &Record) -> &str {
+    record
+        .get("message")
+        .or_else(|| record.get("msg"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
 /// A numeric attribute; Go decoded numbers as float64 and truncated them to int.
 pub fn number(record: &Record, key: &str) -> Option<i64> {
     record.get(key).and_then(Value::as_i64)
@@ -77,13 +87,13 @@ pub type Matcher<'matcher> = &'matcher dyn Fn(&Record) -> bool;
 /// Go's `forContainer`: records with `message` about `container_id`.
 pub fn for_container(message: &str, container_id: &str) -> impl Fn(&Record) -> bool {
     let (message, container_id) = (message.to_owned(), container_id.to_owned());
-    move |record| text(record, "msg") == message && text(record, "id") == container_id
+    move |record| message_of(record) == message && text(record, "id") == container_id
 }
 
 /// Go's `withMsg`: records with `message`.
 pub fn with_msg(message: &str) -> impl Fn(&Record) -> bool {
     let message = message.to_owned();
-    move |record| text(record, "msg") == message
+    move |record| message_of(record) == message
 }
 
 /// What the collecting tasks and the waits share.
@@ -257,17 +267,17 @@ impl DaemonLog {
         .await?;
         let watcher = self
             .wait(test, "systemd reload watcher outcome", &|record| {
-                let message = text(record, "msg");
+                let message = message_of(record);
                 message == MSG_WATCHER_STARTED || message == MSG_WATCHER_UNAVAILABLE
             })
             .await?;
-        let requests = if text(&watcher, "msg") == MSG_WATCHER_STARTED {
+        let requests = if message_of(&watcher) == MSG_WATCHER_STARTED {
             2
         } else {
             1
         };
         self.wait(test, "startup passes complete", &|record| {
-            text(record, "msg") == MSG_REQUEST_DONE && number(record, "epoch") == Some(requests)
+            message_of(record) == MSG_REQUEST_DONE && number(record, "epoch") == Some(requests)
         })
         .await?;
         Ok(())

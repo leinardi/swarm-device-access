@@ -159,35 +159,44 @@ only Docker writes (`engine.rs`). Stops go by container ID and share one 20 s sh
 the rust-common crates)**
 
 - `docker` — the daemon's read-only `DockerApi` (ping, list, inspect, events: `GET` plus one
-  `HEAD /_ping`) and its types on docker-engine's client, over the configured unix socket only;
+  `GET /_ping`) and its types on docker-client's bollard client, over the configured unix socket
+  only;
   `Client::transport` hands that client to the launcher's engine alone.
-- logging — go-slog: slog's `text` and `json` handlers and the plain format in its `Raw` style,
-  byte for byte, with Go's fallback level and format parsing; components log through a cloned
-  `LogHandle`, which a reconfigure swaps behind the shared cell. `--log-time` controls the
-  timestamp.
+- logging (`src/logging.rs`) — `tracing` events (`info!`, `warn!`, ... with `key = value` fields,
+  `error = %err` for an error) through rust-common's `tracing-setup`: tracing-subscriber's `text`
+  lines or flat `json`, to stdout, without the target. The daemon's subscriber is reloadable
+  (`build_reloadable`; `SIGHUP` calls `ReloadHandle::reconfigure` for the format and the level),
+  `--log-time` is `Options::time` and fixed at startup, and the launcher installs its own fixed
+  one without a timestamp and puts `component = launcher` on each of its events. The blocking
+  transactions run under `logging::inherit`, so they log where their caller does. Tests capture
+  with `test_support::capture_logs` (`tracing_setup::testing::Capture` under a scoped default),
+  never a global subscriber.
 - `systemd` — D-Bus `Reloading` signal watcher (zbus). Triggers re-apply on the **completion** edge
   only (signal body `active=false`). The start edge (`true`) is mid-reload and races the cgroup
   wipe. Degrades to retrying in the background when D-Bus is unreachable.
-- `metrics`, `server` — the Prometheus `Recorder` (with a no-op form) on go-prom's registry
-  (`ExpfmtVersion::V0_70_1`), and the `/metrics`, `/healthz` and `/readyz` routes on go-http's
-  server with the daemon's `TIMEOUTS` (5 s, 10 s, 30 s, 60 s). There is no pprof server (Q2).
-- go-compat — the Go standard library's formatting and parsing the 1.x log, error and flag text
-  depends on; go-clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`.
+- `metrics`, `server` — the Prometheus `Recorder` (with a no-op form) on prometheus-client's
+  registry (typed label sets, counters registered without `_total`, service-kit's
+  `ProcessCollector`), exposed as OpenMetrics text, and the `/metrics`, `/healthz` and `/readyz`
+  routes as an axum router on service-kit's `http` server (a 5 s header-read timeout, a 30 s
+  write-stall timeout and a 5 s drain). There is no pprof server (Q2).
+- clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`. Settings, labels,
+  policy globs and `/proc` lines are read with std and the `glob` crate (`policy::glob`, `text`,
+  `lexpath`).
 
 ## Shared crates (rust-common)
 
-`go-compat`, `go-clock`, `go-slog`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
-`service-kit`, `testenv-core` and `repo-meta` come from
+`clock`, `docker-client`,
+`service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v0.3.0"`, with `version = "0.3"`, the tag's `<major>.<minor>`) in the root
+release tag (`tag = "v0.4.0"`, with `version = "0.4"`, the tag's `<major>.<minor>`) in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
 its own features.
 
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
-  this daemon passes `PlainStyle::Raw` and uses go-slog's fallback `parse_level`/`parse_format`,
-  `ExpfmtVersion::V0_70_1` (go-prom), its `TIMEOUTS` (go-http), moby's `User-Agent` and no
-  response-header timeout with only the `write` and `attach` features (docker-engine), its envid,
+  this daemon passes `Options` with no target and no span fields (tracing-setup),
+  a `swarm-device-access/<version>` `User-Agent` and a response-header timeout with only the
+  `attach` feature (docker-client), its envid,
   labels and resources (`testenv/src/config.rs`) and runner settings
   (`testenv/tests/integration/main.rs`) to testenv-core, and
   `buildinfo!("SWARM_DEVICE_ACCESS", …)` (service-kit).
@@ -276,7 +285,7 @@ in the same commit, when a reused component changes or an upstream fix is taken.
 - **Reuse before writing.** Check the workspace, the rust-common crates and the reuse ledger in
   [`docs/rust-port.md`](docs/rust-port.md) for an existing helper or component (the `LogHandle`,
   `processor::rules::is_mount_source`, the injected `Clock`, the backoff constants, the `Recorder`
-  and its no-op form, go-compat, `test_support`) before adding one. A helper every project would
+  and its no-op form, `lexpath`, `text`, `test_support`) before adding one. A helper every project would
   want goes to rust-common, not here.
 - **Fail closed.** An empty, unknown or malformed mode, config value or label denies or skips — it
   never falls back to wider device access.
@@ -309,7 +318,7 @@ Run before considering an edit done. `make check` applies to every row.
 | --- | --- |
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify`, then `make check-stage` |
 | `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
-| `tests/testdata/**` (the Go golden captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, Go golden captures): never regenerate one by hand |
+| `tests/testdata/**` (the 1.x captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, 1.x fixtures): never regenerate one by hand |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `tag` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |

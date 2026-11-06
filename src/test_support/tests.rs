@@ -22,14 +22,14 @@
 use std::time::Duration;
 
 use super::*;
-use go_slog::Attr;
 
 #[test]
 fn capture_logs_records_what_is_logged_at_the_level() {
-    let (log, sink) = capture_logs(Level::INFO);
-    log.debug("hidden", &[]);
-    log.warn("shown", &[Attr::string("key", "value")]);
-    assert_eq!(sink.contents(), "level=WARN shown key=value\n");
+    let logs = capture_logs(LevelFilter::INFO);
+    tracing::debug!("hidden");
+    tracing::warn!(key = "value", "shown");
+    assert_eq!(logs.contents(), "level=WARN shown key=value\n");
+    assert_eq!(logs.records()[0]["key"], "value");
 }
 
 #[tokio::test(start_paused = true)]

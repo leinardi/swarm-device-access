@@ -26,9 +26,8 @@ use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 
 use rustix::fs::{Mode, OFlags};
 
-use go_compat::errno::io_error_text;
-use go_compat::quote::quote;
-use go_compat::strings::fields;
+use crate::text::io_error_text;
+use crate::text::quote;
 
 /// One cgroup directory: its path and the inode of the directory. A cgroup removed and recreated
 /// at the same path gets a new inode, so state keyed by `Identity` never carries over to the new
@@ -167,9 +166,9 @@ impl CgroupHandle {
                 source,
             })?;
         let pid = pid.to_string();
-        Ok(fields(&String::from_utf8_lossy(&data))
-            .iter()
-            .any(|listed| *listed == pid))
+        Ok(String::from_utf8_lossy(&data)
+            .split_whitespace()
+            .any(|listed| listed == pid))
     }
 
     /// The directory descriptor, for reads and writes relative to it.

@@ -31,7 +31,7 @@ use rustix::io::Errno;
 use rustix::process::{Resource, Rlimit, getrlimit, prlimit};
 
 use super::bpf_sys;
-use go_compat::errno::errno_string;
+use crate::text::errno_string;
 
 /// Why the limit could not be removed, with cilium's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,19 +110,19 @@ mod tests {
     fn errors_read_as_cilium_s() {
         assert_eq!(
             MemlockError::Set(Errno::PERM).to_string(),
-            "failed to set memlock rlimit: operation not permitted"
+            "failed to set memlock rlimit: Operation not permitted (os error 1)"
         );
         assert_eq!(
             MemlockError::Detect(Errno::INVAL).to_string(),
-            "unexpected error detecting memory cgroup accounting: invalid argument"
+            "unexpected error detecting memory cgroup accounting: Invalid argument (os error 22)"
         );
         assert_eq!(
             MemlockError::Lower(Errno::PERM).to_string(),
-            "lowering memlock rlimit: operation not permitted"
+            "lowering memlock rlimit: Operation not permitted (os error 1)"
         );
         assert_eq!(
             MemlockError::Restore(Errno::PERM).to_string(),
-            "restoring old memlock rlimit: operation not permitted"
+            "restoring old memlock rlimit: Operation not permitted (os error 1)"
         );
     }
 

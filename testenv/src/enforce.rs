@@ -30,11 +30,7 @@ use std::fmt::Write as _;
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::os::fd::AsFd as _;
 use std::os::unix::fs::MetadataExt as _;
-use std::sync::Arc;
 
-use go_clock::SystemClock;
-use go_compat::local_zone::local_zone;
-use go_slog::{Config, Format, Level, LogHandle, Logger};
 use swarm_device_access::cgroup::{
     CgroupVersion, DeviceRule, KernelOps, V2Ops as _, canonical_bytes, parse_owned,
     parse_owned_innermost,
@@ -260,7 +256,15 @@ pub fn dump_device_programs(pid: i64) -> Result<ProgramDump, Error> {
         .metadata()
         .map_err(|error| Error::new(format!("stat {cgroup}: {error}")))?
         .ino();
-    let ops = KernelOps::new(stderr_log());
+    // What `KernelOps` logs goes to stderr: stdout carries the dump.
+    let log = tracing_setup::build(
+        std::io::stderr,
+        tracing_setup::Format::Text,
+        tracing::level_filters::LevelFilter::DEBUG,
+        tracing_setup::Options::new().target(false),
+    );
+    let _scope = tracing::dispatcher::set_default(&log);
+    let ops = KernelOps;
     let attached = ops
         .query(dir.as_fd())
         .map_err(|error| Error::new(format!("query {cgroup}: {error}")))?;
@@ -282,21 +286,6 @@ pub fn dump_device_programs(pid: i64) -> Result<ProgramDump, Error> {
         attach_flags: attached.attach_flags,
         programs,
     })
-}
-
-/// The daemon's text log at debug to stderr, for what `KernelOps` logs: stdout carries the dump.
-fn stderr_log() -> LogHandle {
-    LogHandle::new(Logger::new(
-        Config {
-            format: Format::Text,
-            level: Level::DEBUG,
-            include_time: true,
-            plain_style: go_slog::PlainStyle::Raw,
-        },
-        Box::new(std::io::stderr()),
-        local_zone(|key| std::env::var(key).ok()),
-        Arc::new(SystemClock),
-    ))
 }
 
 /// One attached program, as the daemon's cgroup v2 pass classifies it.

@@ -256,7 +256,7 @@ daemon, and exits with the daemon's status.
 | `--host-network` | `false` | Run the daemon in the host network instead of none; only `--metrics-addr` needs it. |
 | `--host-docker-socket` | `/var/run/docker.sock` | Host path of the Docker socket bound into the daemon. Must be an absolute, clean path. The launcher itself always uses its own `/var/run/docker.sock` mount. |
 | `--log-level` | `info` | The launcher's own log level: `debug`, `info`, `warn`, `error`. |
-| `--log-format` | `text` | The launcher's own log format: `text`, `json`, `plain`. |
+| `--log-format` | `text` | The launcher's own log format: `text`, `json`. |
 | `-h`, `--help` |  | Print the launch flags and exit |
 
 Running the daemon from the launcher's own image ID, not a tag, means the
@@ -293,8 +293,8 @@ value is set in both places, the CLI flag wins.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
-| `--log-format` | `text` | `text`, `json`, `plain` |
-| `--log-time` | `false` | Include timestamps in log lines |
+| `--log-format` | `text` | `text`, `json` |
+| `--log-time` | `false` | Include timestamps in log lines (RFC 3339, UTC). Fixed at startup: a reload that changes it is logged and ignored |
 | `--docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
 | `--dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay, and a reload can turn it off but not on (see [Config File](#config-file)) |
 | `--policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
@@ -450,14 +450,33 @@ win.
 ## 🔁 Migrating from 1.x
 
 Version 2.0 replaces the Go daemon with a Rust one. The image name, the
-`launch` mode, the config file keys, the labels, the log lines, the error texts
-and the `sda_` metrics are those of 1.x; what differs is in the numbered table
-below. Every flag now takes two dashes (Q1): update the `command:` of the Swarm
-service, both the launch flags and the daemon flags after `--`, before you
-deploy 2.0. A 1.x command line such as `- -log-level=info` makes the 2.0
-launcher or daemon exit with status 2 and
-`error: single-dash long flags are not supported: '-log-level'; use '--log-level'`,
-and Swarm keeps restarting the task until the command is fixed.
+`launch` mode, the config file keys, the container labels and the `sda_`
+metric names are unchanged. The wire formats and texts around them are not
+byte-compatible with 1.x: the log format (Q13), the metrics exposition (Q14),
+the HTTP server's wire behaviour (Q11), error wording (Q6, Q8, Q10, Q12, Q16,
+Q17) and several input spellings (Q1, Q17) differ, as the numbered table below
+lists, together with every behaviour 2.0 dropped (Q2, Q3, Q5).
+
+Upgrade checklist:
+
+1. Every flag takes two dashes (Q1): update the `command:` of the Swarm
+   service, both the launch flags and the daemon flags after `--`, before you
+   deploy 2.0. A 1.x command line such as `- -log-level=info` makes the 2.0
+   launcher or daemon exit with status 2 and
+   `error: single-dash long flags are not supported: '-log-level'; use '--log-level'`,
+   and Swarm keeps restarting the task until the command is fixed.
+2. Boolean flags take `true` or `false` only, and a container label
+   `swarm-device-access.enable` must be `true` or `false`; `1`, `t`, `yes` and
+   the other spellings are refused, and the container is not enabled (Q17).
+3. Check every `--device-allow`, `--device-deny` and label glob: backslash
+   escapes, `**`, `[!x]`, negated classes (`[^x]`) and classes that could match
+   `/` are rejected at load (Q17).
+4. Move off `--log-format=plain`, `--debug-addr` and the `GO*` runtime
+   variables (Q2, Q5, Q13), and update log parsers (`error` replaces `err`) and
+   scrapers or dashboards that expect `go_*` families, the 0.0.4 text format or
+   gzip (Q3, Q4, Q14).
+5. Config values written as `0x10` or `1_000` read as strings, not numbers
+   (Q17).
 
 Upgrading in place keeps every grant: the 2.0 daemon recognises the device
 filters 1.x attached, and a rollback to 1.x recognises the ones 2.0 attached,
@@ -469,16 +488,21 @@ and referenced from the code and from
 | --- | --- | --- | --- |
 | Q1 | CLI | Go's `flag`: `-flag` and `--flag` both accepted; the daemon ignores positional arguments (`launch` refuses them) | Only `--flag`. A single-dash flag or a positional argument is refused with exit 2; `-h`/`--help` print to stdout and exit 0, with clap's layout of the same flag help. This also applies to the daemon arguments after `launch --`. The launcher's own refusals of an unknown flag or a stray argument, which Go's flag package made exit 1 after printing its usage, are clap's usage errors with exit 2; its host-path errors name the flag by its `--` spelling (`launch: flag "--config-dir": "rel" must be an absolute, clean path`). |
 | Q2 | `debug-addr` / `--debug-addr` | Serves pprof | No pprof. A non-empty value is refused at startup and on reload. |
-| Q3 | `/metrics` | `go_*` runtime families | No `go_*` families; `process_*` and `promhttp_metric_handler_*` are kept. |
-| Q4 | `/metrics` | Protobuf or text, negotiated | Always text 0.0.4, with no protobuf negotiation. |
+| Q3 | `/metrics` | `go_*` runtime families | No `go_*` families; `process_*` is kept. |
+| Q4 | `/metrics` | Protobuf or text 0.0.4, negotiated by `Accept`, and gzip by `Accept-Encoding` | Always OpenMetrics text (`application/openmetrics-text; version=1.0.0; charset=utf-8`), uncompressed, with no `Accept`, `Accept-Encoding` or `name[]` handling (Q14). |
 | Q5 | Environment | `GOMAXPROCS`, `GOMEMLIMIT`, `GOGC`, `GODEBUG` tune the runtime | These variables no longer have any effect. |
 | Q6 | Config file syntax errors | yaml.v3's libyaml wording, e.g. `parse config file "<path>": yaml: line 2: found unexpected end of stream` | The same files are refused, with the same prefix up to `yaml:` and the space after it; the rest is saphyr-parser's wording and line, e.g. `yaml: line 1: while scanning a quoted scalar, found unexpected end of stream`. A file that is not UTF-8 reads `yaml: invalid UTF-8`, and a UTF-16 file, which yaml.v3 decodes, is refused the same way. saphyr-parser reads YAML 1.2 more strictly in three places, all refusals: a quoted value continued on a line indented no more than its key, which libyaml accepts; flow collections nested deeper than 255, which 1.x refused as a wrong shape or an unknown key; and a tab between `:` and a plain value (`policy-mode:<TAB>all`), which libyaml reads as separation and saphyr-parser refuses with `yaml: line 1: ':' must be followed by a valid YAML whitespace` (a space, or a tab before a quoted value, reads as in 1.x). yaml.v3's own errors keep their text: unknown anchors, nesting past libyaml's depth of 10000, a `%YAML` version other than 1.1, a `...` before the first document, and every shape, decode, duplicate-key and multiple-document error. |
 | Q7 | cgroup v1 refusal of a device rule that is not a concrete allow (unreachable: the daemon builds only concrete rules) | Go's `%+v` of the rule prints the addresses of its numbers: `{Allow:true Type:a Major:0xc000012345 Minor:0xc000012350 Access:r}` | The numbers themselves: `{Allow:true Type:a Major:10 Minor:200 Access:r}`; an absent one still reads `<nil>`. |
 | Q8 | systemd reload watcher: the `err` of `systemd reload handling unavailable; retrying in the background` for the rarer failures | godbus's wording for a failed authentication or `Hello`, a broken reply, and any bus address other than one `unix:path=`, e.g. `connect system bus: dbus: authentication failed` | The same prefixes (`connect system bus:`, `add match signal <signal>:`, `resolve the owner of org.freedesktop.systemd1:`, each followed by a space) with zbus's wording after them. A socket that is missing or refuses the connection, a D-Bus error reply (no systemd on the bus) and the setup timeout read as in 1.x. |
 | Q9 | Container process liveness before a device-rule mutation | `pidfd_send_signal(fd, 0)`: an exited process that is not yet reaped (a zombie) counts as alive, and the mutation goes ahead | The pidfd is polled, and a process that has exited counts as gone, reaped or not: the reconcile fails with `pinned container process exited: no such process` and is retried. rustix cannot send signal 0. |
-| Q10 | Launcher: a wait answer whose JSON has a wrong type (unreachable: dockerd sends a number for `StatusCode`) | `encoding/json`'s wording, e.g. `daemon wait stream failed: json: cannot unmarshal string into Go struct field WaitResponse.StatusCode of type int64` | The same prefix, with serde_json's wording after it, e.g. `daemon wait stream failed: invalid type: string "x", expected i64 at line 1 column 17`. A wait answer that is not JSON at all reads as in 1.x: the answer's own text. |
-| Q11 | Metrics server: requests net/http refuses or frames otherwise | net/http's own answers to a malformed request (a bad request line or header, an unknown version, a missing `Host`), its header-count and size limits, its 400 to a partial pipelined request at the header deadline, and its 10 s drain of a slowly sent body before answering | hyper's: a 400 without a reason or a body to a malformed request or an unknown version, an HTTP/1.1 request without `Host` served, other header limits (for example a 431 above 100 headers), a close without a 400 at the header deadline, and the answer sent at once without reading the body. Paths, routes, status codes, bodies, header order, the 307 for unclean paths, HEAD, `Content-Length` or chunked framing and the four server deadlines are unchanged; chunk boundaries follow 2 KiB chunks rather than the encoder's writes. |
-| Q12 | Metrics address with a host name that does not resolve | Go's resolver: `metrics server: listen on <addr>: listen tcp: lookup <host> on <nameserver>: no such host` (or its timeout and server-failure wordings) | The same prefix up to `lookup <host>:`, with getaddrinfo's wording after it, e.g. `failed to lookup address information: Name does not resolve`. inet_aton's shorthands (`0`, `127.1`) read `lookup <host>: no such host`. A name that resolves binds the same address. |
+| Q10 | Launcher: a wait answer whose JSON has a wrong type (unreachable: dockerd sends a number for `StatusCode`) | `encoding/json`'s wording, e.g. `daemon wait stream failed: json: cannot unmarshal string into Go struct field WaitResponse.StatusCode of type int64` | The same prefix, with bollard's wording after it (Q16: serde_json's decode error inside bollard's `JsonDataError`). |
+| Q11 | Metrics server wire behaviour | net/http's: its own answers to malformed requests, header order and case (`Content-Type` before `Date`), content sniffing of `/healthz` and `/readyz`, a 307 for an unclean path (`//healthz`, `/./metrics`), `Content-Length` or chunked framing as Go chose it, and four deadlines (5 s head, 10 s read, 30 s write, 60 s idle) | axum on service-kit's HTTP/1 server (hyper): hyper's answers and header order, a plain `text/plain; charset=utf-8` for `ok` and `not ready`, a 404 for an unclean path, a 5 s header-read timeout and a 30 s write-stall timeout (no read or idle deadline), and a stop that drains for 5 s and then cuts what is left. Routes, status codes and bodies are 1.x's, and any method is still answered (Q15). |
+| Q12 | Metrics address that cannot be bound | `metrics server: listen on <addr>: listen tcp ...: <cause>` in Go's wording (resolver, `bind`, missing port, bad port) | The same prefix `metrics server: listen on <addr>:`, then the operating system's text for the cause, e.g. `Address already in use (os error 98)`, or tokio's for an address that is not `host:port`. A bare `:port` binds every interface, IPv6 where the host has it. |
+| Q13 | Log format | slog's `text` and `json` handlers and a `plain` format, Go's time layouts in the local zone (`TZ`), error values under `err`, a duration as `1s`, a list as `[a b]` | Logging goes through `tracing`: tracing-subscriber's `text` lines (`LEVEL message key=value`) and flat `json` objects (`timestamp`, `level`, `message`, then the fields). `plain` is refused, in the flag, the config key and the launcher's flag, which name `text` and `json`. With `--log-time` the timestamp is RFC 3339 in UTC whatever `TZ` says, and a reload cannot change it (a changed `log-time` is logged as needing a restart). A log line's error is the field `error` (was `err`), a duration is Rust's (`1s`, `500ms`), a list is its debug form (`["a", "b"]`, `None` for an unset allow or deny list), and the HTTP server's own messages are warnings. Messages, levels and the other field names are 1.x's. |
+| Q14 | Metrics exposition | The Prometheus text format 0.0.4, with `promhttp_metric_handler_*` families | OpenMetrics text: a `# EOF` line, counters as `<name>_total` under a `# TYPE <name> counter` family, floats as the Rust encoder writes them (a histogram bound as `1.0`, where the Go client wrote `1`), `sda_last_event_timestamp_seconds` as a whole number (`1792933384`, not `1.792933384e+09`), no `promhttp_metric_handler_*` families. Every `sda_*` name, type, label name and help text is 1.x's, and the histogram keeps the Go client's default buckets. |
+| Q15 | Metrics server and the HTTP methods | Any method on a route is answered | Unchanged: every route still answers any method. HEAD gets the body's headers only, as hyper frames it. |
+| Q16 | Docker client | moby client v0.6.0 on the Engine's unix socket: `User-Agent: moby-client/v0.6.0 linux/<arch>`, versioned paths negotiated by `HEAD /_ping` then `GET /_ping`, errors worded as moby words them (`Cannot connect to the Docker daemon at unix://<socket>. Is the docker daemon running?`, `Error response from daemon: <message>`, `Get "http://api.moby.localhost/...": context deadline exceeded`), the launcher's create body Go's `json.Marshal` bytes, the attach hijacked on a connection of its own | docker-client on bollard 0.21.1: `User-Agent: swarm-device-access/<version>`, `GET /_ping` once, `GET /version` once to settle the API version, requests under the negotiated `/v<major>.<minor>` prefix, bollard's error wording (`Docker responded with status code 404: <message>`, `Docker stream error: ...`, an I/O error's text for an unreachable engine), the bare `context deadline exceeded` and `context canceled` for a call a deadline or a cancellation ended, the launcher's create body re-encoded by bollard's model (the same fields, not the same bytes), a wait that finds the daemon already removed answered as removed with status 1 and a warning, and an engine older than the client's API floor answering its own error. An event record the models cannot read (an enum value a newer Engine introduced) ends the stream as a decode error: the daemon logs a warning, resubscribes from now rather than from the record, and re-enumerates the running containers, so the record cannot be replayed for ever. Daemon, launcher and tests no longer share moby's byte-for-byte wire. |
+| Q17 | Settings, labels, policy globs and `/proc` text | Parsed with ports of Go's standard library: `strconv.ParseBool` (`1 t T TRUE true True 0 f F FALSE false False`), `filepath.Match`, yaml.v3's integer and float syntax, `bufio.Scanner`, Go error text (`no such file or directory`) | Booleans: a flag takes `true` or `false` only (`--dry-run=1` and `=T` exit 2), and a container label that is not `true` or `false` (`enable=1`, `yes`) is refused, so the container is not enabled; the label's error is logged naming the label and value, the same fail-closed direction as before for an unrecognised value. Policy globs (`policy::glob`, the `glob` crate; case-sensitive, `*`, `?` and classes never match `/`, no leading-dot rule): the spellings the two matchers read differently are refused when the config or label is loaded, so a pattern never changes meaning silently or narrows a deny: `\` escapes, `**`, `[!x]`, every negated class (`[^x]`) and any class item or range that could match `/` (`[+-9]`), because Go let those match `/` and a deny such as `/dev[^a]*` would stop matching `/dev/null`, and classes Go calls malformed (`[]`, `[a-]`, `[-a]`); the error text ends `syntax error in pattern: <reason>`. Deny still wins over allow. YAML scalars in the config file resolve with std parsing: `0x10` and underscore integers (`1_000`) are strings, not integers (so a numeric key refuses them), `09` is an integer (9) where Go read it as a float, and underscores in floats (`.5_5`) are strings; `0b`, `0o` and leading `0` decimals still resolve. A `/proc` or cgroup line over 64 KiB is an error `line longer than 65536 bytes` (Go: `bufio.Scanner: token too long`); the data is never truncated. Error text carries the operating system's wording and number, e.g. `No such file or directory (os error 2)` (Go: `no such file or directory`); a malformed device number reads `invalid digit found in string`. |
 
 ## 🧩 Tips and Limitations
 

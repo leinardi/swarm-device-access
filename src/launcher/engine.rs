@@ -18,118 +18,119 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! The launcher's write-capable Engine client: the eight calls of [`EngineApi`], the only Docker
-//! writes in the project, sent as moby client v0.6.0 sends the Go launcher's calls.
+//! writes in the project, on bollard.
 //!
-//! [`Engine`] shares the daemon client's transport (its socket, pool, negotiation and error
-//! wording): docker-engine's `exchange` and `exchange_upgrade` on [`Client::transport`], which
-//! only this module calls; only `src/launcher/**` may name this module
-//! (`meta/tests/launcher_boundary.rs`). The requests, as
-//! `tests/testdata/engine_wire/api-1.56/launcher.jsonl` recorded the Go launcher's:
+//! [`Engine`] shares the daemon client's connection (its socket, negotiation and error wording):
+//! [`Client::transport`] hands out bollard's client, which only this module takes; only
+//! `src/launcher/**` may name this module (`meta/tests/launcher_boundary.rs`). The calls:
 //!
 //! - `GET /containers/{id}/json`, and `GET /containers/json?all=1&filters=...` with the name
-//!   filter;
+//!   filter `^/swarm-device-access$`;
 //! - `DELETE /containers/{id}?force=1`;
-//! - `POST /containers/create?name=...` with the JSON body of the daemon spec;
-//! - `POST /containers/{id}/attach?stderr=1&stdout=1&stream=1`, upgraded to a raw stream on a
-//!   connection of its own (moby's hijack);
-//! - `POST /containers/{id}/wait?condition=removed`, whose answer is read in the background;
+//! - `POST /containers/create?name=...` with the daemon spec's JSON, decoded into bollard's
+//!   model and sent as bollard encodes it;
+//! - `POST /containers/{id}/attach?stderr=1&stdout=1&stream=1`, its output demultiplexed by
+//!   docker-client into stdout and stderr pieces;
+//! - `POST /containers/{id}/wait?condition=removed`, sent and answered as to its headers before the
+//!   call returns (the waiter is registered then), its body read in the background;
 //! - `POST /containers/{id}/start` and `POST /containers/{id}/stop?t=<seconds>`.
 //!
-//! net/http sends `Content-Length: 0` with an empty `POST`, and hyper sends none, so the empty
-//! `POST`s set it. Only what the launcher reads is decoded: an inspect's `Image` and
-//! `State.Running`, a summary's `Id` and `Labels`, the create's `Id` and `Warnings`, the wait's
-//! `StatusCode` and `Error.Message`.
+//! Each unary call is bounded as a whole by the client's call timeout (the stop by that and the
+//! seconds it grants the container), and nothing here retries: a write that fails is the
+//! caller's to report, never sent twice. Only what the launcher reads is converted: an
+//! inspect's `Image` and `State.Running`, a summary's `Id` and `Labels`, the create's `Id` and
+//! `Warnings`, the wait's status code.
 
 use std::future::Future;
-use std::io;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::time::Duration;
 
-use bytes::Bytes;
-use http_body_util::{BodyExt as _, Full};
-use hyper::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HeaderValue, UPGRADE};
-use hyper::{Method, Request, Response};
-use hyper_util::rt::TokioIo;
-use serde::Deserialize;
-use tokio::io::{AsyncRead, ReadBuf};
+use tokio::sync::mpsc;
 
 use super::spec::{DAEMON_NAME, DaemonSpec};
-use crate::docker::types::{Labels, decode_first, decode_list, null_default};
-use crate::docker::{
-    Body, Client, Error, Filters, encode_query, ensure_reader_closed, trim_id, wait_answer,
+use crate::docker::attach::{self, Output, WaitCondition};
+use crate::docker::bollard::models::ContainerCreateBody;
+use crate::docker::bollard::query_parameters::{
+    CreateContainerOptionsBuilder, InspectContainerOptions, ListContainersOptionsBuilder,
+    RemoveContainerOptionsBuilder, StartContainerOptions, StopContainerOptionsBuilder,
 };
-use go_compat::errno::io_error_text;
+use crate::docker::types::Labels;
+use crate::docker::{
+    CancellationToken, Client, ClientError, Error, ErrorKind, Filters, bounded, trim_id,
+};
 
-/// The daemon's output stream: what the attach upgraded to, read until the daemon's output ends.
-pub type Attached = Box<dyn AsyncRead + Send + Unpin>;
+/// The daemon's output: its stdout and stderr pieces, until its output ends (the channel
+/// closes) or the stream breaks (an error comes first).
+pub type Attached = mpsc::Receiver<Result<Output, ClientError>>;
 
-/// The answer of a wait, once the condition is met; the error is moby's, as its error channel
-/// carried it.
+/// The answer of a wait, once the condition is met; the error is the engine's, worded.
 pub type WaitAnswer = Pin<Box<dyn Future<Output = Result<WaitResponse, String>> + Send>>;
 
+/// How many pieces of output wait for the copy to the console before the attach's reader does.
+const OUTPUT_BUFFER: usize = 64;
+
+/// What a wait that finds the container already removed answers: the exit code the engine no
+/// longer has, read as a failure.
+const REMOVED_STATUS: i64 = 1;
+
+/// The answer of a wait that finds the container already removed: the exit status the engine no
+/// longer has, read as a failure.
+fn already_removed(error: &ClientError) -> WaitResponse {
+    WaitResponse {
+        status_code: REMOVED_STATUS,
+        error: Some(WaitExitError {
+            message: format!("container already removed, exit status unknown: {error}"),
+        }),
+    }
+}
+
 /// container `InspectResponse`: what the launcher reads of it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Inspected {
     /// `Image`: the ID of the image the container runs.
-    #[serde(rename = "Image", deserialize_with = "null_default")]
     pub image: String,
     /// `State`, absent when the Engine reported none.
-    #[serde(rename = "State")]
     pub state: Option<State>,
 }
 
 /// container `State`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct State {
     /// `Running`.
-    #[serde(rename = "Running", deserialize_with = "null_default")]
     pub running: bool,
 }
 
 /// container `Summary`: what the launcher reads of a listed container.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Summary {
     /// `Id`.
-    #[serde(rename = "Id", deserialize_with = "null_default")]
     pub id: String,
     /// `Labels`.
-    #[serde(rename = "Labels", deserialize_with = "null_default")]
     pub labels: Labels,
 }
 
 /// container `CreateResponse`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Created {
     /// `Id`.
-    #[serde(rename = "Id", deserialize_with = "null_default")]
     pub id: String,
     /// `Warnings`.
-    #[serde(rename = "Warnings", deserialize_with = "null_default")]
     pub warnings: Vec<String>,
 }
 
 /// container `WaitResponse`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WaitResponse {
     /// `StatusCode`.
-    #[serde(rename = "StatusCode", deserialize_with = "null_default")]
     pub status_code: i64,
     /// `Error`, absent unless the wait itself failed.
-    #[serde(rename = "Error")]
     pub error: Option<WaitExitError>,
 }
 
 /// container `WaitExitError`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WaitExitError {
     /// `Message`.
-    #[serde(rename = "Message", deserialize_with = "null_default")]
     pub message: String,
 }
 
@@ -151,11 +152,12 @@ pub trait EngineApi: Send + Sync {
     /// moby's `ContainerCreate` of `spec`, named [`DAEMON_NAME`].
     fn create(&self, spec: &DaemonSpec) -> impl Future<Output = Result<Created, Error>> + Send;
 
-    /// moby's `ContainerAttach` with `Stream`, `Stdout` and `Stderr`: the multiplexed output.
+    /// moby's `ContainerAttach` with `Stream`, `Stdout` and `Stderr`: the output, demultiplexed.
     fn attach(&self, id: &str) -> impl Future<Output = Result<Attached, Error>> + Send;
 
-    /// moby's `ContainerWait` for the `removed` condition: resolves once the Engine accepted the
-    /// wait, with its answer to come.
+    /// moby's `ContainerWait` for the `removed` condition: resolves once the wait is on its way,
+    /// with its answer to come. A container the engine no longer has is answered as removed, its
+    /// exit status unknown.
     fn wait_removed(&self, id: &str) -> impl Future<Output = Result<WaitAnswer, Error>> + Send;
 
     /// moby's `ContainerStart`.
@@ -176,163 +178,145 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// The launcher's engine on `client`'s transport.
+    /// The launcher's engine on `client`'s connection.
     #[must_use]
     pub fn new(client: Client) -> Self {
         Self { client }
     }
 
-    async fn call(
-        &self,
-        path: &str,
-        query: &str,
-        shape: impl Fn(&mut Request<Full<Bytes>>),
-    ) -> Result<Response<Body>, Error> {
-        self.client.transport().exchange(path, query, shape).await
-    }
-
-    /// A `POST` with no body and the `Content-Length: 0` net/http sends with it, its answer
-    /// drained.
-    async fn post_empty(&self, path: &str, query: &str) -> Result<(), Error> {
-        let response = self.call(path, query, empty_post).await?;
-        ensure_reader_closed(response).await;
-        Ok(())
+    fn call(&self) -> Duration {
+        self.client.call_timeout()
     }
 }
 
 impl EngineApi for Engine {
     async fn inspect(&self, id: &str) -> Result<Inspected, Error> {
-        let id = trim_id("container", id)?;
-        let response = self
-            .call(&format!("/containers/{id}/json"), "", |_| {})
-            .await?;
-        decode_first(&read_body(response).await?)
+        let id = trim_id(id)?;
+        let docker = self.client.transport().await;
+        let inspected = bounded(
+            self.call(),
+            docker.inspect_container(id, None::<InspectContainerOptions>),
+        )
+        .await?;
+        Ok(Inspected {
+            image: inspected.image.unwrap_or_default(),
+            state: inspected.state.map(|state| State {
+                running: state.running.unwrap_or_default(),
+            }),
+        })
     }
 
     async fn list_daemons(&self) -> Result<Vec<Summary>, Error> {
         let filters = Filters::new().add("name", &[&format!("^/{DAEMON_NAME}$")]);
-        let query = encode_query(&mut [("all", "1".to_owned()), ("filters", filters.to_json())]);
-        let response = self.call("/containers/json", &query, |_| {}).await?;
-        decode_list(&read_body(response).await?)
+        let options = ListContainersOptionsBuilder::new()
+            .all(true)
+            .filters(&filters.to_map())
+            .build();
+        let docker = self.client.transport().await;
+        let listed = bounded(self.call(), docker.list_containers(Some(options))).await?;
+        Ok(listed
+            .into_iter()
+            .map(|summary| Summary {
+                id: summary.id.unwrap_or_default(),
+                labels: summary.labels.unwrap_or_default().into_iter().collect(),
+            })
+            .collect())
     }
 
     async fn remove(&self, id: &str) -> Result<(), Error> {
-        let id = trim_id("container", id)?;
-        let response = self
-            .call(&format!("/containers/{id}"), "force=1", |request| {
-                *request.method_mut() = Method::DELETE;
-            })
-            .await?;
-        ensure_reader_closed(response).await;
-        Ok(())
+        let id = trim_id(id)?;
+        let options = RemoveContainerOptionsBuilder::new().force(true).build();
+        let docker = self.client.transport().await;
+        bounded(self.call(), docker.remove_container(id, Some(options))).await
     }
 
     async fn create(&self, spec: &DaemonSpec) -> Result<Created, Error> {
-        let body = Bytes::from(spec.body());
-        let query = encode_query(&mut [("name", DAEMON_NAME.to_owned())]);
-        let response = self
-            .call("/containers/create", &query, |request| {
-                *request.method_mut() = Method::POST;
-                *request.body_mut() = Full::new(body.clone());
-                request
-                    .headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            })
-            .await?;
-        decode_first(&read_body(response).await?)
+        let body: ContainerCreateBody = serde_json::from_str(&spec.body())
+            .map_err(|error| Error::invalid(format!("encode the daemon spec: {error}")))?;
+        let options = CreateContainerOptionsBuilder::new()
+            .name(DAEMON_NAME)
+            .build();
+        let docker = self.client.transport().await;
+        let created = bounded(self.call(), docker.create_container(Some(options), body)).await?;
+        Ok(Created {
+            id: created.id,
+            warnings: created.warnings,
+        })
     }
 
     async fn attach(&self, id: &str) -> Result<Attached, Error> {
-        let id = trim_id("container", id)?;
-        let upgraded = self
-            .client
-            .transport()
-            .exchange_upgrade(
-                &format!("/containers/{id}/attach"),
-                "stderr=1&stdout=1&stream=1",
-                |request| {
-                    empty_post(request);
-                    let headers = request.headers_mut();
-                    headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
-                    headers.insert(CONNECTION, HeaderValue::from_static("Upgrade"));
-                    headers.insert(UPGRADE, HeaderValue::from_static("tcp"));
-                },
-            )
-            .await?;
-        Ok(Box::new(Hijacked {
-            inner: TokioIo::new(upgraded),
-            socket: self
-                .client
-                .settings()
-                .socket()
-                .unwrap_or_default()
-                .to_owned(),
-        }))
+        let id = trim_id(id)?;
+        let docker = self.client.transport().await;
+        // The pump ends with the receiver the launcher drops, and the token is never cancelled.
+        Ok(attach::attach(
+            &docker,
+            id,
+            self.call(),
+            OUTPUT_BUFFER,
+            CancellationToken::new(),
+        )
+        .await?)
     }
 
     async fn wait_removed(&self, id: &str) -> Result<WaitAnswer, Error> {
-        let id = trim_id("container", id)?;
-        let response = self
-            .call(
-                &format!("/containers/{id}/wait"),
-                "condition=removed",
-                empty_post,
-            )
-            .await?;
-        Ok(Box::pin(wait_answer::<WaitResponse>(response.into_body())))
+        let id = trim_id(id)?;
+        let config = self.client.streaming().await;
+        // Returns once the engine answered the wait's headers, so the waiter is registered and the
+        // start that follows cannot overtake it: a container that exits at once and is
+        // auto-removed still answers its status. The token is never cancelled; the wait ends with
+        // its receiver, which the launcher drops.
+        let registered = attach::wait(
+            &config,
+            id,
+            WaitCondition::Removed,
+            self.call(),
+            CancellationToken::new(),
+        )
+        .await;
+        let answer = match registered {
+            Ok(answer) => answer,
+            // An auto-removed daemon the wait came too late for: removed, its status gone.
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(Box::pin(std::future::ready(Ok(already_removed(&error)))));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Box::pin(async move {
+            match answer.await {
+                Ok(Ok(status_code)) => Ok(WaitResponse {
+                    status_code,
+                    error: None,
+                }),
+                Ok(Err(error)) if error.kind() == ErrorKind::NotFound => {
+                    Ok(already_removed(&error))
+                }
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(_closed) => Err("the wait ended without an answer".to_owned()),
+            }
+        }))
     }
 
     async fn start(&self, id: &str) -> Result<(), Error> {
-        let id = trim_id("container", id)?;
-        self.post_empty(&format!("/containers/{id}/start"), "")
-            .await
+        let id = trim_id(id)?;
+        let docker = self.client.transport().await;
+        bounded(
+            self.call(),
+            docker.start_container(id, None::<StartContainerOptions>),
+        )
+        .await
     }
 
     async fn stop(&self, id: &str, timeout_seconds: i64) -> Result<(), Error> {
-        let id = trim_id("container", id)?;
-        let query = encode_query(&mut [("t", timeout_seconds.to_string())]);
-        self.post_empty(&format!("/containers/{id}/stop"), &query)
-            .await
+        let id = trim_id(id)?;
+        let seconds = i32::try_from(timeout_seconds).unwrap_or(i32::MAX);
+        let options = StopContainerOptionsBuilder::new().t(seconds).build();
+        let docker = self.client.transport().await;
+        // The engine answers once the container stopped, up to the seconds it was given.
+        let bound =
+            self.call() + Duration::from_secs(u64::try_from(timeout_seconds).unwrap_or_default());
+        bounded(bound, docker.stop_container(id, Some(options))).await
     }
 }
 
-/// Makes `request` the empty `POST` net/http sends: `Content-Length: 0`.
-fn empty_post(request: &mut Request<Full<Bytes>>) {
-    *request.method_mut() = Method::POST;
-    request
-        .headers_mut()
-        .insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
-}
-
-async fn read_body(response: Response<Body>) -> Result<Vec<u8>, Error> {
-    Ok(response.into_body().collect().await?.to_bytes().to_vec())
-}
-
-/// The hijacked attach connection, whose read errors read as Go's `net.OpError` on the unbound
-/// unix socket the client dialled: `read unix @-><socket>: read: <errno>`.
-struct Hijacked {
-    inner: TokioIo<hyper::upgrade::Upgraded>,
-    socket: String,
-}
-
-impl AsyncRead for Hijacked {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        buffer: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let this = &mut *self;
-        Pin::new(&mut this.inner)
-            .poll_read(context, buffer)
-            .map_err(|error| {
-                io::Error::new(
-                    error.kind(),
-                    format!(
-                        "read unix @->{}: read: {}",
-                        this.socket,
-                        io_error_text(&error)
-                    ),
-                )
-            })
-    }
-}
+#[cfg(test)]
+mod tests;

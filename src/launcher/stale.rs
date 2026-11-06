@@ -22,9 +22,9 @@
 use super::engine::{EngineApi, Summary};
 use super::error::{LaunchError, RemoveError, StaleError};
 use super::spec::{LABEL_LAUNCHER, LABEL_ROLE, ROLE_DAEMON};
-use super::{Runner, short_id};
+use super::{COMPONENT, Runner, short_id};
 use crate::docker::{CallContext, with_context};
-use go_slog::Attr;
+use tracing::info;
 
 /// Identifies a daemon started by the sh wrapper of earlier releases, which recorded no owner.
 const LABEL_IMAGE_TITLE: &str = "org.opencontainers.image.title";
@@ -48,7 +48,7 @@ impl<E: EngineApi> Runner<E> {
             self.check_stale(context, stale, launcher_id)
                 .await
                 .map_err(LaunchError::Stale)?;
-            self.remove_container(&stale.id)
+            self.remove_by_id(&stale.id)
                 .await
                 .map_err(|source| LaunchError::RemoveStale {
                     id: stale.id.clone(),
@@ -70,10 +70,7 @@ impl<E: EngineApi> Runner<E> {
         let label = |key: &str| stale.labels.get(key).map_or("", String::as_str);
         if label(LABEL_ROLE) != ROLE_DAEMON {
             if label(LABEL_IMAGE_TITLE) == IMAGE_TITLE {
-                self.log.info(
-                    "removing daemon left by the sh wrapper",
-                    &[Attr::string("id", short_id(&stale.id))],
-                );
+                info!(component = COMPONENT, id = %short_id(&stale.id), "removing daemon left by the sh wrapper");
                 return Ok(());
             }
             return Err(StaleError::Foreign {
@@ -88,10 +85,7 @@ impl<E: EngineApi> Runner<E> {
             });
         }
         if owner == launcher_id {
-            self.log.info(
-                "removing daemon left by an earlier run of this launcher",
-                &[Attr::string("id", short_id(&stale.id))],
-            );
+            info!(component = COMPONENT, id = %short_id(&stale.id), "removing daemon left by an earlier run of this launcher");
             return Ok(());
         }
 
@@ -126,19 +120,13 @@ impl<E: EngineApi> Runner<E> {
                 Some(_) => {}
             },
         }
-        self.log.info(
-            "removing orphaned daemon",
-            &[
-                Attr::string("id", short_id(&stale.id)),
-                Attr::string("launcher", short_id(owner)),
-            ],
-        );
+        info!(component = COMPONENT, id = %short_id(&stale.id), launcher = %short_id(owner), "removing orphaned daemon");
         Ok(())
     }
 
     /// Force-removes `container_id` by ID; one already gone is fine. It runs under a context of
     /// its own, so a failed setup still cleans up after a signal.
-    pub(super) async fn remove_container(&self, container_id: &str) -> Result<(), RemoveError> {
+    pub(super) async fn remove_by_id(&self, container_id: &str) -> Result<(), RemoveError> {
         let removed = with_context(
             &CallContext::new().with_timeout(self.timing.call),
             self.engine.remove(container_id),

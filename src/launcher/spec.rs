@@ -15,18 +15,17 @@
  */
 
 //! The daemon container, Go's `daemonSpec`: the privileged set the daemon needs and nothing
-//! else, and the create body moby v0.6.0 sends for it.
+//! else, and the create body Go's launcher sent for it.
 //!
 //! The body is written by hand, field by field in the order and form of Go's `json.Marshal` of
 //! moby's `CreateRequest` (every field of `Config` and `HostConfig` that is not `omitempty`, at
-//! its zero value, `null` for a nil slice or map), so the Engine receives the bytes the Go
-//! launcher sent; the tests compare it with bodies a Go program printed and with the captured
-//! create.
+//! its zero value, `null` for a nil slice or map); the tests compare it with bodies a Go program
+//! printed. The engine decodes it into the Docker client's create model and sends that (Q16), so the
+//! Engine receives the same fields, not the same bytes.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::time::Duration;
-
-use crate::docker::push_json_string;
 
 /// The name of the daemon container. One name per node is what lets the next launcher find, and
 /// replace, a daemon its predecessor left behind.
@@ -266,6 +265,29 @@ fn push_json_strings(out: &mut String, values: &[String]) {
 
 const fn json_bool(value: bool) -> &'static str {
     if value { "true" } else { "false" }
+}
+
+/// encoding/json's string encoding with `json.Marshal`'s HTML escaping, quotes included.
+fn push_json_string(out: &mut String, text: &str) {
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(character);
+            }
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '<' | '>' | '&' | '\u{2028}' | '\u{2029}' | '\0'..='\u{1f}' => {
+                let _ = write!(out, "\\u{:04x}", u32::from(character));
+            }
+            _ => out.push(character),
+        }
+    }
+    out.push('"');
 }
 
 #[cfg(test)]

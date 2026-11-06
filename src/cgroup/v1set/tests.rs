@@ -252,7 +252,7 @@ fn malformed_list_entries_are_refused_with_go_s_text() {
         ("c 1 rwm", r#"malformed devices.list entry: "c 1 rwm""#),
         (
             "c a:3 rwm",
-            r#"malformed devices.list entry: "c a:3 rwm": device number "a": strconv.ParseInt: parsing "a": invalid syntax"#,
+            r#"malformed devices.list entry: "c a:3 rwm": device number "a": invalid digit found in string"#,
         ),
         (
             "c 1:3 rwx",
@@ -287,7 +287,7 @@ fn malformed_list_entries_are_refused_with_go_s_text() {
         parse_devices_list("x".repeat(70_000).as_bytes())
             .unwrap_err()
             .to_string(),
-        "read devices.list: bufio.Scanner: token too long"
+        "read devices.list: line longer than 65536 bytes"
     );
 }
 
@@ -595,20 +595,20 @@ fn openat_file_errors_read_as_go() {
             .write(handle.dir(), DEVICES_ALLOW, "c 1:3 r")
             .unwrap_err()
             .to_string(),
-        "open devices.allow: is a directory"
+        "open devices.allow: Is a directory (os error 21)"
     );
     assert_eq!(
         OpenatFiles
             .read(handle.dir(), DEVICES_ALLOW)
             .unwrap_err()
             .to_string(),
-        "read devices.allow: read devices.allow: is a directory"
+        "read devices.allow: read devices.allow: Is a directory (os error 21)"
     );
     assert_eq!(
         OpenatFiles
             .read(handle.dir(), DEVICES_LIST)
             .unwrap_err()
             .to_string(),
-        "open devices.list: no such file or directory"
+        "open devices.list: No such file or directory (os error 2)"
     );
 }

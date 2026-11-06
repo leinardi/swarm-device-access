@@ -143,6 +143,6 @@ fn open_error_reads_as_go() {
     let error = SelfIdError::Open(io::Error::from_raw_os_error(2));
     assert_eq!(
         error.to_string(),
-        "open /proc/self/mountinfo: open /proc/self/mountinfo: no such file or directory"
+        "open /proc/self/mountinfo: open /proc/self/mountinfo: No such file or directory (os error 2)"
     );
 }

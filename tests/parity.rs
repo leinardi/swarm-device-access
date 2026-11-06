@@ -16,19 +16,20 @@
 
 //! End-to-end parity of the binary with the Go 1.x release (`v1.0.3`): the command line's exit
 //! codes and texts, and one daemon run on a scripted Engine (startup, a `SIGHUP` reload that
-//! applies, one that is rejected, a scrape and a `SIGTERM`), compared by its log lines, the
-//! requests it sent the Engine and the `sda_` families it exposed.
+//! applies, one that is rejected, a scrape and a `SIGTERM`), compared by the requests it sent
+//! the Engine (by what they read, since the client is no longer moby's, Q16); its scrape is
+//! checked for what the run recorded, as OpenMetrics text. The log lines are not compared: the daemon
+//! logs through `tracing`, so their format is no longer Go's (the run only waits for the
+//! events it logs).
 //!
 //! The Go side is in `tests/testdata/parity`, written by [`capture_go_parity`] from the Go binary
 //! named by `SDA_GO_BINARY` (an ignored test: `make` never runs it). Each run masks what differs
 //! between any two runs (the version stamps, the temporary directory, the metrics port, the
-//! events `since`). The log lines and requests are compared as sorted lists, since the daemon's
-//! tasks interleave them differently from run to run; the startup lines up to the metrics server
-//! and the last line, and the requests up to the first container list, are compared by position
-//! as well. Two kinds of line depend on the host or the timing and are left out of the lists:
-//! the systemd watcher's retries, and the `RLIMIT_MEMLOCK` warning, which only a host that
-//! refuses both the probe's map and a raised limit logs; when the run logs it, it is checked to
-//! carry one of cilium's errors.
+//! events `since`). The requests are compared as sorted lists, since the daemon's tasks interleave
+//! them differently from run to run; the requests up to the first container list are compared
+//! by position as well. The `RLIMIT_MEMLOCK` warning, which only a host that refuses both the
+//! probe's map and a raised limit logs, is left out of the log lines and, when the run logs it,
+//! checked to carry one of cilium's errors.
 
 use std::convert::Infallible;
 use std::fmt::Write as _;
@@ -111,12 +112,15 @@ enum Kind {
     /// Q6: saphyr-parser refuses a tab between `:` and a plain value, which yaml.v3 reads as
     /// separation; the config is refused (exit 1) where Go went on to its next check.
     Q6Tab,
+    /// `feat(log)!`: `plain` is no longer a log format, so the refusal of an unknown one lists
+    /// `[text json]` where Go listed `[text json plain]`; the rest of the answer is Go's.
+    NoPlain,
 }
 
 /// The command-line cases, in the Rust spelling, run in the repository root.
 const CLI_CASES: &[(&[&str], Kind)] = &[
-    (&["--log-format=xml", "--policy-mode=bogus"], Kind::Same),
-    (&["--log-format=xml"], Kind::Same),
+    (&["--log-format=xml", "--policy-mode=bogus"], Kind::NoPlain),
+    (&["--log-format=xml"], Kind::NoPlain),
     (&["--policy-mode=bogus"], Kind::Same),
     (&["--device-allow=relative"], Kind::Same),
     (&["--device-allow=/dev/["], Kind::Same),
@@ -139,7 +143,7 @@ const CLI_CASES: &[(&[&str], Kind)] = &[
             "--config=tests/testdata/parity/valid.conf",
             "--log-format=xml",
         ],
-        Kind::Same,
+        Kind::NoPlain,
     ),
     (
         &[
@@ -151,10 +155,10 @@ const CLI_CASES: &[(&[&str], Kind)] = &[
     (&["launch", "--config-dir=rel"], Kind::Q1),
     (&["launch", "--config-dir=/srv/../etc"], Kind::Q1),
     (&["launch", "--host-docker-socket="], Kind::Q1),
-    (&["launch", "--log-format=xml"], Kind::Same),
+    (&["launch", "--log-format=xml"], Kind::NoPlain),
     (
         &["launch", "--log-level=trace", "--log-format=xml"],
-        Kind::Same,
+        Kind::NoPlain,
     ),
     (&["launch", "extra"], Kind::Q1),
     (&["launch", "--dry-run"], Kind::Q1),
@@ -213,6 +217,14 @@ fn the_command_line_answers_as_go_s() {
         match kind {
             Kind::Same => {
                 assert_eq!(rust, go, "{args:?}");
+                continue;
+            }
+            Kind::NoPlain => {
+                assert_eq!(
+                    rust.replace("[text json]", "[text json plain]"),
+                    go,
+                    "{args:?}"
+                );
                 continue;
             }
             Kind::Q6Syntax => {
@@ -451,7 +463,8 @@ struct Run {
     logs: Vec<String>,
     memlock: Vec<String>,
     requests: Vec<String>,
-    metrics: Vec<String>,
+    /// The body of the `/metrics` scrape.
+    scrape: String,
     exit: Option<i32>,
 }
 
@@ -576,67 +589,16 @@ fn mask(line: &str, dir: &Path, port: u16) -> String {
     masked
 }
 
-/// The samples whose value is a time: how long the dry-run passes took, and when the last
-/// container was processed.
-const TIMED_SAMPLES: [&str; 2] = [
-    "sda_apply_duration_seconds_sum ",
-    "sda_last_event_timestamp_seconds ",
-];
-
-/// The `sda_` families of a scrape, values included but those of [`TIMED_SAMPLES`], which are
-/// masked once checked to be positive numbers.
-fn sda_families(scrape: &str) -> Vec<String> {
-    scrape
-        .lines()
-        .filter(|line| {
-            line.starts_with("sda_")
-                || line.starts_with("# HELP sda_")
-                || line.starts_with("# TYPE sda_")
-        })
-        .map(|line| {
-            let timed = TIMED_SAMPLES
-                .iter()
-                .find_map(|name| line.strip_prefix(name).map(|value| (name, value)));
-            match timed {
-                Some((name, value)) => {
-                    let value: f64 = value
-                        .parse()
-                        .unwrap_or_else(|error| panic!("{line}: {error}"));
-                    assert!(value > 0.0, "{line}");
-                    format!("{name}<time>")
-                }
-                None => line.to_owned(),
-            }
-        })
-        .collect()
-}
-
-/// The systemd watcher's retries, whose count depends on how long the run took.
-const RETRY_LINE: &str = "systemd reload watcher still unavailable";
-
 /// The `RLIMIT_MEMLOCK` warning, which depends on the host's privileges and limits.
-const MEMLOCK_LINE: &str = "level=WARN msg=\"could not remove RLIMIT_MEMLOCK; loading BPF device \
-                            filters may fail\" err=";
+const MEMLOCK_LINE: &str = "could not remove RLIMIT_MEMLOCK; loading BPF device filters may fail";
 
 /// The beginnings of cilium's `RemoveMemlock` errors.
 const MEMLOCK_ERRORS: [&str; 4] = [
-    "\"failed to set memlock rlimit: ",
-    "\"unexpected error detecting memory cgroup accounting: ",
-    "\"lowering memlock rlimit: ",
-    "\"restoring old memlock rlimit: ",
+    "failed to set memlock rlimit: ",
+    "unexpected error detecting memory cgroup accounting: ",
+    "lowering memlock rlimit: ",
+    "restoring old memlock rlimit: ",
 ];
-
-/// The startup lines Go writes in a fixed order, up to the metrics server's.
-fn startup(logs: &[String]) -> &[String] {
-    let end = logs
-        .iter()
-        .position(|line| line.contains("metrics server listening"))
-        .map_or(0, |index| index + 1);
-    &logs[..end]
-}
-
-/// The requests Go sends in a fixed order: the pings, the subscription and the first list.
-const ORDERED_REQUESTS: usize = 4;
 
 /// The scenario, run by `binary` (`go` for Go's single-dash flags).
 fn run_daemon(binary: &str, go: bool) -> Run {
@@ -715,22 +677,36 @@ fn run_daemon(binary: &str, go: bool) -> Run {
     let (memlock, logs): (Vec<String>, Vec<String>) = output
         .snapshot()
         .iter()
-        .filter(|line| !line.contains(RETRY_LINE))
         .map(|line| mask(line, &dir, port))
-        .partition(|line| line.starts_with(MEMLOCK_LINE));
+        .partition(|line| line.contains(MEMLOCK_LINE));
     Run {
         logs,
         memlock,
         requests: requests.iter().map(|line| mask(line, &dir, port)).collect(),
-        metrics: sda_families(&scrape),
+        scrape,
         exit,
     }
 }
 
-fn sorted(lines: &[String]) -> Vec<String> {
-    let mut sorted = lines.to_vec();
-    sorted.sort();
-    sorted
+/// The requests as what they read, sorted: each path without its API version prefix and query,
+/// the pings and the version negotiation left out.
+fn semantic(lines: &[String]) -> Vec<String> {
+    let mut reads: Vec<String> = lines
+        .iter()
+        .filter_map(|line| {
+            let uri = line.split(' ').nth(1)?;
+            let path = uri.split('?').next()?;
+            let path = match path.strip_prefix("/v") {
+                Some(rest) if rest.starts_with(|first: char| first.is_ascii_digit()) => {
+                    rest.find('/').map_or(path, |slash| &rest[slash..])
+                }
+                _ => path,
+            };
+            (!matches!(path, "/_ping" | "/version")).then(|| format!("GET {path}"))
+        })
+        .collect();
+    reads.sort();
+    reads
 }
 
 fn read_lines(name: &str) -> Vec<String> {
@@ -746,36 +722,66 @@ fn read_lines(name: &str) -> Vec<String> {
 #[test]
 fn a_daemon_run_matches_go_s() {
     let rust = run_daemon(RUST_BINARY, false);
-    let go_logs = read_lines("go-logs.txt");
     assert_eq!(rust.exit, Some(0), "{}", rust.logs.join("\n"));
-    assert!(!startup(&go_logs).is_empty());
-    assert_eq!(startup(&rust.logs), startup(&go_logs), "the startup lines");
-    assert_eq!(rust.logs.last(), go_logs.last(), "the last line");
-    assert_eq!(sorted(&rust.logs), sorted(&go_logs), "the log lines");
     assert!(rust.memlock.len() <= 1, "{:?}", rust.memlock);
     for line in &rust.memlock {
-        let err = &line[MEMLOCK_LINE.len()..];
+        let err = line.split_once("error=").map_or("", |(_, error)| error);
         assert!(
             MEMLOCK_ERRORS.iter().any(|prefix| err.starts_with(prefix)),
             "{line}"
         );
     }
+    // The Docker client is no longer moby's (Q16): the requests are Go's as to what the daemon
+    // asks the Engine (the same reads of the same containers, the same number of times), not
+    // as to their bytes, so the two runs are compared by method-less path with the pings and the
+    // version negotiation, which belong to each client, left out; and the Rust run's own start
+    // is pinned: the version, one ping, then the subscription.
     let go_requests = read_lines("go-requests.txt");
     assert_eq!(
-        rust.requests.get(..ORDERED_REQUESTS),
-        go_requests.get(..ORDERED_REQUESTS),
+        semantic(&rust.requests),
+        semantic(&go_requests),
+        "the Engine reads"
+    );
+    assert_eq!(
+        rust.requests.get(..2),
+        Some(
+            &[
+                "GET /version ua=swarm-device-access".to_owned(),
+                "GET /_ping ua=swarm-device-access".to_owned()
+            ][..]
+        ),
         "the Engine requests' order"
     );
-    assert_eq!(
-        sorted(&rust.requests),
-        sorted(&go_requests),
-        "the Engine requests"
+    assert!(
+        rust.requests
+            .get(2)
+            .is_some_and(|request| request.starts_with("GET /events?")),
+        "{:?}",
+        rust.requests
     );
-    assert_eq!(
-        rust.metrics,
-        read_lines("go-metrics.txt"),
-        "the sda_ families"
+    assert!(
+        rust.requests
+            .iter()
+            .all(|request| request.ends_with(" ua=swarm-device-access")),
+        "{:?}",
+        rust.requests
     );
+    // The scrape is OpenMetrics text, no longer Go's: the semantic tests of the recorder
+    // (`src/metrics/recorder/tests.rs`) check the families; here the daemon's own run shows up.
+    for line in [
+        "# TYPE sda_events counter\n",
+        "# TYPE sda_apply_duration_seconds histogram\n",
+        "# TYPE sda_reconcile_pending_containers gauge\n",
+        "sda_events_total{event=\"start\"} 1\n",
+        "# EOF\n",
+    ] {
+        assert!(
+            rust.scrape.contains(line),
+            "{line:?} not in:\n{}",
+            rust.scrape
+        );
+    }
+    assert!(!rust.scrape.contains("promhttp_"), "{}", rust.scrape);
 }
 
 /// Writes the Go side from the binary `SDA_GO_BINARY` names, the `v1.0.3` release.
@@ -794,9 +800,7 @@ fn capture_go_parity() {
         .unwrap_or_else(|error| panic!("create testdata: {error}"));
     for (name, text) in [
         ("go-cli.txt", cli),
-        ("go-logs.txt", run.logs.join("\n") + "\n"),
         ("go-requests.txt", run.requests.join("\n") + "\n"),
-        ("go-metrics.txt", run.metrics.join("\n") + "\n"),
     ] {
         std::fs::write(testdata(name), text)
             .unwrap_or_else(|error| panic!("write {name}: {error}"));

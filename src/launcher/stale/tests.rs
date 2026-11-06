@@ -157,7 +157,6 @@ async fn remove_stale() {
             engine: launch.engine,
             self_id: launch.self_id,
             timing: launch.timing,
-            log: launch.log,
         };
 
         let removed = runner
@@ -223,7 +222,7 @@ async fn remove_stale_logs_the_orphan() {
     fake.started().await;
     fake.exit(0);
     assert_eq!(result(done).await.unwrap(), 0);
-    assert!(run.sink.contents().contains(
+    assert!(run.logs.contents().contains(
         "level=INFO removing orphaned daemon component=launcher id=444444444444 \
          launcher=555555555555"
     ));

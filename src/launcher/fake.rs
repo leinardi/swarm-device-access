@@ -34,9 +34,6 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use bytes::Bytes;
-use hyper::StatusCode;
-use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 
@@ -45,9 +42,10 @@ use super::engine::{
 };
 use super::spec::{DEFAULT_HOST_DOCKER_SOCKET, DaemonSpec, Options};
 use super::{Console, Launch, LaunchError, Timing};
-use crate::docker::{CallContext, Error};
-use crate::test_support::capture_logs;
-use go_slog::{Level, MemorySink};
+use crate::docker::attach::Output;
+use crate::docker::{CallContext, ClientError, Error, stream_failure};
+use crate::test_support::{Logs, capture_logs};
+use tracing::level_filters::LevelFilter;
 
 pub(super) const TEST_LAUNCHER_ID: &str =
     "1111111111111111111111111111111111111111111111111111111111111111";
@@ -56,23 +54,26 @@ pub(super) const TEST_IMAGE_ID: &str =
 pub(super) const TEST_DAEMON_ID: &str =
     "3333333333333333333333333333333333333333333333333333333333333333";
 
-/// The stdout and stderr streams of the multiplexed attach.
+/// How many pieces of output the fake holds for the launcher.
+const OUTPUT_PIECES: usize = 1024;
+
+/// The stdout and stderr streams of the attach.
 pub(super) const STREAM_STDOUT: u8 = 1;
 pub(super) const STREAM_STDERR: u8 = 2;
 
 /// Go's `errInjected`.
 pub(super) fn injected() -> Error {
-    Error::connection_failed("injected failure".to_owned())
+    Error::unavailable("injected failure".to_owned())
 }
 
 /// Go's `errDenied`.
 pub(super) fn denied() -> Error {
-    Error::response(StatusCode::FORBIDDEN, "permission denied".to_owned())
+    Error::response(403, "permission denied".to_owned())
 }
 
 /// A 404, as moby reports a missing container.
 pub(super) fn not_found(id: &str) -> Error {
-    Error::response(StatusCode::NOT_FOUND, format!("No such container: {id}"))
+    Error::response(404, format!("No such container: {id}"))
 }
 
 /// What a scripted stop does, given the engine.
@@ -111,7 +112,7 @@ struct Recorded {
     stops: Vec<StopCall>,
     daemon_gone: bool,
     /// The daemon's side of the attach.
-    output: Option<mpsc::UnboundedSender<io::Result<Bytes>>>,
+    output: Option<mpsc::Sender<Result<Output, ClientError>>>,
     /// Hung calls the launcher dropped.
     released: usize,
 }
@@ -242,15 +243,16 @@ impl FakeEngine {
         self.0.started.notified().await;
     }
 
-    /// Writes one multiplexed line of daemon output.
+    /// Writes one line of daemon output to `stream`.
     pub(super) fn emit(&self, stream: u8, line: &str) {
-        let payload = format!("{line}\n");
-        let size = u32::try_from(payload.len()).unwrap_or(u32::MAX);
-        let mut frame = vec![stream, 0, 0, 0];
-        frame.extend_from_slice(&size.to_be_bytes());
-        frame.extend_from_slice(payload.as_bytes());
+        let bytes = format!("{line}\n").into_bytes();
+        let piece = if stream == STREAM_STDERR {
+            Output::Stderr(bytes)
+        } else {
+            Output::Stdout(bytes)
+        };
         if let Some(output) = &lock(&self.0.recorded).output {
-            let _ = output.send(Ok(Bytes::from(frame)));
+            let _ = output.try_send(Ok(piece));
         }
     }
 
@@ -259,7 +261,7 @@ impl FakeEngine {
         if let Some(output) = lock(&self.0.recorded).output.take()
             && let Some(error) = error
         {
-            let _ = output.send(Err(io::Error::other(error.to_owned())));
+            let _ = output.try_send(Err(stream_failure(error)));
         }
     }
 
@@ -364,12 +366,9 @@ impl EngineApi for FakeEngine {
         if let Some(error) = error {
             return Err(error);
         }
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = mpsc::channel(OUTPUT_PIECES);
         lock(&self.0.recorded).output = Some(sender);
-        Ok(Box::new(ChannelReader {
-            receiver,
-            pending: Bytes::new(),
-        }))
+        Ok(receiver)
     }
 
     async fn wait_removed(&self, _id: &str) -> Result<WaitAnswer, Error> {
@@ -418,35 +417,6 @@ impl EngineApi for FakeEngine {
     }
 }
 
-/// The launcher's end of the fake attach: what the daemon side sends, then its end or error.
-struct ChannelReader {
-    receiver: mpsc::UnboundedReceiver<io::Result<Bytes>>,
-    pending: Bytes,
-}
-
-impl AsyncRead for ChannelReader {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        buffer: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        loop {
-            if !self.pending.is_empty() {
-                let take = self.pending.len().min(buffer.remaining());
-                let chunk = self.pending.split_to(take);
-                buffer.put_slice(&chunk);
-                return Poll::Ready(Ok(()));
-            }
-            match self.receiver.poll_recv(context) {
-                Poll::Ready(Some(Ok(bytes))) => self.pending = bytes,
-                Poll::Ready(Some(Err(error))) => return Poll::Ready(Err(error)),
-                Poll::Ready(None) => return Poll::Ready(Ok(())),
-                Poll::Pending => return Poll::Pending,
-            }
-        }
-    }
-}
-
 /// A writer the test reads back.
 #[derive(Clone, Default)]
 pub(super) struct Buffer(Arc<Mutex<Vec<u8>>>);
@@ -481,14 +451,14 @@ pub(super) struct TestRun {
     pub(super) fake: FakeEngine,
     pub(super) stdout: Buffer,
     pub(super) stderr: Buffer,
-    pub(super) sink: MemorySink,
+    pub(super) logs: Logs,
     pub(super) launch: Launch<FakeEngine>,
 }
 
 /// Go's `newTestRun`: the default host socket, the test launcher's ID, a 2 s call timeout, a
 /// 5 s budget and a 10 ms poll.
 pub(super) fn test_run(fake: &FakeEngine) -> TestRun {
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let logs = capture_logs(LevelFilter::DEBUG);
     let stdout = Buffer::default();
     let stderr = Buffer::default();
     let mut launch = Launch::new(
@@ -501,7 +471,6 @@ pub(super) fn test_run(fake: &FakeEngine) -> TestRun {
             stdout: Box::new(stdout.clone()),
             stderr: Box::new(stderr.clone()),
         },
-        &log,
     );
     launch.self_id = Box::new(|| Ok(TEST_LAUNCHER_ID.to_owned()));
     launch.timing = Timing {
@@ -513,7 +482,7 @@ pub(super) fn test_run(fake: &FakeEngine) -> TestRun {
         fake: fake.clone(),
         stdout,
         stderr,
-        sink,
+        logs,
         launch,
     }
 }

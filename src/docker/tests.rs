@@ -14,273 +14,380 @@
  * limitations under the License.
  */
 
-//! What adopting docker-engine changed in the daemon's client, each against its parent: the 1 MiB
-//! event record bound and the yield between reads (swarm-scheduler-exporter's 2379192), and the
-//! causes kept behind moby's unchanged error texts. The transport, negotiation, wording, event
-//! decoding and context tests are docker-engine's; the wire is `tests/engine_wire.rs`.
+//! What the daemon's client does on the wire, against docker-client's fake engine on a unix
+//! socket: the conversion of the answers, the negotiated version and the `User-Agent`, a missing
+//! container, an event stream that is closed and opened again from where it was, a body that
+//! stalls after its headers, and an engine that is gone. The bollard calls themselves are
+//! docker-client's to test.
 
-use std::collections::VecDeque;
-use std::error::Error as _;
-use std::path::PathBuf;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::task::{Context, Poll};
 use std::time::Duration;
 
-use bytes::Bytes;
-use hyper::body::Frame;
+use docker_client::ErrorKind as ClientKind;
+use docker_client::test_util::{FakeEngine, Reply, Request};
 use jiff::Timestamp;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tokio::net::{UnixListener, UnixStream};
 
-use super::types::Event;
-use super::{Client, DockerApi as _, Error, EventStream as _, Filters, Settings, StreamErrorKind};
-use docker_engine::JsonStream;
+use super::{
+    CallContext, Client, DockerApi as _, Error, ErrorKind, EventStream as _, Filters,
+    StreamErrorKind, with_context,
+};
 
-/// One more byte than an event record may hold.
-const OVERSIZED: usize = 1024 * 1024 + 1;
+const ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const CALL: Duration = Duration::from_millis(300);
 
-/// A directory of its own under the temporary directory, removed on drop.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "sda-docker-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::SeqCst)
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-
-    fn socket(&self) -> String {
-        self.0.join("docker.sock").display().to_string()
-    }
+fn client(engine: &FakeEngine, call: Duration) -> Client {
+    Client::unix(engine.socket().to_str().unwrap(), call, call).unwrap()
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+fn event(action: &str, id: &str, nano: i64) -> String {
+    format!(
+        r#"{{"Type":"container","Action":"{action}","Actor":{{"ID":"{id}","Attributes":{{"name":"web"}}}},"time":{},"timeNano":{nano}}}"#,
+        nano / 1_000_000_000
+    )
 }
 
-/// A request's method and target, once its head is read; `None` when the client is gone.
-async fn read_head(stream: &mut UnixStream) -> Option<(String, String)> {
-    let mut head = Vec::new();
-    let mut byte = [0_u8; 1];
-    while !head.ends_with(b"\r\n\r\n") {
-        if stream.read(&mut byte).await.ok()? == 0 {
-            return None;
-        }
-        head.push(byte[0]);
-    }
-    let line = String::from_utf8_lossy(&head).into_owned();
-    let mut words = line.split(' ');
-    Some((words.next()?.to_owned(), words.next()?.to_owned()))
+/// The requests that are not the version negotiation.
+fn calls(engine: &FakeEngine) -> Vec<Request> {
+    engine
+        .requests()
+        .into_iter()
+        .filter(|request| request.path() != "/version")
+        .collect()
 }
 
-/// An Engine on `socket` that answers the ping with API 1.56, a container's inspect with
-/// `inspect`, and the events with a chunked body of `events`, held open after it.
-fn engine(socket: &str, inspect: &'static str, events: Vec<u8>) -> tokio::task::JoinHandle<()> {
-    let listener = UnixListener::bind(socket).unwrap();
-    let events = Arc::new(events);
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
-                return;
-            };
-            let events = Arc::clone(&events);
-            tokio::spawn(async move {
-                while let Some((method, target)) = read_head(&mut stream).await {
-                    if target == "/_ping" {
-                        let body = if method == "HEAD" { "" } else { "OK" };
-                        let answer = format!(
-                            "HTTP/1.1 200 OK\r\nApi-Version: 1.56\r\nContent-Length: 2\r\n\r\n{body}"
-                        );
-                        let _ = stream.write_all(answer.as_bytes()).await;
-                    } else if target.starts_with("/v1.56/events") {
-                        let _ = stream
-                            .write_all(
-                                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                                  Transfer-Encoding: chunked\r\n\r\n",
-                            )
-                            .await;
-                        for piece in events.chunks(64 * 1024) {
-                            let mut chunk = format!("{:x}\r\n", piece.len()).into_bytes();
-                            chunk.extend_from_slice(piece);
-                            chunk.extend_from_slice(b"\r\n");
-                            if stream.write_all(&chunk).await.is_err() {
-                                return;
-                            }
-                        }
-                        // Held open: the record never completes.
-                        let mut sink = Vec::new();
-                        let _ = stream.read_to_end(&mut sink).await;
-                        return;
-                    } else {
-                        let answer = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                             Content-Length: {}\r\n\r\n{inspect}",
-                            inspect.len()
-                        );
-                        let _ = stream.write_all(answer.as_bytes()).await;
-                    }
-                }
-            });
-        }
-    })
-}
-
-fn client(socket: &str) -> Client {
-    Client::new(Settings::unix(socket).unwrap())
-}
-
-/// Every error of `error`'s source chain, from the outermost, as its text.
-fn chain(error: &Error) -> Vec<String> {
-    let mut texts = vec![error.to_string()];
-    let mut source = error.source();
-    while let Some(cause) = source {
-        texts.push(cause.to_string());
-        source = cause.source();
-    }
-    texts
-}
-
-/// An event record that grows past 1 MiB on a stream that stays open ends the stream with a
-/// decode error, where it was buffered for as long as the daemon kept sending.
+/// The answers convert to the fields the daemon reads, the first call asks the engine for its API
+/// version and every later request is sent under it (`/v1.45/...`), and every request carries the
+/// program's `User-Agent`.
 #[tokio::test]
-async fn an_oversized_event_record_ends_the_stream_with_a_decode_error() {
-    let dir = Scratch::new();
-    let socket = dir.socket();
-    let mut record = b"{\"Type\":\"".to_vec();
-    record.resize(OVERSIZED + 64 * 1024, b'a');
-    let _engine = engine(&socket, "{}", record);
-    let mut stream = client(&socket)
+async fn the_answers_convert_and_the_requests_carry_the_user_agent() {
+    let inspect = format!(
+        r#"{{"Id":"{ID}","State":{{"Running":true,"Pid":42,"StartedAt":"2026-01-02T03:04:05.000000006Z"}},"Config":{{"Labels":{{"a":"b"}}}},"HostConfig":{{"Privileged":false}},"Mounts":[{{"Type":"bind","Source":"/dev/null","Destination":"/dev/null"}}]}}"#
+    );
+    let engine = FakeEngine::start(&[
+        (
+            "/version",
+            Reply::ok(r#"{"ApiVersion":"1.45","MinAPIVersion":"1.24"}"#),
+        ),
+        ("/_ping", Reply::ok("OK")),
+        (
+            "/containers/json",
+            Reply::ok(&format!(r#"[{{"Id":"{ID}"}}]"#)),
+        ),
+        (&format!("/containers/{ID}/json"), Reply::ok(&inspect)),
+    ])
+    .unwrap();
+    let docker = client(&engine, CALL);
+
+    docker.ping().await.unwrap();
+    let listed = docker.container_list().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, ID);
+    let inspected = docker.container_inspect(&format!(" {ID}\n")).await.unwrap();
+    assert_eq!(inspected.id, ID);
+    let state = inspected.state.unwrap();
+    assert!(state.running);
+    assert_eq!(state.pid, 42);
+    assert_eq!(state.started_at, "2026-01-02T03:04:05.000000006Z");
+    assert_eq!(inspected.config.unwrap().labels["a"], "b");
+    assert!(!inspected.host_config.unwrap().privileged);
+    assert_eq!(inspected.mounts[0].destination, "/dev/null");
+
+    // The version is asked for once, before the first call.
+    let all = engine.requests();
+    assert_eq!(all[0].path(), "/version");
+    assert_eq!(
+        all.iter()
+            .filter(|request| request.path() == "/version")
+            .count(),
+        1
+    );
+    let requests = calls(&engine);
+    let paths: Vec<_> = requests.iter().map(Request::raw_path).collect();
+    assert_eq!(
+        paths,
+        [
+            "/v1.45/_ping",
+            "/v1.45/containers/json",
+            &format!("/v1.45/containers/{ID}/json")
+        ]
+    );
+    assert!(requests.iter().all(|request| request.method == "GET"));
+    assert!(requests.iter().all(|request| {
+        request
+            .header("user-agent")
+            .is_some_and(|agent| agent.starts_with("swarm-device-access/"))
+    }));
+    // The list is of the running containers: no `all`, no filter.
+    assert_eq!(requests[1].query(), "");
+}
+
+/// An engine that cannot negotiate (no `/version`) is spoken to at the client's own version, once: the
+/// failed negotiation is not repeated before every call.
+#[tokio::test]
+async fn a_failed_negotiation_is_not_an_error_and_not_repeated() {
+    let engine = FakeEngine::start(&[("/_ping", Reply::ok("OK"))]).unwrap();
+    let docker = client(&engine, CALL);
+    docker.ping().await.unwrap();
+    docker.ping().await.unwrap();
+    let versions = engine
+        .requests()
+        .iter()
+        .filter(|request| request.path() == "/version")
+        .count();
+    assert_eq!(versions, 1);
+}
+
+/// A container the engine does not have is a not-found error, the kind the processor reads as
+/// "the container is gone", and its text is the engine's.
+#[tokio::test]
+async fn a_missing_container_is_not_found() {
+    let engine = FakeEngine::start(&[]).unwrap();
+    let docker = client(&engine, CALL);
+    let error = docker.container_inspect(ID).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+    assert!(error.is_not_found());
+    assert!(error.to_string().contains("No such object"), "{error}");
+    // Not a failure to reach the engine: nothing else was asked of it.
+    assert_eq!(calls(&engine).len(), 1);
+}
+
+/// An empty ID is refused before any request, as moby refuses it.
+#[tokio::test]
+async fn an_empty_id_is_refused_without_a_request() {
+    let engine = FakeEngine::start(&[]).unwrap();
+    let docker = client(&engine, CALL);
+    let error = docker.container_inspect("  ").await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "invalid container name or ID: value is empty"
+    );
+    assert!(engine.requests().is_empty());
+}
+
+/// The subscription asks for the `since` it was given and the event filter, and yields the events
+/// in order, then the engine's close as an EOF.
+#[tokio::test]
+async fn the_events_come_with_since_and_filters_until_the_stream_closes() {
+    let first = event("start", "c1", 1_767_323_046_000_000_001);
+    let second = event("die", "c1", 1_767_323_047_000_000_002);
+    let engine = FakeEngine::start(&[("/events", Reply::events(&[&first, &second]))]).unwrap();
+    let docker = client(&engine, CALL);
+    let since = Timestamp::from_nanosecond(1_767_323_045_000_000_006).unwrap();
+    let filters = Filters::new().add("event", &["start", "die"]);
+
+    let mut stream = docker.events(since, &filters).await.unwrap();
+    let start = stream.next().await.unwrap();
+    assert_eq!(
+        (
+            start.kind.as_str(),
+            start.action.as_str(),
+            start.actor.id.as_str()
+        ),
+        ("container", "start", "c1")
+    );
+    assert_eq!(start.actor.attributes["name"], "web");
+    assert_eq!(start.time, 1_767_323_046);
+    assert_eq!(start.time_nano, 1_767_323_046_000_000_001);
+    assert_eq!(stream.next().await.unwrap().action, "die");
+    let end = stream.next().await.unwrap_err();
+    assert_eq!(end.kind(), StreamErrorKind::Eof);
+    assert_eq!(end.to_string(), "EOF");
+    // The stream is over for good.
+    assert_eq!(
+        stream.next().await.unwrap_err().kind(),
+        StreamErrorKind::Eof
+    );
+
+    let request = calls(&engine).pop().unwrap();
+    assert_eq!(request.method, "GET");
+    let query = request.query();
+    assert!(query.contains("since=1767323045.000000006"), "{query}");
+    // moby's filter encoding: `{"event":["die","start"]}` here, percent-encoded.
+    assert!(query.contains("filters="), "{query}");
+    assert!(query.contains("start") && query.contains("die"), "{query}");
+}
+
+/// A stream the engine closed is opened again from one nanosecond after its last event, which is
+/// what the event loop asks of the client, and answers from where it left off.
+#[tokio::test]
+async fn a_closed_stream_is_opened_again_from_the_last_event() {
+    let first = event("start", "c1", 1_767_323_046_000_000_001);
+    let engine = FakeEngine::start(&[("/events", Reply::events(&[&first]))]).unwrap();
+    let docker = client(&engine, CALL);
+    let filters = Filters::new().add("event", &["start"]);
+    let initial = Timestamp::from_nanosecond(1_767_323_045_000_000_000).unwrap();
+
+    let mut stream = docker.events(initial, &filters).await.unwrap();
+    let last = stream.next().await.unwrap().time_nano;
+    assert_eq!(
+        stream.next().await.unwrap_err().kind(),
+        StreamErrorKind::Eof
+    );
+    drop(stream);
+
+    let again = Timestamp::from_nanosecond(i128::from(last) + 1).unwrap();
+    let mut stream = docker.events(again, &filters).await.unwrap();
+    assert_eq!(stream.next().await.unwrap().action, "start");
+
+    let sinces: Vec<_> = calls(&engine)
+        .iter()
+        .map(|request| {
+            request
+                .query()
+                .split('&')
+                .find_map(|pair| pair.strip_prefix("since="))
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(sinces, ["1767323045.000000000", "1767323046.000000002"]);
+}
+
+/// A record that is not an event ends the stream with a decode error, and the stream stays over.
+#[tokio::test]
+async fn a_record_that_is_not_an_event_ends_the_stream() {
+    let mut body =
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n".to_vec();
+    body.extend_from_slice(b"{\"Action\": [not json\n");
+    let engine = FakeEngine::start(&[("/events", Reply::Raw(body))]).unwrap();
+    let docker = client(&engine, CALL);
+    let mut stream = docker
         .events(Timestamp::UNIX_EPOCH, &Filters::new())
         .await
         .unwrap();
-    let ended = tokio::time::timeout(Duration::from_secs(10), stream.next())
+    let end = stream.next().await.unwrap_err();
+    assert_ne!(end.kind(), StreamErrorKind::Eof, "{end}");
+    assert_eq!(
+        stream.next().await.unwrap_err().kind(),
+        StreamErrorKind::Eof
+    );
+}
+
+/// A body that stalls after its headers outlasts bollard's own timeout (the headers), so the
+/// client's whole-call bound ends the call, as a timeout.
+#[tokio::test]
+async fn a_stalled_body_hits_the_whole_call_timeout() {
+    let engine = FakeEngine::start(&[("/containers/json", Reply::Stalled)]).unwrap();
+    let docker = client(&engine, Duration::from_millis(200));
+    let error = tokio::time::timeout(Duration::from_secs(5), docker.container_list())
         .await
-        .expect("the oversized record was buffered: the stream did not end within 10s")
+        .expect("the call hung")
         .unwrap_err();
-    assert_eq!(ended.kind(), StreamErrorKind::Decode);
-    assert_eq!(ended.to_string(), "event JSON exceeds 1048576 bytes");
+    assert_eq!(error.kind(), ErrorKind::Timeout);
+    assert!(!error.is_canceled());
 }
 
-/// A body whose frames are all ready at once, as hyper hands over what it already read.
-struct Ready(VecDeque<Bytes>);
-
-impl hyper::body::Body for Ready {
-    type Data = Bytes;
-    type Error = Error;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        _context: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, Error>>> {
-        Poll::Ready(
-            self.get_mut()
-                .0
-                .pop_front()
-                .map(|data| Ok(Frame::data(data))),
-        )
-    }
-}
-
-/// The event stream yields to the runtime before each read, so a burst of ready records does not
-/// keep the daemon's other tasks (the coordinator, the shutdown watch) from running on its
-/// worker; it ran through every ready frame without yielding.
-#[tokio::test(flavor = "current_thread")]
-async fn the_event_stream_yields_between_records() {
-    let records = ["{\"Action\":\"start\"}\n", "{\"Action\":\"die\"}\n"];
-    let mut stream = JsonStream::new(
-        Ready(records.iter().map(|record| Bytes::from(*record)).collect()),
-        Some("application/json"),
-    );
-    for action in ["start", "die"] {
-        let ran = Arc::new(AtomicBool::new(false));
-        let other = tokio::spawn({
-            let ran = Arc::clone(&ran);
-            async move { ran.store(true, Ordering::SeqCst) }
-        });
-        let event: Event = stream.next().await.unwrap();
-        assert_eq!(event.action, action);
-        assert!(
-            ran.load(Ordering::SeqCst),
-            "reading the {action} record never yielded to the other task"
-        );
-        other.await.unwrap();
-    }
-}
-
-/// The moby text of a request to a socket path that does not exist, the dial's text, and the
-/// error.
-async fn missing_socket() -> (String, String, Error) {
-    let dir = Scratch::new();
-    let socket = dir.socket();
-    let error = client(&socket).container_list().await.unwrap_err();
-    let dial = format!("dial unix {socket}: connect: no such file or directory");
-    let text = format!(
-        "failed to connect to the docker API at unix://{socket}; check if the path is correct \
-         and if the daemon is running: {dial}"
-    );
-    (text, dial, error)
-}
-
-/// A failed dial keeps moby's text and now carries the system error as its cause.
+/// The caller's deadline ends the same stalled call first when it is the shorter one, with Go's
+/// bare `context deadline exceeded`, and its cancellation with `context canceled`.
 #[tokio::test]
-async fn a_failed_dial_keeps_the_system_error_as_its_cause() {
-    let (text, _, error) = missing_socket().await;
-    assert_eq!(error.to_string(), text);
-    let mut cause = error.source();
-    let mut system = None;
-    while let Some(found) = cause {
-        system = found.downcast_ref::<std::io::Error>().or(system);
-        cause = found.source();
-    }
-    assert_eq!(
-        system.map(std::io::Error::kind),
-        Some(std::io::ErrorKind::NotFound),
-        "no system error in {:?}",
-        chain(&error)
-    );
+async fn the_callers_context_ends_a_stalled_call() {
+    let engine = FakeEngine::start(&[("/containers/json", Reply::Stalled)]).unwrap();
+    let docker = client(&engine, Duration::from_secs(30));
+
+    let context = CallContext::new().with_timeout(Duration::from_millis(100));
+    let error = with_context(&context, docker.container_list())
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "context deadline exceeded");
+    assert_eq!(error.kind(), ErrorKind::Timeout);
+
+    let context = CallContext::new();
+    let canceler = context.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        canceler.cancel();
+    });
+    let error = with_context(&context, docker.container_list())
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "context canceled");
+    assert!(error.is_canceled());
 }
 
-/// The transport's failure (`SendError`) and the dial's (`ConnectError`) are errors of their own
-/// in that chain, each with the dial's text, before the system error.
+/// An engine that is gone is unavailable, which is neither a missing container nor a timeout.
 #[tokio::test]
-async fn the_transport_and_dial_failures_are_errors_in_the_chain() {
-    let (text, dial, error) = missing_socket().await;
-    assert_eq!(
-        chain(&error),
-        [
-            text,
-            dial.clone(),
-            dial,
-            "No such file or directory (os error 2)".to_owned()
-        ]
-    );
+async fn an_engine_that_is_gone_is_unavailable() {
+    let engine = FakeEngine::start(&[]).unwrap();
+    let docker = client(&engine, CALL);
+    drop(engine);
+    let error: Error = docker.ping().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Unavailable, "{error}");
+    assert_eq!(ClientKind::Unavailable, error.kind());
 }
 
-/// An answer that is not the JSON asked for keeps serde's text and now carries serde's error as
-/// its cause.
-#[tokio::test]
-async fn a_decode_failure_keeps_serde_s_error_as_its_cause() {
-    let dir = Scratch::new();
-    let socket = dir.socket();
-    let _engine = engine(&socket, "{\"Id\":5}", Vec::new());
-    let error = client(&socket).container_inspect("c1").await.unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "invalid type: integer `5`, expected a string at line 1 column 7"
-    );
-    let cause = error.source();
+/// A socket that does not exist is refused when the client is built, with the path in the text.
+#[test]
+fn a_socket_that_does_not_exist_is_refused_up_front() {
+    let error = Client::unix("/nonexistent/docker.sock", CALL, CALL).unwrap_err();
     assert!(
-        cause.is_some_and(<dyn std::error::Error>::is::<serde_json::Error>),
-        "no serde_json cause: {:?}",
-        chain(&error)
+        error.to_string().contains("/nonexistent/docker.sock"),
+        "{error}"
     );
+}
+
+/// A record of a value this program's models do not know (here an event `Type` a newer Engine
+/// introduced) fails the whole decode, which the stream reports as a decode error: the event
+/// loop's skip-to-now (`src/daemon/events.rs`) exists for it.
+#[tokio::test]
+async fn an_unknown_event_type_is_a_decode_error() {
+    let unknown = r#"{"Type":"brand-new-type","Action":"start","Actor":{"ID":"c1"},"time":1,"timeNano":1000000000}"#;
+    let engine = FakeEngine::start(&[("/events", Reply::events(&[unknown]))]).unwrap();
+    let docker = client(&engine, CALL);
+    let mut stream = docker
+        .events(Timestamp::UNIX_EPOCH, &Filters::new())
+        .await
+        .unwrap();
+    let end = stream.next().await.unwrap_err();
+    assert_eq!(end.kind(), StreamErrorKind::Decode, "{end}");
+}
+
+/// The subscription is established when `events` resolves: an engine that answers the events
+/// headers late leaves the call pending, so the daemon is not ready before it is subscribed, and
+/// the stream it then returns yields the events.
+#[tokio::test]
+async fn the_events_call_resolves_only_once_the_engine_answered_the_headers() {
+    let first = event("start", "c1", 1_767_323_046_000_000_001);
+    let engine = FakeEngine::start(&[(
+        "/events",
+        Reply::Delayed {
+            delay: Duration::from_millis(400),
+            reply: Box::new(Reply::events(&[&first])),
+        },
+    )])
+    .unwrap();
+    let docker = client(&engine, Duration::from_secs(5));
+    let filters = Filters::new();
+
+    let early = tokio::time::timeout(
+        Duration::from_millis(100),
+        docker.events(Timestamp::UNIX_EPOCH, &filters),
+    )
+    .await;
+    assert!(early.is_err(), "resolved before the engine answered");
+
+    let mut stream = docker
+        .events(Timestamp::UNIX_EPOCH, &filters)
+        .await
+        .unwrap();
+    assert_eq!(stream.next().await.unwrap().action, "start");
+}
+
+/// An engine that never answers the events headers is a timeout, not an open stream, and one that
+/// refuses them is the call's error, not the stream's first item.
+#[tokio::test]
+async fn a_silent_or_refusing_engine_is_not_a_subscription() {
+    let engine = FakeEngine::start(&[("/events", Reply::Silent)]).unwrap();
+    let docker = client(&engine, Duration::from_millis(150));
+    let error = docker
+        .events(Timestamp::UNIX_EPOCH, &Filters::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Timeout, "{error}");
+
+    let engine = FakeEngine::start(&[("/events", Reply::error(500, "engine broke"))]).unwrap();
+    let docker = client(&engine, CALL);
+    let error = docker
+        .events(Timestamp::UNIX_EPOCH, &Filters::new())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("engine broke"), "{error}");
 }

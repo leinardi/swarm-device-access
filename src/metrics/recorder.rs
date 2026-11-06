@@ -14,39 +14,50 @@
  * limitations under the License.
  */
 
-//! The daemon's metrics, a port of `internal/observability/metrics.go`: every `sda_` family with
-//! Go's name, type, labels and help text, and the methods the daemon records through.
+//! The daemon's metrics: every `sda_` family of the 1.x daemon with its name, type, labels and
+//! help text, and the methods the daemon records through, on prometheus-client.
 //!
-//! The Go `Recorder` registers against the Prometheus Go client's default registry, which also
-//! holds the process collector, and promhttp adds its handler metrics there. This one owns its
-//! [`Registry`] with the same families (but `go_*`, Q3), so the metrics server serves exactly
-//! what it was given. A no-op form ([`Recorder::noop`]) stands for Go's nil `*Recorder`, on which
-//! every method does nothing.
+//! The recorder owns its [`Registry`], so the metrics server exposes exactly what it was given:
+//! the `sda_*` families and service-kit's `process_*` collector. Counters are registered without
+//! the `_total` suffix, which prometheus-client appends. A no-op form ([`Recorder::noop`]) stands
+//! for Go's nil `*Recorder`, on which every method does nothing.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Timestamp;
+use prometheus_client::encoding::EncodeLabelSet;
+use prometheus_client::metrics::counter::Counter;
+use prometheus_client::metrics::family::Family;
+use prometheus_client::metrics::gauge::Gauge;
+use prometheus_client::metrics::histogram::Histogram;
+use prometheus_client::registry::{Metric, Registry};
+use service_kit::process::ProcessCollector;
 
-use go_compat::float;
-
-use super::process::ProcessCollector;
-use super::promhttp::HandlerMetrics;
-use super::{
-    Collector, Counter, CounterVec, DEF_BUCKETS, Gauge, Histogram, Kind, Registry, constant_desc,
-};
-
-/// `sda_events_total`'s label.
-const EVENT_LABEL: &str = "event";
-/// `sda_rules_applied_total`'s label.
-const RESULT_LABEL: &str = "result";
-/// The label of the two skip counters.
-const REASON_LABEL: &str = "reason";
+use super::{CONTENT_TYPE, DEF_BUCKETS, Exposition};
 
 /// The label value of a container handled without a container-level failure.
 const RESULT_OK: &str = "ok";
 /// The label value of a container-level failure.
 const RESULT_ERROR: &str = "error";
+
+/// `sda_events_total`'s labels.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EncodeLabelSet)]
+struct EventLabels {
+    event: String,
+}
+
+/// `sda_rules_applied_total`'s labels.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EncodeLabelSet)]
+struct ResultLabels {
+    result: &'static str,
+}
+
+/// The labels of the two skip counters.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EncodeLabelSet)]
+struct ReasonLabels {
+    reason: String,
+}
 
 /// The daemon's metrics, cheap to clone: every clone records into the same families.
 #[derive(Debug, Clone)]
@@ -54,25 +65,24 @@ pub struct Recorder {
     families: Option<Arc<Families>>,
 }
 
-/// The families of a live recorder and the registry that serves them.
+/// The families of a live recorder and the registry that exposes them.
 #[derive(Debug)]
 struct Families {
     registry: Registry,
-    handler: HandlerMetrics,
-    events_total: Arc<CounterVec>,
-    rules_applied: Arc<CounterVec>,
-    reload_reapplies: Arc<Counter>,
-    docker_reconnects: Arc<Counter>,
-    apply_duration: Arc<Histogram>,
-    containers_scanned: Arc<Counter>,
-    containers_skipped: Arc<CounterVec>,
-    device_files_discovered: Arc<Counter>,
-    candidates_skipped: Arc<CounterVec>,
-    rule_failures: Arc<Counter>,
-    dry_run_skips: Arc<Counter>,
-    last_event_timestamp: Arc<Gauge>,
-    pending_containers: Arc<Gauge>,
-    reload_incomplete: Arc<Gauge>,
+    events: Family<EventLabels, Counter>,
+    rules_applied: Family<ResultLabels, Counter>,
+    reload_reapplies: Counter,
+    docker_reconnects: Counter,
+    apply_duration: Histogram,
+    containers_scanned: Counter,
+    containers_skipped: Family<ReasonLabels, Counter>,
+    device_files_discovered: Counter,
+    candidates_skipped: Family<ReasonLabels, Counter>,
+    rule_failures: Counter,
+    dry_run_skips: Counter,
+    last_event_timestamp: Gauge,
+    pending_containers: Gauge,
+    reload_incomplete: Gauge,
 }
 
 impl Default for Recorder {
@@ -83,91 +93,93 @@ impl Default for Recorder {
 
 impl Recorder {
     /// Go's `NewRecorder`: every family, registered in a registry of its own beside the process
-    /// collector and promhttp's handler metrics.
-    ///
-    /// # Panics
-    ///
-    /// Never: the names, help texts and labels are constants, distinct and valid, which the
-    /// tests check by building one.
+    /// collector. A family with labels has no series until it is recorded (a count of 0 creates
+    /// one); the others read 0 from the start.
     #[must_use]
     pub fn new() -> Self {
+        let mut registry = Registry::default();
+        registry.register_collector(Box::new(ProcessCollector::new()));
         let families = Families {
-            registry: Registry::new(),
-            handler: HandlerMetrics::new(),
-            events_total: counter_vec(
-                "sda_events_total",
+            events: register(
+                &mut registry,
+                "sda_events",
                 "Total Docker container events received.",
-                EVENT_LABEL,
             ),
-            rules_applied: counter_vec(
-                "sda_rules_applied_total",
+            rules_applied: register(
+                &mut registry,
+                "sda_rules_applied",
                 "Containers handled, by result: ok = no container-level failure (includes \
                  policy, label and no-pid skips and partial per-device failures), error = \
                  container-level failure.",
-                RESULT_LABEL,
             ),
-            reload_reapplies: counter(
-                "sda_reload_reapplies_total",
+            reload_reapplies: register(
+                &mut registry,
+                "sda_reload_reapplies",
                 "Times device rules were re-applied after a systemd daemon-reload.",
             ),
-            docker_reconnects: counter(
-                "sda_docker_reconnects_total",
+            docker_reconnects: register(
+                &mut registry,
+                "sda_docker_reconnects",
                 "Times the Docker event stream reconnected after an error.",
             ),
-            apply_duration: Arc::new(Histogram::new(
-                constant_desc(
-                    "sda_apply_duration_seconds",
-                    "Time spent applying device rules per container.",
-                    Kind::Histogram,
-                    &[],
-                ),
-                &DEF_BUCKETS,
-            )),
-            containers_scanned: counter(
-                "sda_containers_scanned_total",
+            apply_duration: register_with(
+                &mut registry,
+                "sda_apply_duration_seconds",
+                "Time spent applying device rules per container.",
+                Histogram::new(DEF_BUCKETS),
+            ),
+            containers_scanned: register(
+                &mut registry,
+                "sda_containers_scanned",
                 "Containers that passed policy and entered the device-rule pipeline.",
             ),
-            containers_skipped: counter_vec(
-                "sda_containers_skipped_total",
+            containers_skipped: register(
+                &mut registry,
+                "sda_containers_skipped",
                 "Containers skipped before rule collection.",
-                REASON_LABEL,
             ),
-            device_files_discovered: counter(
-                "sda_device_files_discovered_total",
+            device_files_discovered: register(
+                &mut registry,
+                "sda_device_files_discovered",
                 "Device files for which rules were collected.",
             ),
-            candidates_skipped: counter_vec(
-                "sda_device_candidates_skipped_total",
+            candidates_skipped: register(
+                &mut registry,
+                "sda_device_candidates_skipped",
                 "Names under a /dev mount that name no device (outside_dev, dangling, \
                  not_device).",
-                REASON_LABEL,
             ),
-            rule_failures: counter(
-                "sda_rule_failures_total",
+            rule_failures: register(
+                &mut registry,
+                "sda_rule_failures",
                 "Per-device rule failures (entries that passed policy but could not be turned \
                  into a rule, and walk errors).",
             ),
-            dry_run_skips: counter(
-                "sda_dry_run_skips_total",
+            dry_run_skips: register(
+                &mut registry,
+                "sda_dry_run_skips",
                 "Rules logged but not written due to dry-run mode.",
             ),
-            last_event_timestamp: gauge(
+            last_event_timestamp: register(
+                &mut registry,
                 "sda_last_event_timestamp_seconds",
                 "Unix timestamp of the last container processed successfully (event, startup or \
                  reload).",
             ),
-            pending_containers: gauge(
+            pending_containers: register(
+                &mut registry,
                 "sda_reconcile_pending_containers",
                 "Containers whose last reconciliation failed and that are being retried with \
                  backoff.",
             ),
-            reload_incomplete: gauge(
+            reload_incomplete: register(
+                &mut registry,
                 "sda_reload_incomplete",
                 "1 until a reconciliation pass for the latest config and trigger has visited \
                  every running container, else 0.",
             ),
+            registry,
         };
-        families.register();
         Self {
             families: Some(Arc::new(families)),
         }
@@ -180,23 +192,33 @@ impl Recorder {
         Self { families: None }
     }
 
-    /// The registry the metrics server gathers, or none for the no-op recorder.
+    /// The exposition the metrics server answers a scrape with: the registry as OpenMetrics text
+    /// (empty but for its `# EOF` for the no-op recorder).
     #[must_use]
-    pub fn registry(&self) -> Option<&Registry> {
-        self.families.as_deref().map(|families| &families.registry)
-    }
-
-    /// promhttp's handler metrics, which the metrics server counts its scrapes in, or none for
-    /// the no-op recorder.
-    #[must_use]
-    pub fn handler_metrics(&self) -> Option<&HandlerMetrics> {
-        self.families.as_deref().map(|families| &families.handler)
+    pub fn exposition(&self) -> Exposition {
+        let mut body = String::new();
+        // Writing to a String cannot fail.
+        let _ = match &self.families {
+            Some(families) => {
+                prometheus_client::encoding::text::encode(&mut body, &families.registry)
+            }
+            None => prometheus_client::encoding::text::encode_eof(&mut body),
+        };
+        Exposition {
+            content_type: CONTENT_TYPE,
+            body: body.into_bytes(),
+        }
     }
 
     /// Go's `RecordEvent`: counts a Docker event by its action.
     pub fn record_event(&self, action: &str) {
         if let Some(families) = &self.families {
-            inc(&families.events_total, action);
+            families
+                .events
+                .get_or_create(&EventLabels {
+                    event: action.to_owned(),
+                })
+                .inc();
         }
     }
 
@@ -205,7 +227,10 @@ impl Recorder {
     pub fn record_rule_applied(&self, success: bool) {
         if let Some(families) = &self.families {
             let result = if success { RESULT_OK } else { RESULT_ERROR };
-            inc(&families.rules_applied, result);
+            families
+                .rules_applied
+                .get_or_create(&ResultLabels { result })
+                .inc();
         }
     }
 
@@ -223,8 +248,7 @@ impl Recorder {
         }
     }
 
-    /// Go's `ObserveApplyDuration`: records how long a container's apply took, in seconds as
-    /// Go's `Duration.Seconds` computes them.
+    /// Go's `ObserveApplyDuration`: records how long a container's apply took, in seconds.
     pub fn observe_apply_duration(&self, duration: Duration) {
         if let Some(families) = &self.families {
             families.apply_duration.observe(duration.as_secs_f64());
@@ -241,14 +265,19 @@ impl Recorder {
     /// Go's `RecordContainerSkipped`: counts a container skipped before rule collection.
     pub fn record_container_skipped(&self, reason: &str) {
         if let Some(families) = &self.families {
-            inc(&families.containers_skipped, reason);
+            families
+                .containers_skipped
+                .get_or_create(&ReasonLabels {
+                    reason: reason.to_owned(),
+                })
+                .inc();
         }
     }
 
     /// Go's `AddDeviceFilesDiscovered`.
     pub fn add_device_files_discovered(&self, count: usize) {
         if let Some(families) = &self.families {
-            families.device_files_discovered.add(count_value(count));
+            families.device_files_discovered.inc_by(count_value(count));
         }
     }
 
@@ -256,24 +285,26 @@ impl Recorder {
     /// creates the series, as `WithLabelValues` does.
     pub fn add_candidates_skipped(&self, reason: &str, count: usize) {
         if let Some(families) = &self.families {
-            // One label value for one label name cannot mismatch.
-            let _ = families
+            families
                 .candidates_skipped
-                .add(&[reason], count_value(count));
+                .get_or_create(&ReasonLabels {
+                    reason: reason.to_owned(),
+                })
+                .inc_by(count_value(count));
         }
     }
 
     /// Go's `AddRuleFailures`.
     pub fn add_rule_failures(&self, count: usize) {
         if let Some(families) = &self.families {
-            families.rule_failures.add(count_value(count));
+            families.rule_failures.inc_by(count_value(count));
         }
     }
 
     /// Go's `AddDryRunSkips`.
     pub fn add_dry_run_skips(&self, count: usize) {
         if let Some(families) = &self.families {
-            families.dry_run_skips.add(count_value(count));
+            families.dry_run_skips.inc_by(count_value(count));
         }
     }
 
@@ -286,14 +317,16 @@ impl Recorder {
             if event_time.subsec_nanosecond() < 0 {
                 seconds -= 1;
             }
-            families.last_event_timestamp.set(float::from_int(seconds));
+            families.last_event_timestamp.set(seconds);
         }
     }
 
     /// Go's `SetPendingContainers`.
     pub fn set_pending_containers(&self, count: usize) {
         if let Some(families) = &self.families {
-            families.pending_containers.set(count_value(count));
+            families
+                .pending_containers
+                .set(i64::try_from(count).unwrap_or(i64::MAX));
         }
     }
 
@@ -301,70 +334,31 @@ impl Recorder {
     /// container, else 0.
     pub fn set_reload_incomplete(&self, incomplete: bool) {
         if let Some(families) = &self.families {
-            families
-                .reload_incomplete
-                .set(if incomplete { 1.0 } else { 0.0 });
+            families.reload_incomplete.set(i64::from(incomplete));
         }
     }
 }
 
-impl Families {
-    /// Registers every family, the process collector and the handler metrics.
-    fn register(&self) {
-        let collectors: [Arc<dyn Collector>; 15] = [
-            Arc::clone(&self.events_total) as Arc<dyn Collector>,
-            Arc::clone(&self.rules_applied) as Arc<dyn Collector>,
-            Arc::clone(&self.reload_reapplies) as Arc<dyn Collector>,
-            Arc::clone(&self.docker_reconnects) as Arc<dyn Collector>,
-            Arc::clone(&self.apply_duration) as Arc<dyn Collector>,
-            Arc::clone(&self.containers_scanned) as Arc<dyn Collector>,
-            Arc::clone(&self.containers_skipped) as Arc<dyn Collector>,
-            Arc::clone(&self.device_files_discovered) as Arc<dyn Collector>,
-            Arc::clone(&self.candidates_skipped) as Arc<dyn Collector>,
-            Arc::clone(&self.rule_failures) as Arc<dyn Collector>,
-            Arc::clone(&self.dry_run_skips) as Arc<dyn Collector>,
-            Arc::clone(&self.last_event_timestamp) as Arc<dyn Collector>,
-            Arc::clone(&self.pending_containers) as Arc<dyn Collector>,
-            Arc::clone(&self.reload_incomplete) as Arc<dyn Collector>,
-            Arc::new(ProcessCollector::new()),
-        ];
-        for collector in collectors {
-            self.registry
-                .register(collector)
-                .unwrap_or_else(|error| panic!("constant family refused: {error}"));
-        }
-        self.handler
-            .register(&self.registry)
-            .unwrap_or_else(|error| panic!("constant family refused: {error}"));
-    }
+/// Registers a new metric of the default kind under `name` and returns it.
+fn register<M: Default + Clone + Metric>(registry: &mut Registry, name: &str, help: &str) -> M {
+    register_with(registry, name, help, M::default())
 }
 
-fn counter(name: &str, help: &str) -> Arc<Counter> {
-    Arc::new(Counter::new(constant_desc(name, help, Kind::Counter, &[])))
+/// Registers `metric` under `name` and returns a handle to it.
+fn register_with<M: Clone + Metric>(
+    registry: &mut Registry,
+    name: &str,
+    help: &str,
+    metric: M,
+) -> M {
+    // The encoder ends the help text with a period.
+    registry.register(name, help.trim_end_matches('.'), metric.clone());
+    metric
 }
 
-fn counter_vec(name: &str, help: &str, label: &str) -> Arc<CounterVec> {
-    Arc::new(CounterVec::new(constant_desc(
-        name,
-        help,
-        Kind::Counter,
-        &[label],
-    )))
-}
-
-fn gauge(name: &str, help: &str) -> Arc<Gauge> {
-    Arc::new(Gauge::new(constant_desc(name, help, Kind::Gauge, &[])))
-}
-
-/// Adds 1 to the series of `value`.
-fn inc(vec: &CounterVec, value: &str) {
-    // One label value for one label name cannot mismatch.
-    let _ = vec.inc(&[value]);
-}
-
-/// Go's `float64(count)` of an `int` count.
-fn count_value(count: usize) -> f64 {
-    float::from_int(u64::try_from(count).unwrap_or(u64::MAX))
+/// A count as the counters take it.
+fn count_value(count: usize) -> u64 {
+    u64::try_from(count).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

@@ -34,9 +34,8 @@ use rustix::io::Errno;
 use super::asm::{DecodeError, EncodeCause, Instruction};
 use super::bpf_sys;
 use super::owned::ProgMeta;
-use go_compat::errno::errno_string;
-use go_compat::quote::is_space;
-use go_slog::{Attr, LogHandle};
+use crate::text::errno_string;
+use tracing::debug;
 
 /// `BPF_F_ALLOW_OVERRIDE`.
 pub const F_ALLOW_OVERRIDE: u32 = 1;
@@ -127,18 +126,10 @@ pub struct KernelProg {
 }
 
 /// The production [`V2Ops`], on the raw `bpf(2)` calls.
-#[derive(Debug, Clone)]
-pub struct KernelOps {
-    log: LogHandle,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct KernelOps;
 
 impl KernelOps {
-    /// The operations, logging through `log`.
-    #[must_use]
-    pub const fn new(log: LogHandle) -> Self {
-        Self { log }
-    }
-
     fn open_by_id(id: u32) -> Result<KernelProg, FetchError> {
         let fd = bpf_sys::prog_get_fd_by_id(id).map_err(FetchError::GetById)?;
         bpf_sys::prog_info(fd.as_fd()).map_err(FetchError::Discover)?;
@@ -226,13 +217,7 @@ impl V2Ops for KernelOps {
                     // without opening it neither its ownership nor the result of a replacement
                     // can be established.
                     Err(error) if error.is_permission() => {
-                        self.log.debug(
-                            "existing CGROUP_DEVICE program cannot be accessed (likely LSM policy)",
-                            &[
-                                Attr::uint("prog_id", u64::from(id)),
-                                Attr::error("err", &error),
-                            ],
-                        );
+                        debug!(prog_id = u64::from(id), error = %error, "existing CGROUP_DEVICE program cannot be accessed (likely LSM policy)");
                         inaccessible += 1;
                     }
                     Err(error) => return Err(OpsError::Fetch(error)),
@@ -756,7 +741,8 @@ pub fn kernel_at_least(release: &str, want_major: i64, want_minor: i64) -> bool 
 /// Go's `%d` verb: leading spaces, an optional sign, then at least one ASCII digit, as a 64-bit
 /// integer.
 fn scan_decimal(input: &str) -> Option<(i64, &str)> {
-    let start = input.trim_start_matches(|character| character != '\n' && is_space(character));
+    let start =
+        input.trim_start_matches(|character: char| character != '\n' && character.is_whitespace());
     let unsigned = start.strip_prefix(['+', '-']).unwrap_or(start);
     let digits = unsigned
         .find(|character: char| !character.is_ascii_digit())

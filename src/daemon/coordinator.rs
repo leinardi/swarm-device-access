@@ -54,8 +54,8 @@ use crate::docker::{self, CallContext, DockerApi, with_context};
 use crate::metrics::Recorder;
 use crate::processor::{self, Inspector, PassRequester, Processor};
 use crate::task::finish;
-use go_clock::Clock;
-use go_slog::{Attr, LogHandle};
+use clock::Clock;
+use tracing::{debug, info, warn};
 
 /// How long an enumerated container's entry suppresses a start event that is not newer than its
 /// inspect. After twice [`MAX_BACKOFF`] the overlap window between enumeration and the event
@@ -164,7 +164,6 @@ pub struct Settings<D, R> {
     /// outside tests).
     pub timeout: Duration,
     pub clock: Arc<dyn Clock>,
-    pub log: LogHandle,
 }
 
 /// What a pass reconciles for: a config generation and a trigger epoch. Every request bumps the
@@ -244,7 +243,6 @@ pub struct Coordinator<D, R> {
     metrics: Recorder,
     timeout: Duration,
     clock: Arc<dyn Clock>,
-    log: LogHandle,
     /// Go's one-slot wake channel: a notification while nothing waits is kept as one permit, so
     /// a request never blocks and never gets lost.
     wake: Notify,
@@ -266,7 +264,6 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
             metrics: settings.metrics,
             timeout: settings.timeout,
             clock: settings.clock,
-            log: settings.log,
             wake: Notify::new(),
             first_pass: CancellationToken::new(),
             holds: TaskTracker::new(),
@@ -384,13 +381,7 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
             // the container's set under the policy and never grants beyond it.
             _ => {
                 if self.skip_event(container_id, event_time) {
-                    self.log.debug(
-                        "event already covered by a pass; skipped",
-                        &[
-                            Attr::string("id", container_id),
-                            Attr::string("action", event.action.as_str()),
-                        ],
-                    );
+                    debug!(id = %container_id, action = %event.action.as_str(), "event already covered by a pass; skipped");
                     return;
                 }
 
@@ -457,25 +448,17 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
         let containers = match listed {
             Ok(containers) => containers,
             Err(error) => {
-                self.log.warn(
-                    "could not list containers; reconciliation incomplete, retrying",
-                    &[
-                        Attr::error("err", &format_args!("list containers: {error}")),
-                        Attr::uint("generation", key.generation),
-                    ],
-                );
+                warn!(error = %format_args!("list containers: {error}"), generation = key.generation, "could not list containers; reconciliation incomplete, retrying");
                 self.warn_incomplete();
                 return PassOutcome::ListFailed;
             }
         };
 
-        self.log.debug(
-            "reconciling running containers",
-            &[
-                Attr::int("count", count(containers.len())),
-                Attr::uint("generation", key.generation),
-                Attr::uint("epoch", key.epoch),
-            ],
+        debug!(
+            count = count(containers.len()),
+            generation = key.generation,
+            epoch = key.epoch,
+            "reconciling running containers"
         );
 
         for container in &containers {
@@ -501,7 +484,7 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
                 .reconcile_container(context, &container_id, None, MSG_PENDING_FAILED)
                 .await;
         }
-        self.report_locked(&mut self.lock());
+        Self::report_locked(&mut self.lock());
     }
 
     /// Reconciles one container unless it is already being handled, in which case the work is
@@ -584,10 +567,7 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
             if let Some(event_time) = terminate_at
                 && let Err(error) = self.reconciler.terminate(container_id, event_time).await
             {
-                self.log.warn(
-                    "could not clean up after container",
-                    &[Attr::string("id", container_id), Attr::error("err", &error)],
-                );
+                warn!(id = %container_id, error = %error, "could not clean up after container");
             }
 
             if reconcile {
@@ -632,10 +612,7 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
                 self.metrics.set_last_event(self.clock.now());
             }
             Err(error) => {
-                self.log.warn(
-                    message,
-                    &[Attr::string("id", container_id), Attr::error("err", error)],
-                );
+                warn!(id = %container_id, error = %error, "{message}");
                 self.metrics.record_rule_applied(false);
             }
         }
@@ -701,7 +678,7 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
         if state.pending.contains_key(container_id) {
             self.wake.notify_one();
         }
-        self.announce_locked(&mut state);
+        Self::announce_locked(&mut state);
         (false, None)
     }
 
@@ -709,9 +686,9 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
     async fn run_sweep(&self) {
         let released = self.reconciler.sweep().await;
         if released > 0 {
-            self.log.debug(
-                "lifecycle sweep released records",
-                &[Attr::int("released", count(released))],
+            debug!(
+                released = count(released),
+                "lifecycle sweep released records"
             );
         }
     }
@@ -757,29 +734,27 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
             state.incomplete = false;
             self.metrics.set_reload_incomplete(false);
         }
-        self.report_locked(&mut state);
+        Self::report_locked(&mut state);
     }
 
     /// Logs completion once per request when nothing is left for the latest request, and warns
     /// while anything is.
-    fn report_locked(&self, state: &mut State) {
+    fn report_locked(state: &mut State) {
         if state.incomplete || !state.pending.is_empty() {
-            self.log.warn(
-                "reconciliation incomplete; retrying",
-                &[
-                    Attr::int("pending_containers", count(state.pending.len())),
-                    Attr::bool("reload_incomplete", state.incomplete),
-                    Attr::uint("generation", state.latest.generation),
-                ],
+            warn!(
+                pending_containers = count(state.pending.len()),
+                reload_incomplete = state.incomplete,
+                generation = state.latest.generation,
+                "reconciliation incomplete; retrying"
             );
             return;
         }
-        self.announce_locked(state);
+        Self::announce_locked(state);
     }
 
     /// Logs completion once per request, when nothing is left for the latest request: no pass
     /// outstanding, nothing pending, and no follow-up queued behind a reservation.
-    fn announce_locked(&self, state: &mut State) {
+    fn announce_locked(state: &mut State) {
         if state.incomplete || !state.pending.is_empty() || state.announced == state.latest {
             return;
         }
@@ -791,17 +766,15 @@ impl<D: ContainerLister, R: Reconciler> Coordinator<D, R> {
             return;
         }
         state.announced = state.latest;
-        self.log.info(
-            "config reload complete",
-            &[
-                Attr::uint("generation", state.latest.generation),
-                Attr::uint("epoch", state.latest.epoch),
-            ],
+        info!(
+            generation = state.latest.generation,
+            epoch = state.latest.epoch,
+            "config reload complete"
         );
     }
 
     fn warn_incomplete(&self) {
-        self.report_locked(&mut self.lock());
+        Self::report_locked(&mut self.lock());
     }
 
     fn superseded(&self, key: PassKey) -> bool {

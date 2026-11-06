@@ -39,8 +39,8 @@ use tokio_util::sync::CancellationToken;
 use zbus::message::Type;
 use zbus::{Connection, DBusError, MatchRule, Message, MessageStream, Structure, Variant};
 
-use go_compat::errno::io_error_text;
-use go_slog::{Attr, LogHandle};
+use crate::text::io_error_text;
+use tracing::{debug, info, warn};
 
 const SYSTEMD_BUS_NAME: &str = "org.freedesktop.systemd1";
 const SYSTEMD_OBJECT_PATH: &str = "/org/freedesktop/systemd1";
@@ -78,20 +78,14 @@ pub type OnReload = Arc<dyn Fn() + Send + Sync>;
 /// unreachable) was not seen, so the caller must reconcile everything once.
 pub async fn supervise(
     cancel: CancellationToken,
-    log: LogHandle,
     on_reload: OnReload,
     on_subscribed: impl FnMut(),
 ) {
-    let open_log = log.clone();
     let supervisor = Supervisor {
-        open: move || {
-            let log = open_log.clone();
-            async move { open(&log).await }
-        },
+        open,
         setup_timeout: SETUP_TIMEOUT,
         min_retry: MIN_RETRY,
         max_retry: MAX_RETRY,
-        log,
     };
     supervisor.run(&cancel, &on_reload, on_subscribed).await;
 }
@@ -102,7 +96,6 @@ pub(crate) struct Supervisor<Open> {
     pub(crate) setup_timeout: Duration,
     pub(crate) min_retry: Duration,
     pub(crate) max_retry: Duration,
-    pub(crate) log: LogHandle,
 }
 
 impl<Open, Opening> Supervisor<Open>
@@ -122,8 +115,7 @@ where
             let outcome = self
                 .attempt(cancel, on_reload, || {
                     if failures > 0 {
-                        self.log
-                            .info("systemd reload handling available again", &[]);
+                        info!("systemd reload handling available again");
                     }
                     failures = 0;
                     on_subscribed();
@@ -136,15 +128,10 @@ where
                 Err(error) => {
                     // Hosts without systemd or without the socket mounted fail every attempt;
                     // say so once, then keep trying quietly.
-                    let attrs = [Attr::error("err", &error), duration_attr("retry_in", retry)];
                     if failures == 0 {
-                        self.log.warn(
-                            "systemd reload handling unavailable; retrying in the background",
-                            &attrs,
-                        );
+                        warn!(error = %error, retry_in = ?retry, "systemd reload handling unavailable; retrying in the background");
                     } else {
-                        self.log
-                            .debug("systemd reload watcher still unavailable", &attrs);
+                        debug!(error = %error, retry_in = ?retry, "systemd reload watcher still unavailable");
                     }
                     failures += 1;
                 }
@@ -155,10 +142,7 @@ where
                     if held >= self.max_retry {
                         retry = self.min_retry;
                     }
-                    self.log.warn(
-                        "systemd reload watcher disconnected; resubscribing",
-                        &[duration_attr("retry_in", retry)],
-                    );
+                    warn!(retry_in = ?retry, "systemd reload watcher disconnected; resubscribing");
                 }
             }
             tokio::select! {
@@ -187,11 +171,10 @@ where
         let subscribed_at = Instant::now();
         // Signals are buffered from here on, so none is lost while the caller reconciles.
         on_subscribed();
-        watcher.watch(cancel, on_reload, &self.log).await;
+        watcher.watch(cancel, on_reload).await;
         let held = subscribed_at.elapsed();
         if let Err(error) = watcher.close().await {
-            self.log
-                .warn("close systemd watcher", &[Attr::error("err", &error)]);
+            warn!(error = %error, "close systemd watcher");
         }
         Ok(held)
     }
@@ -227,20 +210,8 @@ impl Watcher {
 
     /// Blocks until `cancel` fires or the subscription is lost, running `on_reload` on each
     /// completed systemd reload (see [`watch`]).
-    pub(crate) async fn watch(
-        &mut self,
-        cancel: &CancellationToken,
-        on_reload: &OnReload,
-        log: &LogHandle,
-    ) {
-        watch(
-            cancel,
-            &mut self.signals,
-            self.owner.clone(),
-            on_reload,
-            log,
-        )
-        .await;
+    pub(crate) async fn watch(&mut self, cancel: &CancellationToken, on_reload: &OnReload) {
+        watch(cancel, &mut self.signals, self.owner.clone(), on_reload).await;
     }
 
     /// Releases the connection.
@@ -265,16 +236,16 @@ impl Watcher {
 ///
 /// [`Error`] when D-Bus is unavailable (no socket bind-mount, no systemd, the daemon running off
 /// the host). [`supervise`] retries; the daemon runs without reload handling meanwhile.
-pub(crate) async fn open(log: &LogHandle) -> Result<Watcher, Error> {
+pub(crate) async fn open() -> Result<Watcher, Error> {
     let address = env::var("DBUS_SYSTEM_BUS_ADDRESS")
         .ok()
         .filter(|address| !address.is_empty())
         .unwrap_or_else(|| DEFAULT_SYSTEM_BUS_ADDRESS.to_owned());
-    open_at(&address, log).await
+    open_at(&address).await
 }
 
 /// [`open`] on the bus at `address`.
-async fn open_at(address: &str, log: &LogHandle) -> Result<Watcher, Error> {
+async fn open_at(address: &str) -> Result<Watcher, Error> {
     let connection = connect(address).await.map_err(Error::Connect)?;
     match subscribe(&connection).await {
         Ok((signals, owner, forwarders)) => Ok(Watcher {
@@ -285,10 +256,7 @@ async fn open_at(address: &str, log: &LogHandle) -> Result<Watcher, Error> {
         }),
         Err(error) => {
             if let Err(close_error) = connection.close().await {
-                log.warn(
-                    "close dbus conn after subscription failure",
-                    &[Attr::error("err", &CloseError(close_error))],
-                );
+                warn!(error = %CloseError(close_error), "close dbus conn after subscription failure");
             }
             Err(error)
         }
@@ -505,37 +473,27 @@ pub(crate) async fn watch(
     signals: &mut mpsc::Receiver<Signal>,
     mut owner: String,
     on_reload: &OnReload,
-    log: &LogHandle,
 ) {
     let mut runs = Coalescer::new(Arc::clone(on_reload));
-    log.debug(
-        "systemd reload watcher started",
-        &[Attr::string("systemd", owner.as_str())],
-    );
+    debug!(systemd = %owner.as_str(), "systemd reload watcher started");
     loop {
         let signal = tokio::select! {
             () = cancel.cancelled() => break,
             signal = signals.recv() => signal,
         };
         let Some(signal) = signal else {
-            log.debug("systemd signal channel closed", &[]);
+            debug!("systemd signal channel closed");
             break;
         };
         if let Some(new_owner) = owner_change(&signal) {
-            log.debug(
-                "systemd bus name changed owner",
-                &[
-                    Attr::string("old", owner.as_str()),
-                    Attr::string("new", new_owner.as_str()),
-                ],
-            );
+            debug!(old = %owner.as_str(), new = %new_owner.as_str(), "systemd bus name changed owner");
             owner = new_owner;
             continue;
         }
         if !from_systemd(&signal, &owner) || !is_reload_completed(&signal) {
             continue;
         }
-        log.info("systemd reload completed; re-applying device rules", &[]);
+        info!("systemd reload completed; re-applying device rules");
         runs.trigger();
     }
     runs.wait().await;
@@ -629,10 +587,6 @@ fn lock(state: &Mutex<CoalescerState>) -> std::sync::MutexGuard<'_, CoalescerSta
     // A poisoned lock is only reachable in tests (panic = "abort"); both flags are plain booleans,
     // consistent either way.
     state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-fn duration_attr(key: &str, duration: Duration) -> Attr {
-    Attr::duration(key, i64::try_from(duration.as_nanos()).unwrap_or(i64::MAX))
 }
 
 /// Why a subscription attempt failed, worded as the Go watcher's errors.

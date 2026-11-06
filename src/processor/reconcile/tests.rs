@@ -31,7 +31,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::time::Duration;
 
-use hyper::StatusCode;
 use jiff::{SignedDuration, Timestamp};
 
 use super::*;
@@ -42,9 +41,9 @@ use crate::policy::{LABEL_ENABLE, LABEL_PREFIX, Mode};
 use crate::processor::devfs::NodeKind;
 use crate::processor::fake_devfs::{DEV_CARD, DEV_NULL, DEV_SDA, FakeDevFs, FakeNode};
 use crate::processor::pin::PinError;
-use crate::test_support::{TempDir, capture_logs};
-use go_clock::FakeClock;
-use go_slog::{Level, MemorySink};
+use crate::test_support::{Logs, TempDir, capture_logs};
+use clock::FakeClock;
+use tracing::level_filters::LevelFilter;
 
 const RECONCILE_PID: i64 = 80;
 const RECONCILE_STARTED: &str = "2026-09-27T10:00:00.000000000Z";
@@ -278,14 +277,12 @@ fn privileged(mut info: ContainerInspect) -> ContainerInspect {
 }
 
 fn daemon_unavailable() -> Reply {
-    Err(docker::Error::connection_failed(
-        "daemon unavailable".to_owned(),
-    ))
+    Err(docker::Error::unavailable("daemon unavailable".to_owned()))
 }
 
 fn not_found() -> Reply {
     Err(docker::Error::response(
-        StatusCode::NOT_FOUND,
+        404,
         "Error response from daemon: No such container: abc".to_owned(),
     ))
 }
@@ -307,7 +304,7 @@ struct Env {
     host: TempDir,
     proc_root: TempDir,
     clock: Arc<FakeClock>,
-    sink: MemorySink,
+    sink: Logs,
 }
 
 /// How an [`Env`] is built.
@@ -353,7 +350,7 @@ impl Env {
         let clock = Arc::new(FakeClock::new(
             "2026-09-27T12:00:00Z".parse::<Timestamp>().unwrap(),
         ));
-        let (log, sink) = capture_logs(Level::DEBUG);
+        let sink = capture_logs(LevelFilter::DEBUG);
         let (store, publisher) = new_store(options.runtime);
         let settings = Settings {
             inspector: FakeInspector(Arc::clone(&inspector)),
@@ -368,12 +365,11 @@ impl Env {
                 .unwrap_or_else(|| proc_root.path().display().to_string()),
             call_timeout: None,
             clock: Arc::clone(&clock) as Arc<dyn Clock>,
-            log,
         };
         let new_cgroup = {
             let fake = Arc::clone(&fake);
             let apis = Arc::clone(&apis);
-            move |_: CgroupVersion, _: Arc<Ledger>, _: Arc<FilterCache>, _: LogHandle| {
+            move |_: CgroupVersion, _: Arc<Ledger>, _: Arc<FilterCache>| {
                 apis.fetch_add(1, Ordering::SeqCst);
                 Box::new(FakeApi(Arc::clone(&fake))) as Box<dyn Interface>
             }
@@ -821,8 +817,8 @@ async fn reconcile_moved_run_revokes_previous_cgroup() {
     );
     assert!(
         env.log().contains(
-            "level=INFO container moved to another cgroup; previous grants revoked id=abc"
-        ),
+            "level=INFO container moved to another cgroup; previous grants revoked from="
+        ) && env.log().contains(" id=abc "),
         "{}",
         env.log()
     );
@@ -885,10 +881,7 @@ async fn reconcile_inspect_failure_revokes_known_identity() {
     let env = Env::new("all", false);
     env.inspector.then(vec![daemon_unavailable()]);
     let error = env.reconcile().await.unwrap_err();
-    assert!(
-        error.is_docker(docker::ErrorKind::ConnectionFailed),
-        "{error}"
-    );
+    assert!(error.is_docker(docker::ErrorKind::Unavailable), "{error}");
     assert_eq!(env.fake.calls(), 0);
 
     env.inspector
@@ -897,7 +890,7 @@ async fn reconcile_inspect_failure_revokes_known_identity() {
     env.inspector.then(vec![daemon_unavailable()]);
     let error = env.reconcile().await.unwrap_err();
     assert!(
-        error.is_docker(docker::ErrorKind::ConnectionFailed) && !error.is_container_gone(),
+        error.is_docker(docker::ErrorKind::Unavailable) && !error.is_container_gone(),
         "{error}"
     );
     assert_eq!(env.fake.calls(), 2);
@@ -944,8 +937,8 @@ async fn reconcile_invalid_labels_set_empty_set() {
         .unwrap_or_default();
     assert_eq!(
         line,
-        "level=WARN container skipped: invalid policy labels id=abc err=invalid value for label \
-         \"swarm-device-access.enable\": \"maybe\" is not a boolean"
+        "level=WARN container skipped: invalid policy labels error=invalid value for label \
+         \"swarm-device-access.enable\": \"maybe\" is not a boolean id=abc"
     );
 }
 
@@ -988,7 +981,7 @@ async fn reconcile_dry_run_issues_no_cgroup_calls() {
     assert!(env.pinner.pins.lock().unwrap().is_empty());
     assert!(
         env.log().contains(
-            "level=INFO dry-run: would add device rule id=abc type=c major=1 minor=3\n\
+            "level=INFO dry-run: would add device rule id=abc major=1 minor=3 type=c\n\
              level=INFO dry-run: would set device rules id=abc rules=1"
         ),
         "{}",
@@ -1009,7 +1002,7 @@ async fn reconcile_cancelled_caller_keeps_grants() {
     context.cancel();
 
     let error = env.proc.reconcile(&context, "abc").await.unwrap_err();
-    assert!(error.is_docker(docker::ErrorKind::Canceled), "{error}");
+    assert!(error.is_docker_canceled(), "{error}");
     assert_eq!(env.fake.calls(), 1, "only the grant");
 }
 
@@ -1060,10 +1053,7 @@ async fn reconcile_deadline_exceeded_revokes() {
     let context = CallContext::default().with_timeout(Duration::ZERO);
 
     let error = env.proc.reconcile(&context, "abc").await.unwrap_err();
-    assert!(
-        error.is_docker(docker::ErrorKind::DeadlineExceeded),
-        "{error}"
-    );
+    assert!(error.is_docker(docker::ErrorKind::Timeout), "{error}");
     assert_eq!(env.fake.calls(), 2);
     assert!(env.fake.rules(1).is_empty(), "the empty set applied");
 }
@@ -1084,10 +1074,7 @@ async fn reconcile_inspect_failure_of_privileged_does_not_warn() {
     env.inspector.then(vec![daemon_unavailable()]);
 
     let error = env.reconcile().await.unwrap_err();
-    assert!(
-        error.is_docker(docker::ErrorKind::ConnectionFailed),
-        "{error}"
-    );
+    assert!(error.is_docker(docker::ErrorKind::Unavailable), "{error}");
     let after = &env.log()[before..];
     assert!(
         !after.contains("restart the container"),
@@ -1665,7 +1652,7 @@ async fn error_texts() {
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
         "set device rules: open cgroup \"/nonexistent-host/sys/fs/cgroup/docker/testcontainer\": \
-         no such file or directory"
+         No such file or directory (os error 2)"
     );
 
     let mut options = Options::new("all", false);
@@ -1673,7 +1660,7 @@ async fn error_texts() {
     let env = Env::with(options);
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
-        "container \"abc\": open \"/nonexistent-proc/proc/80\": no such file or directory"
+        "container \"abc\": open \"/nonexistent-proc/proc/80\": No such file or directory (os error 2)"
     );
 
     let mut options = Options::new("all", false);
@@ -1682,7 +1669,7 @@ async fn error_texts() {
     let env = Env::with(options);
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
-        "container \"abc\": pidfd_open(-1): invalid argument"
+        "container \"abc\": pidfd_open(-1): Invalid argument (os error 22)"
     );
 
     let env = Env::new("all", false);
@@ -1694,12 +1681,12 @@ async fn error_texts() {
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
         "container \"abc\" (reason incomplete_device_set, retryable): device identity could not \
-         be established: mount source /dev/ttyUSB-gone: no such file or directory"
+         be established: mount source /dev/ttyUSB-gone: No such file or directory (os error 2)"
     );
     assert!(
         env.log().contains(
             "level=WARN device set incomplete; no devices are granted until every device \
-             resolves id=abc errors=1 reason=incomplete_device_set"
+             resolves errors=1 id=abc reason=incomplete_device_set"
         ),
         "{}",
         env.log()
@@ -1732,7 +1719,6 @@ fn compute_with(devfs: Box<OpenDevFs>, mounts: Vec<MountPoint>) -> Desired {
             proc_root: "/".to_owned(),
             call_timeout: None,
             clock: Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
-            log: capture_logs(Level::DEBUG).0,
         },
         Seams {
             devfs: Some(devfs),
@@ -1872,7 +1858,7 @@ fn compute_desired_empties_the_set_when_dev_cannot_be_opened() {
     assert_eq!(
         incomplete,
         "container \"abc\" (reason incomplete_device_set, retryable): device identity could not \
-         be established: open /dev: function not implemented"
+         be established: open /dev: Function not implemented (os error 38)"
     );
 }
 

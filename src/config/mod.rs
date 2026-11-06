@@ -38,13 +38,13 @@ use std::io::{self, Read};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use crate::policy::{self, Global, PolicyError};
-use go_compat::errno::io_error_text;
-use go_compat::quote::quote;
+use crate::text::io_error_text;
+use crate::text::quote;
 
 pub use yaml::{DecodeError, Shape, ShapeError, SyntaxError};
 
 /// The accepted `log-format` values.
-pub const LOG_FORMATS: [&str; 3] = ["text", "json", "plain"];
+pub const LOG_FORMATS: [&str; 2] = ["text", "json"];
 /// The accepted `log-level` values.
 pub const LOG_LEVELS: [&str; 4] = ["debug", "info", "warn", "error"];
 

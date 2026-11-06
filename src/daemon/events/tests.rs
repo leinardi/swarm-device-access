@@ -67,8 +67,8 @@ impl Loop {
             coordinator: &self.harness.coordinator,
             metrics: &self.harness.metrics,
             readiness: &self.readiness,
-            log: &self.harness.log,
             timeout: DOCKER_CALL_TIMEOUT,
+            clock: self.harness.clock.as_ref(),
         }
     }
 
@@ -189,7 +189,7 @@ async fn consume_events_stream_error_returns_reconnect() {
     assert!((fixture.reconnects() - 1.0).abs() < f64::EPSILON);
     assert!(
         fixture.harness.logs().contains(
-            "level=ERROR docker events stream error, reconnecting err=transport EOF backoff=1s"
+            "level=ERROR docker events stream error, reconnecting backoff=1s error=transport EOF"
         ),
         "{}",
         fixture.harness.logs()
@@ -257,8 +257,13 @@ async fn consume_events_arbitrary_stream_error_after_cancel_no_reconnect() {
 #[tokio::test(start_paused = true)]
 async fn event_list_options() {
     assert_eq!(
-        event_filters().to_json(),
-        r#"{"event":{"destroy":true,"die":true,"start":true,"unpause":true}}"#
+        event_filters().to_map(),
+        std::collections::HashMap::from([(
+            "event".to_owned(),
+            ["destroy", "die", "start", "unpause"]
+                .map(str::to_owned)
+                .to_vec()
+        )])
     );
 
     let docker = FakeDocker::default();
@@ -322,10 +327,9 @@ async fn consume_events_deduplicates_processed_ids() {
     let consumed = fixture.consume_once(&context, stream);
     let skipped = async {
         eventually("the skip", WITHIN, || {
-            fixture
-                .harness
-                .logs()
-                .contains("event already covered by a pass; skipped id=already-seen")
+            let logs = fixture.harness.logs();
+            logs.contains("event already covered by a pass; skipped")
+                && logs.contains(" id=already-seen")
         })
         .await;
         context.cancel();
@@ -468,8 +472,7 @@ async fn reconcile_hung_inspect_is_bounded_per_call() {
         host_root: "/host".to_owned(),
         proc_root: "/".to_owned(),
         call_timeout: Some(Duration::from_millis(50)),
-        clock: Arc::new(go_clock::TokioClock::new(base())),
-        log: crate::test_support::capture_logs(go_slog::Level::DEBUG).0,
+        clock: Arc::new(clock::TokioClock::new(base())),
     });
 
     let reconciled = tokio::time::timeout(
@@ -531,9 +534,7 @@ async fn subscribe_success_keeps_stream_open_until_cancel() {
 #[tokio::test(start_paused = true)]
 async fn subscribe_failures_are_worded_as_go() {
     let docker = FakeDocker {
-        ping_err: Some(crate::docker::Error::connection_failed(
-            "daemon down".to_owned(),
-        )),
+        ping_err: Some(crate::docker::Error::unavailable("daemon down".to_owned())),
         ..FakeDocker::default()
     };
     let error = subscribe(&CallContext::new(), &docker, base(), DOCKER_CALL_TIMEOUT)
@@ -559,13 +560,13 @@ async fn subscribe_failures_are_worded_as_go() {
     );
 }
 
-/// moby reports a refused connect on the stream: the subscription succeeds, and its first item
-/// is the error, which reconnects as a stream error.
+/// A subscription the engine refused is a stream whose first item is the error, which reconnects
+/// as a stream error.
 #[tokio::test(start_paused = true)]
 async fn refused_connect_is_a_stream_error() {
     let fixture = Loop::new(
         FakeDocker {
-            events_err: Some(crate::docker::Error::connection_failed(
+            events_err: Some(crate::docker::Error::unavailable(
                 "connection refused".to_owned(),
             )),
             ..FakeDocker::default()
@@ -589,7 +590,7 @@ async fn refused_connect_is_a_stream_error() {
         .await;
     assert!(reconnect);
     assert!(fixture.harness.logs().contains(
-        "level=ERROR docker events stream error, reconnecting err=connection refused backoff=1s"
+        "level=ERROR docker events stream error, reconnecting backoff=1s error=connection refused"
     ));
 }
 
@@ -638,7 +639,7 @@ async fn listen_events_reconnect_events_hang_retries() {
     assert!(
         fixture.harness.logs().contains(
             "level=ERROR could not subscribe to docker events, retrying \
-             err=docker event stream not established before timeout backoff=1s"
+             backoff=1s error=docker event stream not established before timeout"
         ),
         "{}",
         fixture.harness.logs()
@@ -812,5 +813,77 @@ async fn listen_events_reconnect_reenumerates() {
     assert!(
         seen.iter().any(|id| id == "a") && seen.iter().any(|id| id == "b"),
         "reconciled {seen:?}, want both running containers"
+    );
+}
+
+/// A reconnect the engine refuses (a proxy that refuses `/events`) re-establishes nothing: it
+/// neither logs a re-subscription nor requests a re-enumeration, on any backoff cycle.
+#[tokio::test(start_paused = true)]
+async fn listen_events_refused_reconnect_does_not_reenumerate() {
+    let fixture = Arc::new(Loop::new(
+        FakeDocker {
+            events_err: Some(crate::docker::Error::unavailable(
+                "connection refused".to_owned(),
+            )),
+            ..FakeDocker::default()
+        },
+        FakeReconciler::default(),
+    ));
+    let docker = Arc::clone(&fixture.harness.docker);
+    let (closed, stream) = FakeEvents::channel();
+    drop(closed);
+
+    let (context, task) = spawn_listener(&fixture, base(), Some(stream));
+    eventually("three refused reconnects", WITHIN, || {
+        docker.events_calls().0 >= 3
+    })
+    .await;
+    context.cancel();
+    task.await.unwrap();
+
+    assert_eq!(fixture.harness.epoch(), 0, "a pass was requested");
+    assert!(!fixture.harness.logs().contains("re-subscribed"));
+    assert!(!fixture.readiness.is_ready());
+}
+
+/// A record the stream cannot decode (an unknown enum value of a newer Engine) would fail again
+/// from the same point on every reconnect: the loop skips to now instead, warns with the decode
+/// error, backs off, and re-enumerates on the reconnect, which covers what the record announced.
+#[tokio::test(start_paused = true)]
+async fn listen_events_skips_an_undecodable_record_and_reenumerates() {
+    let mut docker = FakeDocker::listing(&["a"]);
+    let sender = docker.first_stream();
+    let fixture = Arc::new(Loop::started(docker, FakeReconciler::default()));
+    let docker = Arc::clone(&fixture.harness.docker);
+    let (context, task) = spawn_listener(&fixture, base(), None);
+
+    eventually("the first stream", WITHIN, || docker.sinces().len() == 1).await;
+    let failed_at = fixture.harness.now();
+    let list_before = docker.list_calls();
+    fail(
+        &sender,
+        StreamError::new(StreamErrorKind::Decode, "unknown variant `brand-new`"),
+    );
+    eventually("the resubscription", WITHIN, || docker.sinces().len() == 2).await;
+    eventually("the re-enumeration", WITHIN, || {
+        docker.list_calls() > list_before
+    })
+    .await;
+    // A few backoff periods on, the loop has not replayed the record in a tight loop.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    context.cancel();
+    task.await.unwrap();
+
+    let sinces = docker.sinces();
+    assert!(
+        sinces[1] > failed_at,
+        "resubscribed from {} (last event before {failed_at})",
+        sinces[1]
+    );
+    assert!(sinces.len() <= 4, "{} subscriptions in 5 s", sinces.len());
+    let logs = fixture.harness.logs();
+    assert!(
+        logs.contains("level=WARN docker event could not be decoded; skipping to now and re-enumerating on reconnect error=unknown variant `brand-new`"),
+        "{logs}"
     );
 }

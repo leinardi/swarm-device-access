@@ -1,0 +1,18 @@
+# The sda_ families of the 1.x daemon, taken from its Prometheus golden (name, type, label names, help text),
+# minus promhttp_*: what `src/metrics/recorder/tests.rs` expects the exposition to carry. A
+# counter's name is its sample name, as the Go client wrote it (OpenMetrics' family name has no
+# `_total`).
+sda_apply_duration_seconds	histogram		Time spent applying device rules per container.
+sda_containers_scanned_total	counter		Containers that passed policy and entered the device-rule pipeline.
+sda_containers_skipped_total	counter	reason	Containers skipped before rule collection.
+sda_device_candidates_skipped_total	counter	reason	Names under a /dev mount that name no device (outside_dev, dangling, not_device).
+sda_device_files_discovered_total	counter		Device files for which rules were collected.
+sda_docker_reconnects_total	counter		Times the Docker event stream reconnected after an error.
+sda_dry_run_skips_total	counter		Rules logged but not written due to dry-run mode.
+sda_events_total	counter	event	Total Docker container events received.
+sda_last_event_timestamp_seconds	gauge		Unix timestamp of the last container processed successfully (event, startup or reload).
+sda_reconcile_pending_containers	gauge		Containers whose last reconciliation failed and that are being retried with backoff.
+sda_reload_incomplete	gauge		1 until a reconciliation pass for the latest config and trigger has visited every running container, else 0.
+sda_reload_reapplies_total	counter		Times device rules were re-applied after a systemd daemon-reload.
+sda_rule_failures_total	counter		Per-device rule failures (entries that passed policy but could not be turned into a rule, and walk errors).
+sda_rules_applied_total	counter	result	Containers handled, by result: ok = no container-level failure (includes policy, label and no-pid skips and partial per-device failures), error = container-level failure.

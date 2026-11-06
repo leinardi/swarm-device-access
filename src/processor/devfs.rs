@@ -32,8 +32,8 @@ use std::os::unix::ffi::OsStrExt;
 use rustix::fs::{FileType, Mode, OFlags, ResolveFlags};
 use rustix::io::Errno;
 
-use go_compat::errno::errno_string;
-use go_compat::filepath;
+use crate::lexpath as filepath;
+use crate::text::errno_string;
 
 /// Where the daemon sees the host's `/dev` (bind-mounted in).
 pub const DEV_ROOT: &str = "/dev";

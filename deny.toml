@@ -56,8 +56,12 @@ confidence-threshold = 0.9
 # encoding_rs ((Apache-2.0 OR MIT) AND BSD-3-Clause, the BSD part for its WHATWG-derived data),
 # under serde-saphyr's encoding_rs_io, which repo-meta reads the workflows with: the meta library
 # only, which only the meta-tests build. Allowed for that crate alone, not for the graph.
+#
+# matchit (MIT AND BSD-3-Clause, the BSD part for the httprouter-derived tests of its radix tree),
+# under axum's Router, which the metrics server routes with. Allowed for that crate alone.
 exceptions = [
     { allow = ["BSD-3-Clause"], crate = "encoding_rs" },
+    { allow = ["BSD-3-Clause"], crate = "matchit" },
 ]
 
 [bans]

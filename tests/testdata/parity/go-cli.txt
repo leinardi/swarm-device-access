@@ -28,13 +28,13 @@ invalid config: device-allow: glob pattern must start with /dev/: "relative"
 exit=Some(1)
 --- stdout
 --- stderr
-invalid config: device-allow: invalid glob pattern "/dev/[": syntax error in pattern
+invalid config: device-allow: invalid glob pattern "/dev/[": syntax error in pattern: missing ]
 #END
 ### -device-deny=/etc/x -device-allow=/dev/[
 exit=Some(1)
 --- stdout
 --- stderr
-invalid config: device-allow: invalid glob pattern "/dev/[": syntax error in pattern
+invalid config: device-allow: invalid glob pattern "/dev/[": syntax error in pattern: missing ]
 #END
 ### -log-level=loud
 exit=Some(1)
@@ -46,7 +46,7 @@ invalid config: setting "log-level": unknown value "loud", must be one of [debug
 exit=Some(1)
 --- stdout
 --- stderr
-config file error: read config file "/nonexistent": open /nonexistent: no such file or directory
+config file error: read config file "/nonexistent": open /nonexistent: No such file or directory (os error 2)
 #END
 ### -config=tests/testdata/parity/unknown-key.conf
 exit=Some(1)

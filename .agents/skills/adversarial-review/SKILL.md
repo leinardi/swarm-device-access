@@ -77,7 +77,7 @@ green. Load only what the diff touches.
 | `src/config/**`, `src/policy/**`, `src/processor/**` (label handling, rule collection), the CLI and `SIGHUP` reload path (`src/cli.rs`, `src/cli/settings.rs`, `src/run.rs`), `src/launcher/**`, the HTTP server (`src/server.rs`, `src/server/**`), `deployments/**` (including `deployments/docker/Dockerfile`), `examples/**` | `trust-boundary` | fail-closed config and mode, label parsing, `/dev`-only rules, reload safety, image privilege, listeners |
 | `src/cgroup/**` | user-level Rust skills, `AGENTS.md` + the note below | NVIDIA-derived BPF/cgroup code; `src/cgroup/bpf_sys.rs` is the one audited `unsafe` module |
 | `meta/**`, `testenv/**` | `AGENTS.md`; the comment heading each test | a meta-test that can skip or pass on nothing is a finding; the integration harness's image identity check |
-| `tests/testdata/**` | `docs/rust-port.md` (Go golden captures) | frozen 1.x captures: an edited or regenerated one is a finding unless it comes from running the 1.x code |
+| `tests/testdata/**` | `docs/rust-port.md` (1.x fixtures) | frozen 1.x captures: an edited or regenerated one is a finding unless it comes from running the 1.x code |
 | `scripts/check-*.sh` | the script's header comment and its meta-test (`meta/tests/suppressions.rs`, `meta/tests/license_headers.rs`) | the check still fails on what it exists to stop |
 | `.pre-commit-config.yaml`, `droast.toml`, `.suppressions-baseline`, `[workspace.lints]`, `clippy.toml` | `AGENTS.md` (coding rules and the ratchet); `meta/tests/toolchain.rs`, `meta/tests/vacuous_flags.rs`, `meta/tests/ci_gates.rs`, `meta/tests/dockerfiles.rs`, `meta/tests/workspace_lints.rs` | no lint disabled or narrowed, no hook dropped; §5 (c) |
 
@@ -249,9 +249,9 @@ Before accepting a new helper, search for the one that already exists in the wor
 `meta/**`, `testenv/**`) and in the rust-common crates it depends on, by *behavior*, not by the
 name the author chose. Shared code is changed in rust-common, never forked here. Check the logger, the
 `/dev` mount check, the injected clock, backoff, the metrics recorder and its no-op form, test
-waits and the go-compat ports. The reuse ledger in `docs/rust-port.md` lists the SSE and SRD
-code a component must start from. Two implementations of the same rule drift apart, and the one the
-reviewer did not read is the one that keeps the bug.
+waits and the in-tree `text` and `lexpath` helpers. The reuse ledger in `docs/rust-port.md` lists
+the SSE and SRD code a component must start from. Two implementations of the same rule drift
+apart, and the one the reviewer did not read is the one that keeps the bug.
 
 ### (e) Docs drift for config and flags
 
