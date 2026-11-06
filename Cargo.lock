@@ -391,6 +391,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "go-http"
+version = "0.1.0"
+source = "git+https://github.com/leinardi/rust-common?rev=afba1366f69b523a3143a0bc8cb312aac302c4d9#afba1366f69b523a3143a0bc8cb312aac302c4d9"
+dependencies = [
+ "bytes",
+ "go-clock",
+ "go-compat",
+ "http-framing",
+ "hyper",
+ "hyper-util",
+ "jiff",
+ "rustix",
+ "socket2",
+ "tokio",
+]
+
+[[package]]
 name = "go-prom"
 version = "0.1.0"
 source = "git+https://github.com/leinardi/rust-common?rev=afba1366f69b523a3143a0bc8cb312aac302c4d9#afba1366f69b523a3143a0bc8cb312aac302c4d9"
@@ -459,6 +476,11 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-framing"
+version = "0.1.0"
+source = "git+https://github.com/leinardi/rust-common?rev=afba1366f69b523a3143a0bc8cb312aac302c4d9#afba1366f69b523a3143a0bc8cb312aac302c4d9"
 
 [[package]]
 name = "httparse"
@@ -1087,6 +1109,7 @@ dependencies = [
  "futures-core",
  "go-clock",
  "go-compat",
+ "go-http",
  "go-prom",
  "go-slog",
  "http-body-util",
@@ -1099,7 +1122,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "socket2",
  "tokio",
  "tokio-util",
  "zbus",

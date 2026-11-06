@@ -17,14 +17,19 @@
 // Adapted from swarm-scheduler-exporter/src/server/tests.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! The server's tests: Go's endpoint tests (`http_test.go`) and the framing rules here, the Go
-//! wire captures in [`wire`], the deadlines in [`timeouts`], and the listener, the drain, the
+//! The server's tests: Go's endpoint tests (`http_test.go`) and the scrape the `/metrics` route
+//! hands promhttp here, the Go wire captures in [`wire`], the deadlines in [`timeouts`], and the
 //! start and the stop in [`shutdown`]. Go's `TestDebugServer_ProfileCompletes` has no port:
-//! there is no debug server, and `refuse_debug_addr_is_q2` stands in its place.
+//! there is no debug server, and `refuse_debug_addr_is_q2` stands in its place. The routing,
+//! framing, bind and drain tests are go-http's.
 
-use std::time::Duration;
+use std::collections::BTreeSet;
+use std::future::Future;
+use std::pin::Pin;
 
 use bytes::Bytes;
+use go_http::TEXT_PLAIN;
+use hyper::header::{CONTENT_TYPE, HeaderValue};
 use jiff::Timestamp;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream};
 
@@ -51,13 +56,25 @@ fn text_exposition(body: &'static [u8]) -> Exposition {
     }
 }
 
-/// An app with readiness `ready` and a recorder of its own.
-fn app_ready(ready: bool) -> App {
+/// Readiness set to `ready`.
+fn readiness(ready: bool) -> Readiness {
     let readiness = Readiness::default();
     readiness.set(ready);
-    App::new(
-        readiness,
-        Recorder::new(),
+    readiness
+}
+
+/// The daemon's mux, ready or not, answering every scrape with `metrics`.
+fn mux_with(
+    ready: bool,
+    metrics: impl Fn(&MetricsRequest) -> Exposition + Send + Sync + 'static,
+) -> Mux {
+    mux(readiness(ready), metrics)
+}
+
+/// `mux` served at the captures' time, its messages captured.
+fn app_of(mux: Mux) -> App {
+    App::with_mux(
+        mux,
         Arc::new(FakeClock::new(capture_time())),
         capture_logs(Level::INFO).0,
     )
@@ -65,9 +82,7 @@ fn app_ready(ready: bool) -> App {
 
 /// A ready app answering every scrape with `metrics`.
 fn app_with(metrics: Exposition) -> App {
-    let mut app = app_ready(true);
-    app.exposition = Some(Box::new(move |_| metrics.clone()));
-    app
+    app_of(mux_with(true, move |_| metrics.clone()))
 }
 
 fn healthy_app() -> App {
@@ -77,7 +92,7 @@ fn healthy_app() -> App {
 /// Serves one connection of `app` over a duplex and returns the client end.
 fn connect(app: App) -> DuplexStream {
     let (client, server_io) = tokio::io::duplex(1 << 20);
-    let connection = connection(server_io, Arc::new(app), Timeouts::DAEMON);
+    let connection = go_http::connection(server_io, app.server, TIMEOUTS);
     tokio::spawn(async move {
         let _ = connection.await;
     });
@@ -106,16 +121,16 @@ async fn metrics_server_endpoints() {
     let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
     let readiness = Readiness::default();
     let app = || {
-        Arc::new(App::new(
+        App::new(
             readiness.clone(),
             Recorder::new(),
             Arc::new(FakeClock::new(capture_time())),
             capture_logs(Level::INFO).0,
-        ))
+        )
     };
-    let send = |app: Arc<App>, request: String| async move {
+    let send = |app: App, request: String| async move {
         let (mut client, server_io) = tokio::io::duplex(1 << 20);
-        let served = connection(server_io, app, Timeouts::DAEMON);
+        let served = go_http::connection(server_io, app.server, TIMEOUTS);
         tokio::spawn(async move {
             let _ = served.await;
         });
@@ -186,58 +201,13 @@ fn refuse_debug_addr_is_q2() {
     );
 }
 
-/// Go's framing: up to 2 KiB a `Content-Length`, above it chunks of 2 KiB.
-#[tokio::test(start_paused = true)]
-async fn bodies_above_2_kib_are_chunked() {
-    let exact = vec![b'x'; 2048].leak();
-    let response = exchange(
-        app_with(text_exposition(exact)),
-        b"GET /metrics HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
-    )
-    .await;
-    let text = String::from_utf8_lossy(&response);
-    assert!(text.contains("\r\nContent-Length: 2048\r\n"), "{text}");
-    assert!(!text.contains("Transfer-Encoding"), "{text}");
-
-    let over = vec![b'x'; 4097].leak();
-    let response = exchange(
-        app_with(text_exposition(over)),
-        b"GET /metrics HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
-    )
-    .await;
-    let text = String::from_utf8_lossy(&response);
-    let (head, body) = text.split_once("\r\n\r\n").unwrap();
-    assert!(
-        head.ends_with("\r\nConnection: close\r\nTransfer-Encoding: chunked"),
-        "{head}"
-    );
-    assert!(!head.contains("Content-Length"), "{head}");
-    let x2048 = "x".repeat(2048);
-    assert_eq!(
-        body,
-        format!("800\r\n{x2048}\r\n800\r\n{x2048}\r\n1\r\nx\r\n0\r\n\r\n")
-    );
-
-    // HEAD: neither header, as Go writes it.
-    let response = exchange(
-        app_with(text_exposition(over)),
-        b"HEAD /metrics HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
-    )
-    .await;
-    let text = String::from_utf8_lossy(&response);
-    assert!(!text.contains("Content-Length"), "{text}");
-    assert!(!text.contains("Transfer-Encoding"), "{text}");
-    assert!(text.ends_with("\r\n\r\n"), "{text}");
-}
-
 /// promhttp reads the first `Accept`, every `Accept-Encoding` and the `name[]` filter; a gzip
 /// answer carries its `Content-Encoding` ahead of the `Content-Type`.
 #[tokio::test(start_paused = true)]
 async fn the_scrape_request_reaches_the_metrics_function() {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = Arc::clone(&seen);
-    let mut app = app_ready(true);
-    app.exposition = Some(Box::new(move |scrape: &MetricsRequest| {
+    let app = app_of(mux_with(true, move |scrape: &MetricsRequest| {
         recorded.lock().unwrap().push(scrape.clone());
         Exposition {
             content_type: exposition::content_type(go_prom::ExpfmtVersion::V0_70_1, None),
@@ -275,8 +245,7 @@ async fn the_scrape_request_reaches_the_metrics_function() {
 async fn a_scrape_without_names_has_no_filter() {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = Arc::clone(&seen);
-    let mut app = app_ready(true);
-    app.exposition = Some(Box::new(move |scrape: &MetricsRequest| {
+    let app = app_of(mux_with(true, move |scrape: &MetricsRequest| {
         recorded.lock().unwrap().push(scrape.clone());
         text_exposition(b"")
     }));
@@ -288,41 +257,34 @@ async fn a_scrape_without_names_has_no_filter() {
     assert_eq!(*seen.lock().unwrap(), [MetricsRequest::default()]);
 }
 
-/// Go's `LookupPort` answers, from a static Go program run without `/etc/services`, as in the
-/// daemon's image.
-#[test]
-fn ports_parse_as_go_s() {
-    assert_eq!(parse_port("8888"), Ok(8888));
-    assert_eq!(parse_port("+80"), Ok(80));
-    assert_eq!(
-        parse_port("70000"),
-        Err("address 70000: invalid port".to_owned())
-    );
-    assert_eq!(parse_port("-1"), Err("address -1: invalid port".to_owned()));
-    assert_eq!(parse_port("http"), Ok(80));
-    assert_eq!(parse_port("HTTP"), Ok(80));
-    assert_eq!(parse_port("ssh"), Ok(22));
-    assert_eq!(
-        parse_port("domain"),
-        Err("lookup tcp/domain: unknown port".to_owned())
-    );
-    assert_eq!(parse_port(""), Ok(0));
-    assert_eq!(parse_port("+"), Ok(0));
-    assert_eq!(parse_port("-0"), Ok(0));
-    assert_eq!(parse_port("08"), Ok(8));
-    assert_eq!(
-        parse_port("0x10"),
-        Err("lookup tcp/0x10: unknown port".to_owned())
-    );
-}
+/// The test-only route that waits.
+const SLOW_PATH: &str = "/slow";
 
-/// A slow route for the deadline and drain tests: it waits `duration`.
+/// A slow route's wait, made per request.
+type SlowRoute = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+/// A slow route for the deadline and stop tests: it waits `duration`.
 fn sleeping(duration: Duration) -> SlowRoute {
     Arc::new(move || Box::pin(tokio::time::sleep(duration)))
 }
 
+/// The daemon's mux, ready, that also serves [`SLOW_PATH`], answered once `wait` is done.
+fn slow_mux(wait: SlowRoute) -> Mux {
+    let metrics = text_exposition(b"m 1\n");
+    mux_with(true, move |_| metrics.clone()).route_async(SLOW_PATH, move |_| {
+        let waiting = wait();
+        async move {
+            waiting.await;
+            Reply::new(
+                StatusCode::OK,
+                vec![(CONTENT_TYPE, HeaderValue::from_static(TEXT_PLAIN))],
+                Bytes::from_static(b"slow done\n"),
+            )
+        }
+    })
+}
+
+/// A healthy app whose [`SLOW_PATH`] waits `duration`.
 fn slow_app(duration: Duration) -> App {
-    let mut app = healthy_app();
-    app.slow = Some(sleeping(duration));
-    app
+    app_of(slow_mux(sleeping(duration)))
 }

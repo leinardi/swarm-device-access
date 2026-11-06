@@ -99,6 +99,9 @@ go-slog.workspace = true
 # The Prometheus Go client's registry and text exposition, byte for byte (rust-common), with
 # prometheus/common v0.70.1's content negotiation (ExpfmtVersion::V0_70_1).
 go-prom.workspace = true
+# Go's net/http server on hyper (rust-common): the mux's answers, header order and framing, the
+# four server deadlines, net.Listen's bind and the drain, for the metrics and health endpoints.
+go-http.workspace = true
 # The flags (Q1). No color: help and errors are plain text, as Go's were.
 clap = { version = "4.6.7", default-features = false, features = [
     "std",
@@ -115,26 +118,16 @@ jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 # ported from yaml.v3 in-tree (src/config/yaml), so no YAML value model or serde is used.
 saphyr-parser = { version = "0.3.2", default-features = false }
 # The Docker client (src/docker): HTTP/1 only, on unix-socket connections it dials and pools
-# itself. The metrics and health endpoints (src/server): hyper's HTTP/1 server with hyper-util's
-# graceful drain.
-hyper = { version = "1.12.0", default-features = false, features = ["client", "http1", "server"] }
-hyper-util = { version = "0.1.21", default-features = false, features = [
-    "tokio",
-    "http1",
-    "server",
-    "server-graceful",
-] }
-# The metrics listener, bound as Go's net.Listen binds it (SO_REUSEADDR, the dual-stack wildcard,
-# the kernel's backlog).
-socket2 = { version = "0.6.5", features = ["all"] }
+# itself; the metrics and health endpoints' status type (their server is go-http's).
+hyper = { version = "1.12.0", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "http1"] }
 http-body-util = "0.1.5"
 bytes = "1.12.1"
 # The Engine API's JSON: the typed answers the daemon reads and the error bodies.
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # The cgroup directory descriptor and the openat, fstat and open calls on it, getrandom for the
-# wrapper nonce, openat2 beneath /dev, the pidfd and its poll, and an interface's index for a
-# zoned metrics address, without unsafe.
+# wrapper nonce, openat2 beneath /dev, and the pidfd and its poll, without unsafe.
 rustix = { version = "1.1.6", default-features = false, features = [
     "std",
     "fs",
@@ -142,7 +135,6 @@ rustix = { version = "1.1.6", default-features = false, features = [
     "system",
     "process",
     "event",
-    "net",
 ] }
 # The raw bpf(2) syscall, in src/cgroup/bpf_sys.rs only.
 libc = "0.2.191"
@@ -174,6 +166,10 @@ tokio = { version = "1.54.1", default-features = false, features = [
 [dev-dependencies]
 # The Go tests' gatherSeries and seriesID, for the collectors' tests.
 go-prom = { workspace = true, features = ["testing"] }
+# The Go wire captures' replay (Capture, replay).
+go-http = { workspace = true, features = ["testing"] }
+# The fake Engine of tests/parity.rs: hyper's HTTP/1 server.
+hyper = { version = "1.12.0", default-features = false, features = ["http1", "server"] }
 # The paused clock (start_paused) needs the test runtime.
 tokio = { version = "1.54.1", default-features = false, features = [
     "time",

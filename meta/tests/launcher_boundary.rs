@@ -24,8 +24,8 @@
 //!   `src/launcher/engine.rs` calls them;
 //! - outside `src/docker` (whose own methods `docker_boundary.rs` pins), only
 //!   `src/launcher/engine.rs` sets a request's method or names a write method (`POST`, `PUT`,
-//!   `DELETE`, `PATCH`, or one parsed from text); the metrics server compares a request's
-//!   method with `HEAD`, `OPTIONS` and `CONNECT`, which write nothing;
+//!   `DELETE`, `PATCH`, or one parsed from text); the metrics server (`src/server.rs`, on
+//!   go-http) names no method at all;
 //! - outside `src/launcher`, nothing names the engine: its module, `Engine`, `EngineApi`, or a
 //!   launcher path to them;
 //! - outside `src/launcher` and the CLI entry modules that run the `launch` subcommand

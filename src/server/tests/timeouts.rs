@@ -19,11 +19,10 @@
 
 //! Go's server deadlines (5s header, 10s read, 30s write, 60s idle) on a paused clock over a
 //! duplex. Each expectation is Go 1.26's wall-clock answer to the same probe, to the
-//! millisecond; and two tests show why hyper's own header timer is not used.
+//! millisecond; and one, at the I/O level, a read waiting when the service sets an earlier
+//! deadline. Why hyper's own header timer is not used is go-http's test.
 
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::{TokioIo, TokioTimer};
+use go_http::{ConnState, TimedIo};
 use tokio::time::Instant;
 
 use super::*;
@@ -293,47 +292,31 @@ async fn a_slow_body_is_answered_at_once() {
     dripping.abort();
 }
 
-async fn ok(
-    _request: Request<Incoming>,
-) -> Result<Response<http_body_util::Full<Bytes>>, Infallible> {
-    Ok(Response::new(http_body_util::Full::new(
-        Bytes::from_static(b"ok\n"),
-    )))
-}
-
-/// Why hyper's header timer is off: hyper 1.12 arms it as soon as a connection goes idle, so it
-/// closes an idle keep-alive connection at 5s, where Go keeps it 60s.
+/// A read is pending under the first request's read deadline (10 s) when its response ends with
+/// the next request's head already read: that head is due 5 s after the response, at 6 s, and the
+/// read waiting since before must fail then, not when its own 10 s timer fires (rust-common
+/// 806d142). Through hyper, `a_pipelined_partial_head_is_due_5s_after_the_response` passed
+/// before too: hyper polls the read side again after a response when no read is pending.
 #[tokio::test(start_paused = true)]
-async fn hyper_s_header_timeout_also_cuts_an_idle_keep_alive() {
-    let (mut client, server_io) = tokio::io::duplex(1 << 16);
-    tokio::spawn(async move {
-        let _ = http1::Builder::new()
-            .timer(TokioTimer::new())
-            .header_read_timeout(Duration::from_secs(5))
-            .serve_connection(TokioIo::new(server_io), service_fn(ok))
-            .await;
-    });
+async fn an_earlier_deadline_set_while_a_read_waits_is_enforced_at_once() {
     let start = Instant::now();
-    client
-        .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
-        .await
-        .unwrap();
-    let mut response = Vec::new();
-    let _ = client.read_to_end(&mut response).await;
-    assert!(String::from_utf8_lossy(&response).starts_with(OK));
-    assert_eq!(start.elapsed().as_millis(), 5000);
-}
-
-/// And without a hyper timer, a header timeout is accepted by the builder and panics on the
-/// connection's first poll.
-#[tokio::test]
-async fn hyper_s_header_timeout_without_a_timer_panics() {
-    let (_client, server_io) = tokio::io::duplex(1 << 16);
-    let task = tokio::spawn(async move {
-        let _ = http1::Builder::new()
-            .header_read_timeout(Duration::from_secs(5))
-            .serve_connection(TokioIo::new(server_io), service_fn(ok))
-            .await;
+    let (mut client, server) = tokio::io::duplex(1024);
+    let state = ConnState::new(TIMEOUTS);
+    let mut io = TimedIo::new(server, state.clone());
+    let pipelined = b"GET / HTTP/1.1\r\nHost: x\r\n\r\nGET /hea";
+    client.write_all(pipelined).await.unwrap();
+    let mut buf = [0_u8; 1024];
+    assert_eq!(io.read(&mut buf).await.unwrap(), pipelined.len());
+    state.on_request_head();
+    let reading = tokio::spawn(async move {
+        let mut buf = [0_u8; 64];
+        let result = io.read(&mut buf).await;
+        (result.map_err(|error| error.kind()), start.elapsed())
     });
-    assert!(task.await.unwrap_err().is_panic());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    state.on_response_done();
+    let (result, elapsed) = reading.await.unwrap();
+    assert_eq!(result, Err(io::ErrorKind::TimedOut));
+    assert_eq!(elapsed, Duration::from_secs(6));
+    drop(client);
 }

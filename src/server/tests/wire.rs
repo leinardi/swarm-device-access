@@ -23,9 +23,9 @@
 //! response as read and `[end: <nil>]` once the server closed; the `/metrics` capture was cut at
 //! 1200 bytes, before its end.
 
-use std::collections::BTreeMap;
-use std::fmt::Write as _;
 use std::path::Path;
+
+use go_http::testing::{self, Capture};
 
 use super::*;
 
@@ -43,131 +43,67 @@ const DIFFERENT: [(&str, &str); 5] = [
     ("go-get-nohost", "Q11 malformed request"),
 ];
 
-/// A capture's request, and its response with whether the capture was cut before the end.
-struct Capture {
-    port: u16,
-    request: Vec<u8>,
-    response: Vec<u8>,
-    truncated: bool,
-}
-
-fn parse(text: &[u8]) -> Capture {
-    let mut lines = text.splitn(3, |byte| *byte == b'\n');
-    let title = String::from_utf8(lines.next().unwrap().to_vec()).unwrap();
-    let port = title
-        .rsplit_once("(port ")
-        .and_then(|(_, port)| port.strip_suffix(')'))
-        .unwrap()
-        .parse()
-        .unwrap();
-    let request_line = String::from_utf8(lines.next().unwrap().to_vec()).unwrap();
-    let request = request_line
-        .strip_prefix("### request: ")
-        .unwrap()
-        .replace("\\r\\n", "\r\n")
-        .into_bytes();
-    let rest = lines.next().unwrap();
-    let end = b"[end: <nil>]\n\n";
-    let (response, truncated) = if rest.ends_with(end) {
-        (rest[..rest.len() - end.len()].to_vec(), false)
-    } else {
-        (rest.strip_suffix(b"\n").unwrap_or(rest).to_vec(), true)
-    };
-    Capture {
-        port,
-        request,
-        response,
-        truncated,
-    }
-}
-
-/// The time of the capture's `Date`, so it compares exactly; the captures were taken over a
-/// minute.
-fn date_of(response: &[u8]) -> Timestamp {
-    let text = String::from_utf8_lossy(response);
-    text.split("\r\n")
-        .find_map(|line| line.strip_prefix("Date: "))
-        .map_or_else(capture_time, |date| {
-            jiff::fmt::strtime::parse("%a, %d %b %Y %H:%M:%S GMT", date)
-                .and_then(|parsed| parsed.to_datetime())
-                .and_then(|civil| civil.to_zoned(jiff::tz::TimeZone::UTC))
-                .unwrap()
-                .timestamp()
-        })
-}
-
-/// The Go server a capture was taken from, at the capture's time; `/metrics` answers 3300 bytes,
-/// more than Go buffers before chunking.
-fn app_for(capture: &Capture) -> App {
+/// The Go server a capture was taken from, at the capture's time (the captures were taken over
+/// a minute); `/metrics` answers 3300 bytes, more than Go buffers before chunking.
+fn server_for(capture: &Capture) -> Server {
     let metrics = text_exposition("# HELP x y\n".repeat(300).leak().as_bytes());
-    let mut app = app_with(metrics);
-    match capture.port {
-        18080 => {}
-        18081 => app.readiness.set(false),
+    let ready = match capture.port {
+        18080 => true,
+        18081 => false,
         other => panic!("no Go server on port {other}"),
-    }
-    app.clock = Arc::new(FakeClock::new(date_of(&capture.response)));
-    app
+    };
+    let clock = Arc::new(FakeClock::new(capture.date().unwrap_or_else(capture_time)));
+    server(
+        mux_with(ready, move |_| metrics.clone()),
+        clock,
+        &capture_logs(Level::INFO).0,
+    )
+}
+
+/// The `go-*.txt` captures, sorted by name; the directory's README is not one.
+fn captures() -> Vec<Capture> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/http");
+    let mut paths: Vec<_> = std::fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "txt"))
+        .collect();
+    paths.sort();
+    paths
+        .iter()
+        .map(|path| {
+            let name = path.file_stem().unwrap().to_string_lossy();
+            Capture::parse(&name, &std::fs::read(path).unwrap()).unwrap()
+        })
+        .collect()
 }
 
 /// 36 of the 41 captures are identical byte for byte, `Date` included; the other 5 are the Q11
 /// and Q3 cases listed in [`DIFFERENT`].
 #[tokio::test(start_paused = true)]
 async fn the_go_wire_captures_are_reproduced() {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/http");
-    let mut names: Vec<_> = std::fs::read_dir(&directory)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "txt"))
-        .collect();
-    names.sort();
-    assert_eq!(names.len(), 41);
-    let mut outcomes = BTreeMap::new();
-    let mut report = String::new();
-    for path in names {
-        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let capture = parse(&std::fs::read(&path).unwrap());
-        let response = exchange(app_for(&capture), &capture.request).await;
-        let identical = if capture.truncated {
-            response.starts_with(&capture.response)
-        } else {
-            response == capture.response
-        };
-        if !identical {
-            let _ = writeln!(
-                report,
-                "{name} differs:\n--- Go\n{}\n--- Rust\n{}",
-                String::from_utf8_lossy(&capture.response),
-                String::from_utf8_lossy(&response)
-            );
-        }
-        outcomes.insert(name, identical);
-    }
-    let different: Vec<&str> = outcomes
-        .iter()
-        .filter(|(_, identical)| !**identical)
-        .map(|(name, _)| name.as_str())
-        .collect();
+    let captures = captures();
+    assert_eq!(captures.len(), 41);
+    let replay = testing::replay(&captures, TIMEOUTS, server_for).await;
     let mut expected: Vec<&str> = DIFFERENT.iter().map(|(name, _)| *name).collect();
     expected.sort_unstable();
-    assert_eq!(different, expected, "{report}");
-    let identical = outcomes.values().filter(|identical| **identical).count();
-    assert_eq!(identical, 36);
+    let mut different = replay.different.clone();
+    different.sort_unstable();
+    assert_eq!(different, expected, "{}", replay.report);
+    assert_eq!(replay.identical.len(), 36);
 }
 
 /// The `/metrics` capture's head is Go's, chunked framing included.
 #[tokio::test(start_paused = true)]
 async fn the_metrics_head_is_go_s() {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/http");
-    let capture = parse(&std::fs::read(directory.join("go-get-metrics.txt")).unwrap());
-    let response = exchange(app_for(&capture), &capture.request).await;
-    let head_end = |bytes: &[u8]| {
-        bytes
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .unwrap()
-    };
-    let go_head = &capture.response[..head_end(&capture.response)];
-    assert_eq!(&response[..head_end(&response)], go_head);
-    assert!(response[head_end(&response)..].starts_with(b"\r\n\r\n800\r\n"));
+    let captures = captures();
+    let capture = captures
+        .iter()
+        .find(|capture| capture.name == "go-get-metrics")
+        .unwrap();
+    let response =
+        testing::exchange(Arc::new(server_for(capture)), TIMEOUTS, &capture.request).await;
+    let head = testing::head(&response).unwrap();
+    assert_eq!(head, testing::head(&capture.response).unwrap());
+    assert!(response[head.len()..].starts_with(b"\r\n\r\n800\r\n"));
 }
