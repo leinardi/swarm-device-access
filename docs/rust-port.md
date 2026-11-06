@@ -59,7 +59,7 @@ and `Cargo.lock` and checked by `cargo deny`.
 
 | Crate | Where | Reason |
 | --- | --- | --- |
-| rust-common's `go-compat`, `go-clock`, `go-slog`, `go-prom`, `go-http`, `docker-engine` (`write`, `attach`), `service-kit` (`runtime`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by release tag (`tag = "v0.2.1"`) in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies (`socket2` and `flate2` come with go-http and go-prom). |
+| rust-common's `go-compat`, `go-clock`, `go-slog`, `go-prom`, `go-http`, `docker-engine` (`write`, `attach`), `service-kit` (`runtime`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by release tag (`tag = "v0.3.0"`) in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies (`socket2` and `flate2` come with go-http and go-prom). |
 | `clap` 4 (derive, no colour) | daemon | The CLI, as in SSE (Q1). |
 | `tokio` (`net`, `time`, `sync`, `rt`, `io-util`, `io-std`, `macros`) | daemon; testenv (dev-dependency) | The sockets, the timers that follow the paused clock, `spawn_blocking` for the cgroup transaction, the launcher's output pump; in testenv the suite's daemon child processes. The runtime and the signal watches are service-kit's. |
 | `tokio-util` | daemon | `CancellationToken`, Go's context cancellation, and the `TaskTracker` of the blocking transactions. |
@@ -168,7 +168,7 @@ These rows extend the component rows above; their pinned source revisions are un
 After the port, the components the services share moved to
 [leinardi/rust-common](https://github.com/leinardi/rust-common); the rows above say what this
 daemon passes each crate. All are one git dependency in the root `Cargo.toml`'s
-`[workspace.dependencies]`, pinned by the release tag (`tag = "v0.2.1"`, with `version = "0.2"`):
+`[workspace.dependencies]`, pinned by the release tag (`tag = "v0.3.0"`, with `version = "0.3"`):
 `go-compat`, `go-clock`, `go-slog`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
 `testenv-core`, `repo-meta` and `service-kit`. The moved code is the same code, and its tests and
 corpora moved with it. The move changed behaviour only here:

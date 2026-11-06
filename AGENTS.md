@@ -24,7 +24,7 @@ Build / test / lint — uses Make wrappers around `cargo`:
 ```bash
 make verify-rust   # rust-build, rust-fmt-check, rust-clippy (-D warnings), rust-test, rust-doc
 make verify        # verify-rust: every check a change has to pass
-make rust-build    # cargo build --workspace --all-targets --all-features --locked, with the version stamps
+make rust-build    # cargo build --workspace --all-targets --all-features --locked, unstamped (as rust-test)
 make rust-test     # cargo test --workspace --locked (meta-tests included)
 make rust-clippy   # cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 make rust-fmt      # cargo fmt --all
@@ -179,7 +179,7 @@ the rust-common crates)**
 `go-compat`, `go-clock`, `go-slog`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
 `service-kit`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v0.2.1"`, with `version = "0.2"`, the tag's `<major>.<minor>`) in the root
+release tag (`tag = "v0.3.0"`, with `version = "0.3"`, the tag's `<major>.<minor>`) in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
 its own features.
 
@@ -229,8 +229,10 @@ symlink.
 - Version strings (`BUILD.version`, `BUILD.commit`, `BUILD.date`) live in `src/version.rs`, read
   at compile time by service-kit's `buildinfo!` from `SWARM_DEVICE_ACCESS_VERSION`,
   `SWARM_DEVICE_ACCESS_COMMIT` and `SWARM_DEVICE_ACCESS_DATE`, which `RUST_VERSION_ENV` in
-  make-common's `.mk/rust.mk` sets from git and the clock under the Makefile's `RUST_STAMP_PREFIX`
-  (`make rust-build`, `make rust-release-binaries`) and the Dockerfile sets from its `VERSION`,
+  make-common's `.mk/rust.mk` sets from git (the date is HEAD's commit date, `GIT_COMMIT_DATE`)
+  under the Makefile's `RUST_STAMP_PREFIX` (`make rust-dist`, `make rust-run`,
+  `make rust-release-binaries`; `make rust-build` builds unstamped, as the tests do, through the
+  Makefile's `RUST_BUILD_ENV :=`) and the Dockerfile sets from its `VERSION`,
   `COMMIT` and `DATE` build arguments; unset, they read `dev`, `none` and `unknown`, and an empty
   stamp stays empty (`EmptyStamp::Kept`).
 - `src/cgroup/{api,ebpf,v1,v2}.rs` retain NVIDIA's original copyright header (Apache 2.0). Don't

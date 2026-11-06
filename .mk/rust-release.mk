@@ -51,7 +51,7 @@ RUST_RELEASE_PLATFORMS := amd64:x86_64-unknown-linux-musl arm64:aarch64-unknown-
 RUST_RELEASE_DIR       := $(REPO_ROOT)/$(DIST_DIR)
 
 # The one static build, for one Rust target: cargo-zigbuild with zig as the C compiler and linker,
-# the version stamps of rust-build, and the checkout and the cargo home remapped, so the binary
+# the version stamps of rust-dist, and the checkout and the cargo home remapped, so the binary
 # carries no path of the machine that built it and a rebuild of the same commit gives the same
 # bytes. The toolchain's rust-src, when it is installed, is mapped back to the /rustc/<commit> the
 # standard library was built with: rustc otherwise writes the local copy's path, under the rustup

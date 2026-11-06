@@ -6,7 +6,7 @@
   static musl release binaries with cargo-zigbuild and pinned zig
 - **Key crates**:
   - `tokio`, `tokio-util` — runtime, cancellation, task tracking
-  - rust-common (git, pinned by release tag `v0.2.1`): `go-compat`, `go-clock`, `go-slog`,
+  - rust-common (git, pinned by release tag `v0.3.0`): `go-compat`, `go-clock`, `go-slog`,
     `go-prom`, `go-http`, `docker-engine`, `service-kit`, `testenv-core`, `repo-meta`
   - `hyper`, `hyper-util` — the launcher's writes and attach on docker-engine's transport
   - `rustix` — syscalls (openat2, fstat, pidfd); `libc` only for raw `bpf(2)` in `bpf_sys.rs`

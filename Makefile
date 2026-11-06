@@ -47,6 +47,17 @@ DIST_DIR     ?= dist
 # SWARM_DEVICE_ACCESS_VERSION, SWARM_DEVICE_ACCESS_COMMIT and SWARM_DEVICE_ACCESS_DATE.
 RUST_STAMP_PREFIX := SWARM_DEVICE_ACCESS
 
+# The date stamp is HEAD's commit date in UTC (rust.mk's GIT_COMMIT_DATE, the clock's only
+# outside git), the date release.yaml stamps. A stamp that moves only with a commit keeps a
+# repeated build a cache hit: a new date on every make would recompile the crate that reads it
+# each time.
+BUILD_DATE ?= $(or $(GIT_COMMIT_DATE),$(shell date -u +"%Y-%m-%dT%H:%M:%SZ"))
+
+# rust-build unstamped, as rust-test builds: the two share the swarm-device-access crate's units
+# instead of each recompiling it after the other. rust-dist, rust-run and the release builds stay
+# stamped.
+RUST_BUILD_ENV :=
+
 # Docker build settings
 DOCKERFILE     ?= deployments/docker/Dockerfile
 DOCKER_CONTEXT ?= .
