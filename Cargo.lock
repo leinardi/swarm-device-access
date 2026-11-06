@@ -1200,11 +1200,24 @@ dependencies = [
  "go-clock",
  "go-compat",
  "go-slog",
- "jiff",
- "regex",
  "rustix",
  "serde_json",
  "swarm-device-access",
+ "testenv-core",
+ "tokio",
+]
+
+[[package]]
+name = "testenv-core"
+version = "0.1.0"
+source = "git+https://github.com/leinardi/rust-common?rev=6d7bf52c92c8114a13dee785df4a17a90df2300f#6d7bf52c92c8114a13dee785df4a17a90df2300f"
+dependencies = [
+ "bollard",
+ "go-compat",
+ "go-slog",
+ "jiff",
+ "regex",
+ "rustix",
  "tokio",
  "tokio-util",
 ]

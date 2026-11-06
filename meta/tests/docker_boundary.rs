@@ -34,8 +34,9 @@
 //!   `/events`;
 //! - nothing under `src/docker` reads an environment variable or dials TCP, and nothing under
 //!   `src/` builds the client from the environment (`Settings::from_env`);
-//! - nothing under `src/` names bollard or `testenv`, the harness that creates and removes
-//!   containers on purpose.
+//! - nothing under `src/` names bollard, `testenv`, the harness that creates and removes
+//!   containers on purpose, or `testenv_core`, its shared half, whose `bollard` feature brings the
+//!   SDK.
 //!
 //! The launcher's write calls take docker-engine's client through `Client::transport` and set
 //! their method outside `src/docker`, in the launcher's engine; who may do that is pinned by
@@ -370,8 +371,9 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     problems
 }
 
-/// The SDK or the harness, by name.
-static SDK_OR_HARNESS: LazyLock<Regex> = LazyLock::new(|| pattern(r"\b(bollard|testenv)\b"));
+/// The SDK, the harness or its shared half (rust-common's testenv-core), by name.
+static SDK_OR_HARNESS: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\b(bollard|testenv(_core)?)\b"));
 
 /// Files that name the SDK or the harness, in code or in a comment.
 fn sdk_problems(files: &[(String, String)]) -> Vec<String> {
@@ -589,6 +591,8 @@ fn a_write_path_is_refused() {
             "\nasync fn version(&self) {\n    self.inner.get(\"/version\", \"\", &[]).await;\n}\n",
         ),
         with(API, "\n// Unlike bollard, this client is shared.\n"),
+        with("src/run.rs", "\nuse testenv::config::ENV_IDS;\n"),
+        with("src/run.rs", "\nuse testenv_core::host::HostSweep;\n"),
         files
             .iter()
             .map(|(path, text)| {

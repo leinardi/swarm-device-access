@@ -31,17 +31,18 @@ publish = false
 workspace = true
 
 # integration is Go's integration build tag: it compiles the modules that talk to the host Docker
-# daemon (the client, the sweep, the image runs) and the suite. Without it, only the run filter,
-# the sweep rules, the redacting logger and the image identity rule build, and their tests run in
-# a plain cargo test, which needs no Docker. Build and clippy take --all-features, so the gated
-# code is still compiled and linted.
+# daemon (the client, the sweep, the image runs) and the suite, and turns on testenv-core's async,
+# bollard and redact features with them. Without it, only the suite's names and labels, the image
+# identity rule and the enforcement tests' guards and program checks build, and their tests run in
+# a plain cargo test, which needs no Docker and does not build bollard. Build and clippy take
+# --all-features, so the gated code is still compiled and linted.
 [features]
 integration = [
+    "testenv-core/async",
+    "testenv-core/bollard",
+    "testenv-core/redact",
     "dep:bollard",
     "dep:futures-util",
-    "dep:rustix",
-    "dep:tokio",
-    "dep:tokio-util",
 ]
 
 [dependencies]
@@ -50,16 +51,17 @@ integration = [
 # checks. The dependency only goes this way: the daemon package names testenv in no table (the
 # docker_boundary meta-test checks its sources), so nothing here reaches the shipped binary.
 swarm-device-access = { path = ".." }
-# Go's strconv.Quote, errors.Join and Duration formatting, as the daemon writes them.
+# Go's strconv.Quote and Duration formatting, as the daemon writes them.
 go-compat.workspace = true
 # The wall clock the harness and its logs read.
 go-clock.workspace = true
 # The daemon's logger, for the harness's own records.
 go-slog.workspace = true
-# The sweep's started label, read as RFC 3339.
-jiff = { version = "0.2.38", default-features = false, features = ["std"] }
-# The run filter: Go's -run patterns are regular expressions.
-regex = "1.13.1"
+# The generic half of the harness (rust-common): Go's -run filter, the envid, the sweep rules and
+# the owner labels, the error type, the identity answer and the ELF check, and (with integration)
+# Go's context and testing packages, the redacting logger and the host daemon's sweep and
+# cleanup. Its features follow integration, so a plain cargo test does not build bollard.
+testenv-core.workspace = true
 # The Docker SDK, for the harness only, which creates and removes containers and images on
 # purpose. An optional normal dependency, not a dev-dependency: the suite reaches it through this
 # library's API, and a dev-dependency is not available to library code. Only the unix socket
@@ -68,23 +70,10 @@ bollard = { version = "=0.21.1", default-features = false, features = ["pipe"], 
 futures-util = { version = "0.3.34", default-features = false, features = [
     "std",
 ], optional = true }
-# kill(pid, 0) for the sweep's liveness check, without unsafe code; the daemon child's signals;
-# the major and minor of a device number for the enforcement tests' neighbouring nodes.
-rustix = { version = "1.1.6", default-features = false, features = [
-    "std",
-    "fs",
-    "process",
-], optional = true }
-tokio = { version = "1.54.1", default-features = false, features = [
-    "rt",
-    "time",
-], optional = true }
-# CancellationToken, Go's context: the suite deadline cancels every Docker call.
-tokio-util = { version = "0.7.20", default-features = false, optional = true }
 
 # The suite's own needs, beside the library's: the daemon child processes and the docker build of
-# the negative control's image, the signal that cancels the suite, the metrics request, and the
-# daemon's JSON log records.
+# the negative control's image, the metrics request, the daemon's JSON log records and the device
+# numbers.
 [dev-dependencies]
 tokio = { version = "1.54.1", default-features = false, features = [
     "io-util",
@@ -92,11 +81,13 @@ tokio = { version = "1.54.1", default-features = false, features = [
     "net",
     "process",
     "rt",
-    "signal",
     "sync",
     "time",
 ] }
 serde_json = "1.0.154"
+# The major and minor of a device number for the enforcement tests' neighbouring nodes, without
+# unsafe code.
+rustix = { version = "1.1.6", default-features = false, features = ["std", "fs"] }
 
 [[test]]
 name = "integration"

@@ -28,9 +28,9 @@ use bollard::query_parameters::{
 };
 use futures_util::StreamExt as _;
 use swarm_device_access::launcher::spec::{DAEMON_NAME, LABEL_LAUNCHER, LABEL_ROLE, ROLE_DAEMON};
-use testenv::context::Context;
 use testenv::enforce::ENV_ENFORCE;
 use testenv::host::{OP_TIMEOUT, with_timeout};
+use testenv_core::context::Context;
 
 use crate::daemon_process::follow_logs;
 use crate::docker::{CLEANUP_TIMEOUT, remove_test_container, short_id, start_container};

@@ -52,49 +52,53 @@ use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bollard::query_parameters::ListContainersOptions;
-use futures_util::future::LocalBoxFuture;
 use go_clock::{Clock as _, SystemClock};
-use go_compat::{duration, quote};
+use go_compat::duration;
+use go_compat::local_zone::local_zone;
 use go_slog::Attr;
-use jiff::Timestamp;
-use testenv::context::Context;
+use testenv::cleanup_command;
+use testenv::config::{ENV_IDS, LABELS};
 use testenv::enforce::{DUMP_FLAG, dump_device_programs};
-use testenv::envid::{LABEL_ENV_ID, generate_env_id, label_filter};
 use testenv::host::{
-    check_image_identity, cleanup, cleanup_command, default_sweep_rules, host_client, run_labels,
-    sweep, with_timeout,
+    HOST_SWEEP, check_image_identity, default_sweep_rules, host_client, with_timeout,
 };
-use testenv::identity::{IDENTITY_FLAG, check_identity, is_static_elf};
-use testenv::redact::RedactingLogger;
-use testenv::run_filter::RunFilter;
-use testenv::sweep_rules::current_owner;
+use testenv::identity::check_identity;
+use testenv_core::context::Context;
+use testenv_core::identity::{IDENTITY_FLAG, is_static_elf};
+use testenv_core::redact::RedactingLogger;
+use testenv_core::run_filter::RunFilter;
+use testenv_core::sweep_rules::current_owner;
+use testenv_core::testing::{Runner, RunnerConfig, TallyStyle, Test, TimeoutRule, say};
 use tokio::process::Command;
-use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::OnceCell;
 
-use crate::testing::{
-    ENV_SUITE_TIMEOUT, Fatal, Outcome, Suite, TestHandle, TestResult, install, run_test, say, suite,
-};
+use crate::testing::{Fatal, Suite, TestHandle, install, suite};
 
 /// The Rust daemon binary under test, run as a host process.
 const ENV_BINARY: &str = "SDA_RUST_TEST_BINARY";
 /// The Rust daemon image under test.
 const ENV_IMAGE: &str = "SDA_RUST_TEST_IMAGE";
-/// Go's `defaultSuiteTimeout`.
-const DEFAULT_SUITE_TIMEOUT: Duration = Duration::from_mins(4);
 /// Bounds the setup's own Docker calls and the binary's identity run.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(60);
 /// Bounds the final check and cleanup of whatever a test left with the run's labels.
 const TEARDOWN_TIMEOUT: Duration = Duration::from_mins(1);
 
-/// One top-level test, under its Go name.
-struct Test {
-    name: &'static str,
-    run: fn(TestHandle) -> LocalBoxFuture<'static, TestResult>,
-}
+/// The runner's lines and exit codes, as Go's `TestMain` and `runSuite` printed them: the deadline
+/// (`SDA_IT_SUITE_TIMEOUT`, Go's `defaultSuiteTimeout` of 4m without it) must be a positive
+/// duration, a test that starts after it fails at once, and the tally counts the skipped tests.
+const RUNNER: RunnerConfig = RunnerConfig {
+    prefix: "[it]",
+    usage: "usage: integration [--run <pattern>]",
+    timeout_env: "SDA_IT_SUITE_TIMEOUT",
+    default_timeout: Duration::from_mins(4),
+    timeout_rule: TimeoutRule::Positive,
+    deadline_check: true,
+    tally: TallyStyle::WithSkipped,
+};
 
 /// Every test, in the order they run: Go's order, then the cross-language upgrade gate and the
 /// identity check's negative control.
@@ -184,51 +188,16 @@ fn main() -> ExitCode {
     {
         return dump_programs(pid);
     }
-    let pattern = match run_pattern(&args) {
-        Ok(pattern) => pattern,
-        Err(message) => {
-            say(&format!(
-                "[it] {message}\nusage: integration [--run <pattern>]"
-            ));
-            return ExitCode::from(2);
-        }
-    };
-    let filter = match RunFilter::parse(&pattern) {
-        Ok(filter) => filter,
-        Err(error) => {
-            say(&format!("[it] {error}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let names: Vec<&str> = TESTS.iter().map(|test| test.name).collect();
-    let selected = match filter.select(&names) {
+    let runner = Runner::new(RUNNER);
+    let (filter, tests) = match runner.select(&args, TESTS) {
         Ok(selected) => selected,
-        Err(error) => {
-            say(&format!("[it] {error}"));
-            return ExitCode::FAILURE;
-        }
+        Err(code) => return ExitCode::from(code),
     };
-    say(&format!(
-        "[it] selected {} of {} tests",
-        selected.len(),
-        names.len()
-    ));
-    let tests: Vec<&Test> = TESTS
-        .iter()
-        .filter(|test| selected.contains(&test.name))
-        .collect();
-
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
+    let runtime = match runner.runtime() {
         Ok(runtime) => runtime,
-        Err(error) => {
-            say(&format!("[it] runtime: {error}"));
-            return ExitCode::FAILURE;
-        }
+        Err(code) => return ExitCode::from(code),
     };
-    runtime.block_on(run_suite(filter, &tests))
+    runtime.block_on(run_suite(&runner, filter, &tests))
 }
 
 /// The suite's binary run as root by the upgrade test (`sudo -n <binary> --dump-device-programs
@@ -257,59 +226,6 @@ fn dump_programs(pid: &str) -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// The `--run` value: `--run <pattern>` or `--run=<pattern>`, the last one winning as Go's flag
-/// package lets it.
-fn run_pattern(args: &[String]) -> Result<String, String> {
-    let mut pattern = String::new();
-    let mut rest = args.iter();
-    while let Some(arg) = rest.next() {
-        if let Some(value) = arg.strip_prefix("--run=") {
-            value.clone_into(&mut pattern);
-        } else if arg == "--run" {
-            rest.next()
-                .ok_or_else(|| "flag needs an argument: --run".to_owned())?
-                .clone_into(&mut pattern);
-        } else {
-            return Err(format!("unknown argument {arg:?}"));
-        }
-    }
-    Ok(pattern)
-}
-
-/// Go's reading of `SDA_IT_SUITE_TIMEOUT` in `runSuite`: unset or empty is the default, anything
-/// else must be a positive duration.
-fn suite_timeout(raw: &str) -> Result<Duration, String> {
-    if raw.is_empty() {
-        return Ok(DEFAULT_SUITE_TIMEOUT);
-    }
-    match duration::parse(raw) {
-        Ok(nanos) if nanos > 0 => Ok(Duration::from_nanos(nanos.unsigned_abs())),
-        Ok(_) | Err(_) => Err(format!(
-            "invalid {ENV_SUITE_TIMEOUT}={}: want a positive duration",
-            quote::quote(raw)
-        )),
-    }
-}
-
-/// The suite context: ends at the deadline, or on SIGINT or SIGTERM, so the waits return and the
-/// cleanups run instead of the process being killed mid-test.
-fn suite_context(timeout: Duration) -> Result<Context, String> {
-    let ctx = Context::background().with_timeout(timeout);
-    let mut interrupt =
-        signal(SignalKind::interrupt()).map_err(|error| format!("watch SIGINT: {error}"))?;
-    let mut terminate =
-        signal(SignalKind::terminate()).map_err(|error| format!("watch SIGTERM: {error}"))?;
-    let cancel = ctx.clone();
-    tokio::spawn(async move {
-        tokio::select! {
-            _ = interrupt.recv() => {}
-            _ = terminate.recv() => {}
-        }
-        cancel.cancel();
-    });
-    Ok(ctx)
 }
 
 /// A variable that must be set, named in the failure with what sets it.
@@ -350,7 +266,7 @@ async fn check_binary_identity(ctx: &Context, binary: &str) -> Result<(), String
 
 /// Everything before the first test: the variables, the identity of the binary and the image,
 /// the Docker client and the sweep. Any failure ends the run.
-async fn set_up(ctx: &Context, timeout: Duration, filter: RunFilter) -> Result<(), String> {
+async fn set_up(ctx: &Context, timeout: Duration) -> Result<(), String> {
     let binary = required(ENV_BINARY)?;
     let image = required(ENV_IMAGE)?;
     if !PathBuf::from(&binary).is_file() {
@@ -364,10 +280,9 @@ async fn set_up(ctx: &Context, timeout: Duration, filter: RunFilter) -> Result<(
         ));
     }
 
-    let env_id = generate_env_id().map_err(|error| error.to_string())?;
+    let env_id = ENV_IDS.generate().map_err(|error| error.to_string())?;
     let owner = current_owner().map_err(|error| error.to_string())?;
-    let started: Timestamp = SystemClock.now();
-    let labels = run_labels(&env_id, &owner, started);
+    let labels = LABELS.run_labels(&env_id, &owner, SystemClock.now());
     say(&format!(
         "integration run {env_id} (deadline {}); if it is killed, remove leftovers with:\n  {}",
         duration::format(i64::try_from(timeout.as_nanos()).unwrap_or(i64::MAX)),
@@ -390,9 +305,13 @@ async fn set_up(ctx: &Context, timeout: Duration, filter: RunFilter) -> Result<(
     ));
 
     let rules = default_sweep_rules(&env_id, &owner).map_err(|error| error.to_string())?;
-    let log = RedactingLogger::new(Box::new(std::io::stderr()))
-        .with_attrs(&[Attr::string("envid", env_id.clone())]);
-    sweep(&setup, &docker, &rules, &log).await;
+    let log = RedactingLogger::new(
+        Box::new(std::io::stderr()),
+        local_zone(|key| std::env::var(key).ok()),
+        Arc::new(SystemClock),
+    )
+    .with_attrs(&[Attr::string("envid", env_id.clone())]);
+    HOST_SWEEP.sweep(&setup, &docker, &rules, &log).await;
 
     install(Suite {
         docker,
@@ -400,45 +319,28 @@ async fn set_up(ctx: &Context, timeout: Duration, filter: RunFilter) -> Result<(
         image,
         env_id,
         labels,
-        filter,
         ctx: ctx.clone(),
         test_image_pull: OnceCell::new(),
     });
     Ok(())
 }
 
-async fn run_suite(filter: RunFilter, tests: &[&Test]) -> ExitCode {
-    let timeout = match suite_timeout(&std::env::var(ENV_SUITE_TIMEOUT).unwrap_or_default()) {
+async fn run_suite(runner: &Runner, filter: RunFilter, tests: &[&Test]) -> ExitCode {
+    // Read and checked before anything else, as Go's runSuite did: a bad value is a usage error.
+    let timeout = match runner.suite_timeout(|key| std::env::var(key).ok()) {
         Ok(timeout) => timeout,
-        Err(message) => {
-            say(&message);
-            return ExitCode::from(2);
-        }
+        Err(code) => return ExitCode::from(code),
     };
-    let ctx = match suite_context(timeout) {
+    let ctx = match runner.suite_context(timeout) {
         Ok(ctx) => ctx,
-        Err(message) => {
-            say(&format!("[it] {message}"));
-            return ExitCode::FAILURE;
-        }
+        Err(code) => return ExitCode::from(code),
     };
-    if let Err(message) = set_up(&ctx, timeout, filter).await {
-        say(&format!("[it] {message}"));
+    if let Err(message) = set_up(&ctx, timeout).await {
+        runner.say(&message);
         return ExitCode::FAILURE;
     }
 
-    let (mut passed, mut skipped, mut failed) = (0_usize, 0_usize, 0_usize);
-    for test in tests {
-        match run_test(test.name, &suite().ctx, test.run).await {
-            Outcome::Passed => passed += 1,
-            Outcome::Skipped => skipped += 1,
-            Outcome::Failed => failed += 1,
-        }
-    }
-    say(&format!(
-        "[it] {} selected, {passed} passed, {skipped} skipped, {failed} failed",
-        tests.len()
-    ));
+    let failed = runner.run_tests(tests, &suite().ctx, &filter).await.failed;
 
     let mut code = if failed > 0 {
         ExitCode::FAILURE
@@ -446,7 +348,7 @@ async fn run_suite(filter: RunFilter, tests: &[&Test]) -> ExitCode {
         ExitCode::SUCCESS
     };
     if let Err(message) = assert_nothing_left().await {
-        say(&format!("[it] the tests left resources behind: {message}"));
+        runner.say(&format!("the tests left resources behind: {message}"));
         code = ExitCode::FAILURE;
     }
     code
@@ -465,7 +367,7 @@ async fn assert_nothing_left() -> Result<(), String> {
             all: true,
             filters: Some(HashMap::from([(
                 "label".to_owned(),
-                vec![label_filter(env_id)],
+                vec![ENV_IDS.label_filter(env_id)],
             )])),
             ..ListContainersOptions::default()
         })),
@@ -475,10 +377,11 @@ async fn assert_nothing_left() -> Result<(), String> {
     if containers.is_empty() {
         return Ok(());
     }
-    let removed = cleanup(&teardown, &suite().docker, env_id).await;
+    let removed = HOST_SWEEP.cleanup(&teardown, &suite().docker, env_id).await;
     Err(format!(
-        "{} containers still carry {LABEL_ENV_ID}={env_id}{}",
+        "{} containers still carry {}={env_id}{}",
         containers.len(),
+        ENV_IDS.label,
         removed.err().map_or_else(String::new, |error| format!(
             "; cleanup: {error}\nClean up with:\n  {}",
             cleanup_command(env_id)

@@ -22,23 +22,19 @@
 //! can be cleaned up (or swept after a crash) without touching anything else on the host.
 //!
 //! The harness mutates Docker on purpose: it creates and removes containers and images. That is
-//! why the modules that reach a daemon sit behind the `integration` feature, as Go's sat behind
-//! its integration build tag, and why the daemon package depends on this crate in no table. The
-//! run filter, the sweep rules, the redacting logger, the image identity rule and the enforcement
-//! tests' guards and program checks need no daemon and always compile, so their tests run in a
-//! plain `cargo test`.
+//! why the module that reaches a daemon sits behind the `integration` feature, as Go's sat behind
+//! its integration build tag, and why the daemon package depends on this crate in no table. What
+//! is generic about a harness (the run filter, the envid, the sweep rules and the host sweep, the
+//! context, the testing package, the redacting logger, the identity answer and the ELF check) is
+//! rust-common's testenv-core; this crate passes it the suite's names ([`config`]). The suite's
+//! names, the image identity rule and the enforcement tests' guards and program checks need no
+//! daemon and always compile, so their tests run in a plain `cargo test`.
 
-#[cfg(feature = "integration")]
-pub mod context;
+pub mod config;
 pub mod enforce;
-#[cfg(feature = "integration")]
-pub mod envid;
-mod error;
 #[cfg(feature = "integration")]
 pub mod host;
 pub mod identity;
-pub mod redact;
-pub mod run_filter;
-pub mod sweep_rules;
 
-pub use error::Error;
+pub use config::cleanup_command;
+pub use testenv_core::Error;

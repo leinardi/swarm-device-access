@@ -25,7 +25,7 @@ use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, StartContainerOptions,
 };
 use futures_util::StreamExt as _;
-use testenv::host::{OP_TIMEOUT, remove_container, with_timeout};
+use testenv::host::{HOST_SWEEP, OP_TIMEOUT, with_timeout};
 
 use crate::testing::{Fatal, TestHandle, docker, suite};
 
@@ -144,7 +144,10 @@ pub async fn start_container(
 /// context is cancelled, so it drops that cancellation and relies on [`CLEANUP_TIMEOUT`].
 pub async fn remove_test_container(test: &TestHandle, container_id: &str) {
     let ctx = test.ctx().without_cancel().with_timeout(CLEANUP_TIMEOUT);
-    if let Err(error) = remove_container(&ctx, docker(), container_id).await {
+    if let Err(error) = HOST_SWEEP
+        .remove_container(&ctx, docker(), container_id)
+        .await
+    {
         test.log(format!(
             "remove container {}: {error}",
             short_id(container_id)

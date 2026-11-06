@@ -36,12 +36,12 @@ use bollard::models::{
 use bollard::query_parameters::{KillContainerOptions, StopContainerOptions};
 use futures_util::StreamExt as _;
 use swarm_device_access::policy::LABEL_ENABLE;
-use testenv::context::Context;
 use testenv::enforce::{
     Build, ENV_ENFORCE, ENV_REQUIRE_RELOAD, Verdict, flag_set, missing_prerequisite,
     reload_unsupported,
 };
 use testenv::host::{OP_TIMEOUT, with_timeout};
+use testenv_core::context::Context;
 use tokio::process::Command;
 use tokio::time::Instant;
 
