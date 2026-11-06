@@ -317,7 +317,7 @@ counts per-device failures.
 | `src/metrics`, `src/server.rs`, `src/server` | Prometheus metrics (`Recorder`, with a no-op form) on prometheus-client's registry and OpenMetrics text exposition (Q14); the `/metrics`, `/healthz` and `/readyz` routes as an axum router on service-kit's `http` server (5 s header-read timeout, 30 s write-stall timeout, 5 s drain; Q11) |
 | `src/systemd.rs` | D-Bus watcher for systemd's `Reloading` signal (zbus) |
 | `src/task.rs`, `src/version.rs` | Awaiting spawned work to completion; the build's version stamps (`BUILD`, service-kit's `buildinfo!`) |
-| rust-common crates | `tracing-setup`: the `tracing` subscriber (`text` or `json`, reloadable on `SIGHUP`); `go-compat`: ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts); `clock`: the one wall-clock read behind the injected `Clock` |
+| rust-common crates | `tracing-setup`: the `tracing` subscriber (`text` or `json`, reloadable on `SIGHUP`); `clock`: the one wall-clock read behind the injected `Clock` |
 
 ## Policy model
 

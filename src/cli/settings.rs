@@ -34,7 +34,6 @@ use crate::config::{self, FileSchema, LoadError, Runtime};
 use crate::policy::Global;
 use crate::server;
 use crate::task::finish;
-use go_compat::errors;
 use tracing::{error, info};
 
 /// Go's `errDryRunEnable`.
@@ -159,11 +158,15 @@ impl Settings {
             self.device_deny.clone(),
         );
         let debug = server::refuse_debug_addr(&self.debug_addr);
-        let joined = errors::join([
+        let failures: Vec<String> = [
             enums.err().map(|error| error.to_string()),
             policy.as_ref().err().map(ToString::to_string),
             debug.err().map(|error| error.to_string()),
-        ]);
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let joined = (!failures.is_empty()).then(|| failures.join("\n"));
         match (joined, policy) {
             (None, Ok(policy)) => Ok(Runtime {
                 dry_run: self.dry_run,

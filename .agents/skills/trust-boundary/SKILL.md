@@ -94,8 +94,8 @@ YAML shape against `KEYS` (`src/config/yaml.rs`, following aliases; explicit `nu
 second document, and validates the enums; any failure makes the daemon exit `1` with
 `config file error: …`. Covered by `policy::tests::global_validate`,
 `policy::tests::validate_globs_cases`, `config::tests::load_file_*` and
-`config::tests::validate_enums_cases`, and pinned against 1.x by `tests/config_golden.rs` and
-`tests/policy_golden.rs`.
+`config::tests::validate_enums_cases`, and `tests/config_loader.rs` and `policy::glob::tests`
+(1.x differences are listed in README Q17).
 
 - [ ] A new enum-like key or flag is checked in `Settings::validate` (or an equivalent load-time
       check) with a table test covering an unknown value, and parses into a type whose

@@ -90,9 +90,6 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-# Go's formatting and parsing, byte for byte (rust-common): durations, floats, quoting, time
-# layouts, the local zone, errno texts, strconv, filepath, scanner, sort.
-go-compat.workspace = true
 # The injected wall clock (rust-common): Clock, SystemClock, TokioClock, FakeClock.
 clock.workspace = true
 # The log: tracing events, written as tracing-subscriber's text lines or flat JSON through
@@ -114,12 +111,15 @@ clap = { version = "4.6.7", default-features = false, features = [
     "error-context",
     "suggestions",
 ] }
-# Zone data (TZif parsing) and civil time only: the zone is resolved and the times are formatted
-# the way Go does (go-compat), so none of jiff's tzdb or system features is on.
+# Zone data (TZif parsing) and civil time only: Docker's RFC 3339 timestamps are parsed and the
+# local zone is resolved, so none of jiff's tzdb or system features is on.
 jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 # The config file's YAML events; tag resolution, the shape checks and the strict decode are
 # ported from yaml.v3 in-tree (src/config/yaml), so no YAML value model or serde is used.
 saphyr-parser = { version = "0.3.2", default-features = false }
+# The policy globs: device-allow and device-deny patterns, matched case-sensitively with `/` never
+# matched by `*`, `?` or a class (Q17).
+glob = "0.3.3"
 # The Docker Engine client (rust-common): bollard on the unix socket, a whole-call timeout, an error
 # with a kind, the attach and wait pumps (`attach`). No `tcp` or `tls`: the socket is the only
 # endpoint. The daemon reaches it through src/docker, the launcher's writes through

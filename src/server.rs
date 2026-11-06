@@ -35,11 +35,11 @@ use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use crate::text::quote;
 use axum::Router;
 use axum::http::StatusCode;
 use axum::http::header::CONTENT_TYPE;
 use axum::routing::any;
-use go_compat::quote::quote;
 use service_kit::http::{Lifecycle, Outcome, ServerConfig};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;

@@ -24,9 +24,8 @@
 //! Engine receives the same fields, not the same bytes.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::time::Duration;
-
-use go_compat::quote::push_hex_escape;
 
 /// The name of the daemon container. One name per node is what lets the next launcher find, and
 /// replace, a daemon its predecessor left behind.
@@ -283,7 +282,7 @@ fn push_json_string(out: &mut String, text: &str) {
             '\u{8}' => out.push_str("\\b"),
             '\u{c}' => out.push_str("\\f"),
             '<' | '>' | '&' | '\u{2028}' | '\u{2029}' | '\0'..='\u{1f}' => {
-                push_hex_escape(out, 'u', u32::from(character), 4);
+                let _ = write!(out, "\\u{:04x}", u32::from(character));
             }
             _ => out.push(character),
         }

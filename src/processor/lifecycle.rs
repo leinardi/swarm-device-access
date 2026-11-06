@@ -24,7 +24,6 @@ use jiff::Timestamp;
 
 use crate::cgroup::{CgroupVersion, Identity};
 use clock::Clock;
-use go_compat::time_layout::{go_zero_time, parse_rfc3339_nano};
 
 /// How much is known about one run of a container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +92,7 @@ impl LifecycleRecord {
         if self.started_at.is_empty() {
             return None;
         }
-        parse_rfc3339_nano(&self.started_at)
+        self.started_at.parse().ok()
     }
 }
 
@@ -194,7 +193,7 @@ impl Lifecycles {
                     cgroup: Some(cgroup),
                     state: LifecycleState::Verified,
                     first_seen: now,
-                    observed: go_zero_time(),
+                    observed: Timestamp::MIN,
                     revoked: false,
                 },
             );

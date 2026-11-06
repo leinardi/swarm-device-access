@@ -185,7 +185,7 @@ fn proc_cgroup_errors_read_as_go() {
     assert_eq!(
         parse_proc_cgroup(long.as_bytes(), mountinfo("/").as_bytes())
             .map_err(|error| error.to_string()),
-        Err(r#"read "cgroup": bufio.Scanner: token too long"#.to_owned())
+        Err(r#"read "cgroup": line longer than 65536 bytes"#.to_owned())
     );
 }
 

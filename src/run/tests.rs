@@ -94,8 +94,8 @@ fn startup_settings_errors_read_as_go_s() {
     };
     assert_eq!(
         check(&["--config=/nonexistent"]),
-        "config file error: read config file \"/nonexistent\": open /nonexistent: no such file or \
-         directory"
+        "config file error: read config file \"/nonexistent\": open /nonexistent: No such file or \
+         directory (os error 2)"
     );
     assert_eq!(
         check(&["--log-level=loud"]),

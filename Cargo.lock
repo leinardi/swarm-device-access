@@ -460,6 +460,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
 name = "go-compat"
 version = "0.3.0"
 source = "git+https://github.com/leinardi/rust-common?rev=2a7e90b9d973340c075dd32cff77d8344adda798#2a7e90b9d973340c075dd32cff77d8344adda798"
@@ -1297,7 +1303,7 @@ dependencies = [
  "clock",
  "docker-client",
  "futures-core",
- "go-compat",
+ "glob",
  "http-body-util",
  "hyper",
  "hyper-util",

@@ -43,7 +43,7 @@ use super::api::DeviceRule;
 use super::asm::{
     AND, HALF, Instruction, JNE, MOV, R0, R1, R2, R3, R4, R5, R6, RSH, WORD, low_i32,
 };
-use go_compat::quote::quote;
+use crate::text::quote;
 
 /// `BPF_DEVCG_DEV_BLOCK`.
 pub(super) const DEV_BLOCK: i32 = 1;

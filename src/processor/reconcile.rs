@@ -57,8 +57,8 @@ use crate::logging;
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global, unknown_labels};
 use crate::task::finish;
+use crate::text::quote;
 use clock::Clock;
-use go_compat::quote::quote;
 use tracing::{debug, error, info, warn};
 
 /// How long a provisional record without a cgroup is kept before the sweep drops it: it names no

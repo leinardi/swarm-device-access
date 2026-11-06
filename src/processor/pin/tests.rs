@@ -26,8 +26,8 @@ use crate::test_support::TempDir;
 #[test]
 fn pin_refuses_a_pid_that_is_not_a_process() {
     for (pid, want) in [
-        (-1, "pidfd_open(-1): invalid argument"),
-        (0, "pidfd_open(0): invalid argument"),
+        (-1, "pidfd_open(-1): Invalid argument (os error 22)"),
+        (0, "pidfd_open(0): Invalid argument (os error 22)"),
     ] {
         let error = PidfdPinner.pin(pid).err().unwrap();
         assert_eq!(error.to_string(), want);
@@ -46,7 +46,7 @@ fn pinned_process_is_alive_until_it_exits() {
     assert_eq!(error, PinError::Gone(Errno::SRCH));
     assert_eq!(
         error.to_string(),
-        "pinned container process exited: no such process"
+        "pinned container process exited: No such process (os error 3)"
     );
 }
 
@@ -56,7 +56,7 @@ fn read_proc_cgroup_of_this_process() {
     assert!(!resolved.mount_point.is_empty(), "{resolved:?}");
 }
 
-/// A fake `<root>/proc/<pid>` holding `files`; a name ending in `/` is a directory.
+/// A fake `<root>/proc/<pid>` holding `files`; a name ending in `/` Is a directory (os error 21).
 fn fake_proc(pid: u32, files: &[(&str, &str)]) -> TempDir {
     let root = TempDir::new("sda-test");
     let dir = root.path().join(format!("proc/{pid}"));
@@ -77,7 +77,7 @@ fn read_proc_cgroup_error_texts() {
     let missing_root = missing.path().to_str().unwrap().to_owned();
     assert_eq!(
         read_proc_cgroup(&missing_root, 1).unwrap_err().to_string(),
-        format!("open \"{missing_root}/proc/1\": no such file or directory")
+        format!("open \"{missing_root}/proc/1\": No such file or directory (os error 2)")
     );
 
     let no_mountinfo = fake_proc(77, &[("cgroup", "0::/x\n")]);
@@ -85,7 +85,7 @@ fn read_proc_cgroup_error_texts() {
         read_proc_cgroup(no_mountinfo.path().to_str().unwrap(), 77)
             .unwrap_err()
             .to_string(),
-        "open mountinfo: no such file or directory"
+        "open mountinfo: No such file or directory (os error 2)"
     );
 
     let malformed = fake_proc(78, &[("cgroup", "garbage\n"), ("mountinfo", "")]);
@@ -101,6 +101,6 @@ fn read_proc_cgroup_error_texts() {
         read_proc_cgroup(unreadable.path().to_str().unwrap(), 79)
             .unwrap_err()
             .to_string(),
-        "read cgroup: read cgroup: is a directory"
+        "read cgroup: read cgroup: Is a directory (os error 21)"
     );
 }

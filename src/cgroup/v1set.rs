@@ -36,9 +36,7 @@ use super::api::DeviceRule;
 use super::error::{Error, FileError, ListEntryCause};
 use super::handle::CgroupHandle;
 use super::v1::CgroupV1;
-use go_compat::parse_int::parse_int;
-use go_compat::scanner;
-use go_compat::strings::{fields, trim_space};
+use crate::text;
 
 /// The access bits of a cgroup v1 device exception.
 pub(super) const ACC_READ: u8 = 1;
@@ -123,18 +121,20 @@ fn parse_num(field: &str) -> Result<i64, ListEntryCause> {
     if field == "*" {
         return Ok(WILDCARD);
     }
-    parse_int(field, 10).map_err(|source| ListEntryCause::Number {
-        field: field.to_owned(),
-        source,
-    })
+    field
+        .parse::<i64>()
+        .map_err(|source| ListEntryCause::Number {
+            field: field.to_owned(),
+            source,
+        })
 }
 
 /// Parses `devices.list` (`c 1:3 rwm`, `b 8:* r`, `a *:* rwm`).
 pub(super) fn parse_devices_list(data: &[u8]) -> Result<Vec<ListEntry>, Error> {
     let mut entries = Vec::new();
-    for line in scanner::lines(data) {
-        let text = String::from_utf8_lossy(line.map_err(Error::ReadList)?);
-        let line = trim_space(&text);
+    for line in text::lines(data) {
+        let decoded = String::from_utf8_lossy(line.map_err(Error::ReadList)?);
+        let line = decoded.trim();
         if line.is_empty() {
             continue;
         }
@@ -142,7 +142,7 @@ pub(super) fn parse_devices_list(data: &[u8]) -> Result<Vec<ListEntry>, Error> {
             line: line.to_owned(),
             cause,
         };
-        let parts = fields(line);
+        let parts: Vec<&str> = line.split_whitespace().collect();
         let [kind, numbers, access] = parts.as_slice() else {
             return Err(malformed(None));
         };

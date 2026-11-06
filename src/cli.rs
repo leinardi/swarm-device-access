@@ -40,8 +40,8 @@ use clap::{ArgAction, CommandFactory as _, FromArgMatches as _, Parser};
 
 use crate::config;
 use crate::launcher::spec::DEFAULT_HOST_DOCKER_SOCKET;
-use go_compat::parse_bool::parse_bool;
-use go_compat::{filepath, quote};
+use crate::lexpath as filepath;
+use crate::text as quote;
 
 /// The first argument that selects the launcher, Go's `launchCommand`.
 pub const LAUNCH_COMMAND: &str = "launch";
@@ -93,7 +93,7 @@ pub struct Args {
         require_equals = true,
         default_value = "false",
         default_missing_value = "true",
-        value_parser = parse_bool,
+        value_parser = clap::value_parser!(bool),
         value_name = "BOOL",
         hide_default_value = true,
         help = "Include timestamp in logs"
@@ -116,7 +116,7 @@ pub struct Args {
         require_equals = true,
         default_value = "false",
         default_missing_value = "true",
-        value_parser = parse_bool,
+        value_parser = clap::value_parser!(bool),
         value_name = "BOOL",
         hide_default_value = true,
         help = "Log device rules that would be applied without writing to the cgroup"
@@ -253,7 +253,7 @@ pub struct LaunchArgs {
         require_equals = true,
         default_value = "false",
         default_missing_value = "true",
-        value_parser = parse_bool,
+        value_parser = clap::value_parser!(bool),
         value_name = "BOOL",
         hide_default_value = true,
         help = "Bind the host's systemd DBus socket into the daemon, enabling daemon-reload \
@@ -279,7 +279,7 @@ pub struct LaunchArgs {
         require_equals = true,
         default_value = "false",
         default_missing_value = "true",
-        value_parser = parse_bool,
+        value_parser = clap::value_parser!(bool),
         value_name = "BOOL",
         hide_default_value = true,
         help = "Run the daemon in the host network (needed for --metrics-addr); default is no \

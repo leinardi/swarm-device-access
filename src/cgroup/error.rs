@@ -24,11 +24,8 @@ use std::io;
 use super::asm::DecodeError;
 use super::owned::{CanonicalError, EmitError, GateError, NonceError, OwnedError};
 use super::v2ops::{OpsError, describe_attach_flags};
-use go_compat::errno::io_error_text;
-use go_compat::errors;
-use go_compat::parse_int::NumError;
-use go_compat::quote::{quote, quote_rune};
-use go_compat::scanner::TokenTooLong;
+use crate::text::{LineTooLong, io_error_text, quote};
+use std::num::ParseIntError;
 
 /// Why `set_device_rules` failed.
 #[derive(Debug)]
@@ -44,8 +41,8 @@ pub enum Error {
         line: String,
         cause: Option<ListEntryCause>,
     },
-    /// `devices.list` has a line too long for Go's scanner.
-    ReadList(TokenTooLong),
+    /// `devices.list` has a line that is too long.
+    ReadList(LineTooLong),
     /// A `devices.*` file could not be opened, read or written.
     File(FileError),
     /// The revocation of one owned bit failed; nothing was granted.
@@ -213,7 +210,11 @@ impl fmt::Display for Error {
                 "cgroup v1 set needs a c or b rule with concrete major and minor: {rule}"
             ),
             Self::UnknownAccess(access) => {
-                write!(formatter, "unknown device access {}", quote_rune(*access))
+                write!(
+                    formatter,
+                    "unknown device access {}",
+                    format_args!("{access:?}")
+                )
             }
             Self::ListEntry { line, cause } => {
                 write!(formatter, "malformed devices.list entry: {}", quote(line))?;
@@ -233,8 +234,11 @@ impl fmt::Display for Error {
                 mismatched.join(", ")
             ),
             Self::Joined(errors) => formatter.write_str(
-                &errors::join(errors.iter().map(|error| Some(error.to_string())))
-                    .unwrap_or_default(),
+                &errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
             ),
             Self::Query(source) => write!(
                 formatter,
@@ -330,7 +334,10 @@ impl std::error::Error for Error {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListEntryCause {
     /// `device number "<field>": <strconv.ParseInt error>`.
-    Number { field: String, source: NumError },
+    Number {
+        field: String,
+        source: ParseIntError,
+    },
     /// `unknown device access '<letter>'`.
     Access(char),
 }
@@ -342,7 +349,11 @@ impl fmt::Display for ListEntryCause {
                 write!(formatter, "device number {}: {source}", quote(field))
             }
             Self::Access(access) => {
-                write!(formatter, "unknown device access {}", quote_rune(*access))
+                write!(
+                    formatter,
+                    "unknown device access {}",
+                    format_args!("{access:?}")
+                )
             }
         }
     }

@@ -122,7 +122,7 @@ fn load_file_unreadable_path() {
     assert_eq!(
         error,
         format!(
-            "read config file {}: open {missing}: no such file or directory",
+            "read config file {}: open {missing}: No such file or directory (os error 2)",
             quote(missing)
         )
     );
@@ -131,7 +131,7 @@ fn load_file_unreadable_path() {
     assert_eq!(
         error,
         format!(
-            "read config file {}: read {directory_path}: is a directory",
+            "read config file {}: read {directory_path}: Is a directory (os error 21)",
             quote(directory_path)
         )
     );

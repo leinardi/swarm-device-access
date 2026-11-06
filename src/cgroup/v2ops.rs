@@ -34,8 +34,7 @@ use rustix::io::Errno;
 use super::asm::{DecodeError, EncodeCause, Instruction};
 use super::bpf_sys;
 use super::owned::ProgMeta;
-use go_compat::errno::errno_string;
-use go_compat::quote::is_space;
+use crate::text::errno_string;
 use tracing::debug;
 
 /// `BPF_F_ALLOW_OVERRIDE`.
@@ -742,7 +741,8 @@ pub fn kernel_at_least(release: &str, want_major: i64, want_minor: i64) -> bool 
 /// Go's `%d` verb: leading spaces, an optional sign, then at least one ASCII digit, as a 64-bit
 /// integer.
 fn scan_decimal(input: &str) -> Option<(i64, &str)> {
-    let start = input.trim_start_matches(|character| character != '\n' && is_space(character));
+    let start =
+        input.trim_start_matches(|character: char| character != '\n' && character.is_whitespace());
     let unsigned = start.strip_prefix(['+', '-']).unwrap_or(start);
     let digits = unsigned
         .find(|character: char| !character.is_ascii_digit())

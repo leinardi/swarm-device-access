@@ -1652,7 +1652,7 @@ async fn error_texts() {
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
         "set device rules: open cgroup \"/nonexistent-host/sys/fs/cgroup/docker/testcontainer\": \
-         no such file or directory"
+         No such file or directory (os error 2)"
     );
 
     let mut options = Options::new("all", false);
@@ -1660,7 +1660,7 @@ async fn error_texts() {
     let env = Env::with(options);
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
-        "container \"abc\": open \"/nonexistent-proc/proc/80\": no such file or directory"
+        "container \"abc\": open \"/nonexistent-proc/proc/80\": No such file or directory (os error 2)"
     );
 
     let mut options = Options::new("all", false);
@@ -1669,7 +1669,7 @@ async fn error_texts() {
     let env = Env::with(options);
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
-        "container \"abc\": pidfd_open(-1): invalid argument"
+        "container \"abc\": pidfd_open(-1): Invalid argument (os error 22)"
     );
 
     let env = Env::new("all", false);
@@ -1681,7 +1681,7 @@ async fn error_texts() {
     assert_eq!(
         env.reconcile().await.unwrap_err().to_string(),
         "container \"abc\" (reason incomplete_device_set, retryable): device identity could not \
-         be established: mount source /dev/ttyUSB-gone: no such file or directory"
+         be established: mount source /dev/ttyUSB-gone: No such file or directory (os error 2)"
     );
     assert!(
         env.log().contains(
@@ -1858,7 +1858,7 @@ fn compute_desired_empties_the_set_when_dev_cannot_be_opened() {
     assert_eq!(
         incomplete,
         "container \"abc\" (reason incomplete_device_set, retryable): device identity could not \
-         be established: open /dev: function not implemented"
+         be established: open /dev: Function not implemented (os error 38)"
     );
 }
 

@@ -118,23 +118,14 @@ fn values_and_positionals() {
 /// Bools take `=value` with every `strconv.ParseBool` spelling, and nothing after a space; the
 /// last value wins.
 #[test]
-fn bools_are_go_parse_bool() {
-    for (value, want) in [
-        ("1", true),
-        ("t", true),
-        ("T", true),
-        ("TRUE", true),
-        ("true", true),
-        ("True", true),
-        ("0", false),
-        ("f", false),
-        ("F", false),
-        ("FALSE", false),
-        ("false", false),
-        ("False", false),
-    ] {
+fn bools_are_true_or_false_only() {
+    for (value, want) in [("true", true), ("false", false)] {
         let parsed = parse_args(&[&format!("--dry-run={value}")]).unwrap();
         assert_eq!(parsed.args.dry_run, want, "{value}");
+    }
+    for refused in ["1", "0", "t", "f", "T", "TRUE", "True", "False", "FALSE"] {
+        let exit = parse_args(&[&format!("--dry-run={refused}")]).unwrap_err();
+        assert_eq!(exit.code, 2, "{refused}");
     }
     assert!(parse_args(&["--dry-run"]).unwrap().args.dry_run);
     assert!(
@@ -145,11 +136,7 @@ fn bools_are_go_parse_bool() {
     );
     let exit = parse_args(&["--dry-run=yes"]).unwrap_err();
     assert_eq!(exit.code, 2);
-    assert!(
-        exit.message
-            .contains("strconv.ParseBool: parsing \"yes\": invalid syntax"),
-        "{exit:?}"
-    );
+    assert!(exit.message.contains("invalid value 'yes'"), "{exit:?}");
     assert_eq!(parse_args(&["--dry-run", "false"]).unwrap_err().code, 2);
 }
 

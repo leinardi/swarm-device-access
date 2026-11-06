@@ -650,8 +650,8 @@ async fn dial_failures_read_as_go() {
     let refusing = dir.path().join("plainfile");
     std::fs::write(&refusing, b"").unwrap();
     for (path, cause) in [
-        (missing, "no such file or directory"),
-        (refusing, "connection refused"),
+        (missing, "No such file or directory (os error 2)"),
+        (refusing, "Connection refused (os error 111)"),
     ] {
         let path = path.to_str().unwrap();
         let error = open_at(&format!("unix:path={path}")).await.unwrap_err();

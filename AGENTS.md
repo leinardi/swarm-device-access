@@ -179,12 +179,13 @@ the rust-common crates)**
   `ProcessCollector`), exposed as OpenMetrics text, and the `/metrics`, `/healthz` and `/readyz`
   routes as an axum router on service-kit's `http` server (a 5 s header-read timeout, a 30 s
   write-stall timeout and a 5 s drain). There is no pprof server (Q2).
-- go-compat — the Go standard library's formatting and parsing the 1.x log, error and flag text
-  depends on; clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`.
+- clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`. Settings, labels,
+  policy globs and `/proc` lines are read with std and the `glob` crate (`policy::glob`, `text`,
+  `lexpath`); the daemon does not depend on go-compat (Q17).
 
 ## Shared crates (rust-common)
 
-`go-compat`, `clock`, `docker-client`,
+`clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` (with `redact-go-slog` until the testenv is ported)
 and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
@@ -285,7 +286,7 @@ in the same commit, when a reused component changes or an upstream fix is taken.
 - **Reuse before writing.** Check the workspace, the rust-common crates and the reuse ledger in
   [`docs/rust-port.md`](docs/rust-port.md) for an existing helper or component (the `LogHandle`,
   `processor::rules::is_mount_source`, the injected `Clock`, the backoff constants, the `Recorder`
-  and its no-op form, go-compat, `test_support`) before adding one. A helper every project would
+  and its no-op form, `lexpath`, `text`, `test_support`) before adding one. A helper every project would
   want goes to rust-common, not here.
 - **Fail closed.** An empty, unknown or malformed mode, config value or label denies or skips — it
   never falls back to wider device access.

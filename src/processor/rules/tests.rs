@@ -308,14 +308,14 @@ fn device_error_texts() {
         texts(&collect_from(&dev, &all(), &["/dev/sda"])),
         [
             "device identity could not be established: /dev/sda (resolved /dev/sda, b 8:0): read \
-             uevent b 8:0: no such file or directory"
+             uevent b 8:0: No such file or directory (os error 2)"
         ]
     );
     assert_eq!(
         texts(&collect_from(&dev, &all(), &["/dev/ttyUSB0"])),
         [
-            "device identity could not be established: mount source /dev/ttyUSB0: no such file \
-             or directory"
+            "device identity could not be established: mount source /dev/ttyUSB0: No such file \
+             or directory (os error 2)"
         ]
     );
     dev.other("regular", NodeKind::Other, "/dev/regular");
@@ -329,7 +329,7 @@ fn device_error_texts() {
         .insert("dri/by-path".to_owned(), SysError::new("", Errno::ACCESS));
     assert_eq!(
         texts(&collect_from(&dev, &all(), &["/dev/dri"])),
-        ["device mount enumeration incomplete: /dev/dri/by-path: permission denied"]
+        ["device mount enumeration incomplete: /dev/dri/by-path: Permission denied (os error 13)"]
     );
     dev.directory("big");
     for index in 0..=MAX_MOUNT_ENTRIES {

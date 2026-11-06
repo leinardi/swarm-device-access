@@ -77,19 +77,19 @@ fn real_dev_fs_error_texts() {
     let gone = gone.to_str().unwrap();
     assert_eq!(
         RealDevFs::open(gone, "/sys").unwrap_err().to_string(),
-        format!("open {gone}: no such file or directory")
+        format!("open {gone}: No such file or directory (os error 2)")
     );
 
     let root = TempDir::new("sda-test");
     let dev = RealDevFs::open(root.path().to_str().unwrap(), gone).unwrap();
     assert_eq!(
         dev.open_beneath("nope").err().unwrap().to_string(),
-        "openat2 nope: no such file or directory"
+        "openat2 nope: No such file or directory (os error 2)"
     );
     std::fs::write(root.path().join("file"), b"").unwrap();
     assert_eq!(
         dev.read_link("file").unwrap_err().to_string(),
-        "readlink file: no such file or directory"
+        "readlink file: No such file or directory (os error 2)"
     );
     let uevent = format!("{gone}/dev/char/1:3/uevent");
     assert_eq!(
@@ -100,7 +100,7 @@ fn real_dev_fs_error_texts() {
         })
         .unwrap_err()
         .to_string(),
-        format!("read {uevent}: open {uevent}: no such file or directory")
+        format!("read {uevent}: open {uevent}: No such file or directory (os error 2)")
     );
 }
 
@@ -177,7 +177,9 @@ fn walk_dir_visits_in_lexical_order() {
         errors,
         [(
             gone.clone(),
-            Some(format!("lstat {gone}: no such file or directory"))
+            Some(format!(
+                "lstat {gone}: No such file or directory (os error 2)"
+            ))
         )]
     );
 }
@@ -220,10 +222,10 @@ fn device_id_and_sys_error_texts() {
     assert_eq!(sda.to_string(), "b 8:0");
     assert_eq!(
         SysError::new("openat2 sda", Errno::XDEV).to_string(),
-        "openat2 sda: invalid cross-device link"
+        "openat2 sda: Invalid cross-device link (os error 18)"
     );
     assert_eq!(
         SysError::new("", Errno::INVAL).to_string(),
-        "invalid argument"
+        "Invalid argument (os error 22)"
     );
 }

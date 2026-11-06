@@ -39,7 +39,7 @@ use tokio_util::sync::CancellationToken;
 use zbus::message::Type;
 use zbus::{Connection, DBusError, MatchRule, Message, MessageStream, Structure, Variant};
 
-use go_compat::errno::io_error_text;
+use crate::text::io_error_text;
 use tracing::{debug, info, warn};
 
 const SYSTEMD_BUS_NAME: &str = "org.freedesktop.systemd1";
