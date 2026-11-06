@@ -17,7 +17,8 @@
 //! End-to-end parity of the binary with the Go 1.x release (`v1.0.3`): the command line's exit
 //! codes and texts, and one daemon run on a scripted Engine (startup, a `SIGHUP` reload that
 //! applies, one that is rejected, a scrape and a `SIGTERM`), compared by the requests it sent
-//! the Engine; its scrape is checked for what the run recorded, as OpenMetrics text. The log lines are not compared: the daemon
+//! the Engine (by what they read, since the client is no longer moby's, Q16); its scrape is
+//! checked for what the run recorded, as OpenMetrics text. The log lines are not compared: the daemon
 //! logs through `tracing`, so their format is no longer Go's (the run only waits for the
 //! events it logs).
 //!
@@ -599,9 +600,6 @@ const MEMLOCK_ERRORS: [&str; 4] = [
     "restoring old memlock rlimit: ",
 ];
 
-/// The requests Go sends in a fixed order: the pings, the subscription and the first list.
-const ORDERED_REQUESTS: usize = 4;
-
 /// The scenario, run by `binary` (`go` for Go's single-dash flags).
 fn run_daemon(binary: &str, go: bool) -> Run {
     let dir = temp_dir();
@@ -690,10 +688,25 @@ fn run_daemon(binary: &str, go: bool) -> Run {
     }
 }
 
-fn sorted(lines: &[String]) -> Vec<String> {
-    let mut sorted = lines.to_vec();
-    sorted.sort();
-    sorted
+/// The requests as what they read, sorted: each path without its API version prefix and query,
+/// the pings and the version negotiation left out.
+fn semantic(lines: &[String]) -> Vec<String> {
+    let mut reads: Vec<String> = lines
+        .iter()
+        .filter_map(|line| {
+            let uri = line.split(' ').nth(1)?;
+            let path = uri.split('?').next()?;
+            let path = match path.strip_prefix("/v") {
+                Some(rest) if rest.starts_with(|first: char| first.is_ascii_digit()) => {
+                    rest.find('/').map_or(path, |slash| &rest[slash..])
+                }
+                _ => path,
+            };
+            (!matches!(path, "/_ping" | "/version")).then(|| format!("GET {path}"))
+        })
+        .collect();
+    reads.sort();
+    reads
 }
 
 fn read_lines(name: &str) -> Vec<String> {
@@ -718,16 +731,40 @@ fn a_daemon_run_matches_go_s() {
             "{line}"
         );
     }
+    // The Docker client is no longer moby's (Q16): the requests are Go's as to what the daemon
+    // asks the Engine (the same reads of the same containers, the same number of times), not
+    // as to their bytes, so the two runs are compared by method-less path with the pings and the
+    // version negotiation, which belong to each client, left out; and the Rust run's own start
+    // is pinned: the version, one ping, then the subscription.
     let go_requests = read_lines("go-requests.txt");
     assert_eq!(
-        rust.requests.get(..ORDERED_REQUESTS),
-        go_requests.get(..ORDERED_REQUESTS),
-        "the Engine requests' order"
+        semantic(&rust.requests),
+        semantic(&go_requests),
+        "the Engine reads"
     );
     assert_eq!(
-        sorted(&rust.requests),
-        sorted(&go_requests),
-        "the Engine requests"
+        rust.requests.get(..2),
+        Some(
+            &[
+                "GET /version ua=swarm-device-access".to_owned(),
+                "GET /_ping ua=swarm-device-access".to_owned()
+            ][..]
+        ),
+        "the Engine requests' order"
+    );
+    assert!(
+        rust.requests
+            .get(2)
+            .is_some_and(|request| request.starts_with("GET /events?")),
+        "{:?}",
+        rust.requests
+    );
+    assert!(
+        rust.requests
+            .iter()
+            .all(|request| request.ends_with(" ua=swarm-device-access")),
+        "{:?}",
+        rust.requests
     );
     // The scrape is OpenMetrics text, no longer Go's: the semantic tests of the recorder
     // (`src/metrics/recorder/tests.rs`) check the families; here the daemon's own run shows up.

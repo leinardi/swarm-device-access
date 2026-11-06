@@ -42,7 +42,7 @@ use crate::cli::settings::{self, Reloader, Settings};
 use crate::cli::{self, LAUNCH_COMMAND};
 use crate::config::{self, Runtime};
 use crate::daemon::{self, DOCKER_CALL_TIMEOUT, Readiness};
-use crate::docker::{self, CallContext, Client};
+use crate::docker::{CallContext, Client};
 use crate::launcher::{self, spec};
 use crate::logging;
 use crate::metrics::Recorder;
@@ -159,8 +159,12 @@ where
     let (root, signalled) = watch_shutdown(shutdown);
 
     // API version negotiation runs lazily, on the first request, as moby's does.
-    let docker = match docker::Settings::unix(&effective.docker_socket) {
-        Ok(settings) => Arc::new(Client::new(settings)),
+    let docker = match Client::unix(
+        &effective.docker_socket,
+        DOCKER_CALL_TIMEOUT,
+        DOCKER_CALL_TIMEOUT,
+    ) {
+        Ok(client) => Arc::new(client),
         Err(error) => {
             error!(error = %error, "docker client init failed");
             return Exit::early(1);
@@ -325,8 +329,13 @@ where
     );
     info!(component = %LAUNCHER_COMPONENT, version = BUILD.version, commit = BUILD.commit, date = BUILD.date, daemon_args = ?&launch.daemon_args, "swarm-device-access launcher starting");
     let (context, _) = watch_shutdown(shutdown);
-    let client = match docker::Settings::unix(spec::CONTAINER_DOCKER_SOCKET) {
-        Ok(settings) => Client::new(settings),
+    // The headers of a stop come once the daemon stopped: up to the stop timeout, and a call.
+    let client = match Client::unix(
+        spec::CONTAINER_DOCKER_SOCKET,
+        DOCKER_CALL_TIMEOUT,
+        spec::STOP_TIMEOUT + DOCKER_CALL_TIMEOUT,
+    ) {
+        Ok(client) => client,
         Err(error) => {
             error!(component = %LAUNCHER_COMPONENT, error = %error, "docker client init failed");
             return Exit::early(1);

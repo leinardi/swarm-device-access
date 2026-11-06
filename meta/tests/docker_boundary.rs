@@ -18,29 +18,30 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! The daemon's Docker client is read-only (`docs/rust-port.md`, the Docker transport): it is
-//! rust-common's `docker-engine`, reached through `src/docker` alone, and the daemon's trait has
-//! the ping, list, inspect and events calls only. This pins it on the manifests and on the text of
-//! the non-test sources under `src/`:
+//! rust-common's `docker-client` on bollard, reached through `src/docker` alone, and the daemon's
+//! trait has the ping, list, inspect and events calls only. This pins it on the manifests and on
+//! the text of the non-test sources under `src/`:
 //!
-//! - `docker-engine` is the sanctioned client: only the root package declares it, once in
-//!   `[dependencies]` with `write` and `attach` at most (the launcher's calls) and in
+//! - `docker-client` is the sanctioned client: only the root package declares it, once in
+//!   `[dependencies]` with `attach` at most (the launcher's output and wait pumps) and in
 //!   `[dev-dependencies]` with `test-util` besides; never `tcp` or `tls`, so the client dials the
 //!   configured unix socket only and reads no `DOCKER_*` variable;
-//! - only `src/docker` names the crate, and there no request is built, no method named or set and
-//!   no write (`exchange`, `exchange_upgrade`) called: `DockerApi` is built on the client's
-//!   `GET`s and its ping;
-//! - `DockerApi` declares exactly `ping`, `container_list`, `container_inspect` and `events`, and
-//!   asks only for the daemon's paths: `/_ping`, `/containers/json`, `/containers/{id}/json` and
-//!   `/events`;
+//! - only `src/docker` names the crate, and there no bollard write is called (`create_container`,
+//!   `start_container`, `attach_container`, `wait_container` and the rest of the verbs) nor
+//!   docker-client's `attach::attach` and `attach::wait`: `DockerApi` is built on four calls of
+//!   the client, `ping`, `list_containers`, `inspect_container` and `events`, and no other call
+//!   is made on it;
+//! - `DockerApi` declares exactly `ping`, `container_list`, `container_inspect` and `events`;
 //! - nothing under `src/docker` reads an environment variable or dials TCP, and nothing under
-//!   `src/` builds the client from the environment (`Settings::from_env`);
-//! - nothing under `src/` names bollard, `testenv`, the harness that creates and removes
-//!   containers on purpose, or `testenv_core`, its shared half, whose `bollard` feature brings the
-//!   SDK; and the root package declares none of them in any dependency table.
+//!   `src/` builds the client from the environment (`Config::from_env`);
+//! - bollard is named in `src/docker` (which re-exports its models) and in the launcher's engine
+//!   (`src/launcher/engine.rs` and its tests) alone, and nothing under `src/` names `testenv`,
+//!   the harness that creates and removes containers on purpose, or `testenv_core`, its shared
+//!   half, whose `bollard` feature brings the SDK; the root package declares none of bollard,
+//!   `testenv` and `testenv_core` in any dependency table (bollard comes with docker-client).
 //!
-//! The launcher's write calls take docker-engine's client through `Client::transport` and set
-//! their method outside `src/docker`, in the launcher's engine; who may do that is pinned by
-//! `launcher_boundary.rs`.
+//! The launcher's write calls take bollard's client through `Client::transport` outside
+//! `src/docker`, in the launcher's engine; who may do that is pinned by `launcher_boundary.rs`.
 //!
 //! The checks are functions of the text, and each is also run on input built to break it.
 
@@ -53,19 +54,15 @@ use toml::{Table, Value};
 const API: &str = "src/docker/api.rs";
 /// The trait's calls, in declaration order.
 const CALLS: &[&str] = &["ping", "container_list", "container_inspect", "events"];
-/// The paths the daemon reads, `{id}` standing for the container.
-const PATHS: &[&str] = &[
-    "/_ping",
-    "/containers/json",
-    "/containers/{id}/json",
-    "/events",
-];
+/// The only calls `src/docker` makes on the client (`docker.<call>(`), which are the engine's
+/// `GET /_ping`, `GET /containers/json`, `GET /containers/{id}/json` and `GET /events`.
+const READS: &[&str] = &["ping", "list_containers", "inspect_container", "events"];
 /// The sanctioned Docker client.
-const CLIENT: &str = "docker-engine";
-/// What the root package may enable: in its `[dependencies]` (the launcher's writes and attach),
-/// and in its `[dev-dependencies]`.
-const CLIENT_FEATURES: &[&str] = &["write", "attach"];
-const CLIENT_TEST_FEATURES: &[&str] = &["write", "attach", "test-util"];
+const CLIENT: &str = "docker-client";
+/// What the root package may enable: in its `[dependencies]` (the launcher's output and wait
+/// pumps), and in its `[dev-dependencies]`.
+const CLIENT_FEATURES: &[&str] = &["attach"];
+const CLIENT_TEST_FEATURES: &[&str] = &["attach", "test-util"];
 const DEPENDENCY_TABLES: &[&str] = &["dependencies", "dev-dependencies", "build-dependencies"];
 
 fn pattern(text: &str) -> Regex {
@@ -289,7 +286,7 @@ fn harness_dependency_problems(manifest: &str) -> Vec<String> {
 }
 
 /// The client crate, by its Rust name.
-static ENGINE_CRATE: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bdocker_engine\b"));
+static ENGINE_CRATE: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bdocker_client\b"));
 /// A request being built: a `Request` constructor or the `request::Builder` type.
 static REQUEST_BUILT: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"\bRequest\s*::\s*\w+|\brequest\s*::\s*Builder\b"));
@@ -300,56 +297,48 @@ static METHOD: LazyLock<Regex> = LazyLock::new(|| {
         r"\bMethod\s*::\s*\w+|\bmethod_mut\s*\(|\.method\s*\(\s*[^)\s]|\.method\s*=[^=]|\bMethod\s+as\b|\x22(?:GET|HEAD|POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE)\x22",
     )
 });
-/// A write call of docker-engine's client.
-static WRITE_CALL: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bexchange(?:_upgrade)?\s*\("));
+/// A write call: one of bollard's verbs (`create_container`, `start_exec`, `remove_image`, ...)
+/// on anything, or docker-client's attach and wait pumps.
+static WRITE_CALL: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(
+        r"\.\s*(?:create|start|stop|restart|kill|pause|unpause|remove|rename|update|prune|attach|wait|resize|upload|commit|exec|build|push|pull|tag|import|connect|disconnect|join|leave|init|delete)_(?:containers?|exec|images?|networks?|volumes?|services?|swarm|nodes?|secrets?|configs?|plugins?|tasks?)\s*\(|\battach\s*::\s*(?:attach|wait)\b",
+    )
+});
 /// An environment read or a TCP dial: anything but the configured unix socket.
 static ENV_OR_TCP: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"\benv\s*::\s*var|\bTcpStream\b|DOCKER_"));
 /// The client built from the environment (`DOCKER_HOST` and the rest).
 static FROM_ENV: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bfrom_env\b"));
-/// A request path: a client call's path argument.
-static REQUEST_PATH: LazyLock<Regex> = LazyLock::new(|| {
-    pattern(r#"\b(?:get_list|get_object|get_body|get)\(\s*(?:&format!\(\s*)?"(/[^"]*)""#)
-});
-/// The client's `events` and `ping`, whose paths (`/events`, `/_ping`) are the crate's.
-static FIXED_PATH_CALL: LazyLock<Regex> = LazyLock::new(|| pattern(r"\.\s*(events|ping)\s*\("));
+/// A call on the client the daemon holds, which is always called `docker` in `src/docker`.
+static CLIENT_CALL: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bdocker\s*\.\s*(\w+)\s*\("));
 /// The `DockerApi` trait's block, up to its closing brace.
 static DOCKER_API_TRAIT: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"(?s)pub trait DockerApi\b.*?\n\}"));
 
-/// The path rule: only the daemon's paths, and the pattern still sees each of them.
-fn path_problems(files: &[(String, String)]) -> Vec<String> {
+/// The read rule: `src/docker` makes only the four reads on the client, and the pattern still sees
+/// each of them.
+fn read_problems(files: &[(String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut seen = Vec::new();
     for (path, text) in files.iter().filter(|(path, _)| in_docker(path)) {
-        let calls = REQUEST_PATH
-            .captures_iter(text)
-            .filter_map(|captures| captures.get(1))
-            .map(|found| (found.start(), found.as_str().to_owned()))
-            .chain(FIXED_PATH_CALL.captures_iter(text).filter_map(|captures| {
-                captures.get(1).map(|found| {
-                    let fixed = if found.as_str() == "events" {
-                        "/events"
-                    } else {
-                        "/_ping"
-                    };
-                    (found.start(), fixed.to_owned())
-                })
-            }));
-        for (offset, request_path) in calls {
-            if !PATHS.contains(&request_path.as_str()) {
+        for captures in CLIENT_CALL.captures_iter(text) {
+            let Some(call) = captures.get(1) else {
+                continue;
+            };
+            if !READS.contains(&call.as_str()) {
                 problems.push(format!(
-                    "{path}:{}: {request_path} is not one of the daemon's paths {PATHS:?}",
-                    line_of(text, offset)
+                    "{path}:{}: docker.{}( is not one of the daemon's reads {READS:?}",
+                    line_of(text, call.start()),
+                    call.as_str()
                 ));
             }
-            seen.push(request_path);
+            seen.push(call.as_str().to_owned());
         }
     }
-    for wanted in PATHS {
+    for wanted in READS {
         if !seen.iter().any(|found| found == wanted) {
             problems.push(format!(
-                "{wanted} not found: the path pattern no longer matches"
+                "docker.{wanted}( not found: the call pattern no longer matches"
             ));
         }
     }
@@ -365,7 +354,7 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
     for site in found_in(&files, &ENGINE_CRATE, |path| !in_docker(path)) {
         problems.push(format!(
-            "{site}: names docker_engine; the client is reached through src/docker"
+            "{site}: names docker_client; the client is reached through src/docker"
         ));
     }
     for regex in [&*REQUEST_BUILT, &*METHOD] {
@@ -386,7 +375,7 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
             "{site}: the client is built from --docker-socket, not the environment"
         ));
     }
-    problems.extend(path_problems(&files));
+    problems.extend(read_problems(&files));
     // Comments included: a comment naming the SDK is how it creeps back.
     problems.extend(sdk_problems(sources));
     // The trait's calls.
@@ -416,12 +405,22 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
 static SDK_OR_HARNESS: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"\b(bollard|testenv(_core)?)\b"));
 
-/// Files that name the SDK or the harness, in code or in a comment.
+/// The launcher's engine and its tests, which name bollard's models and errors through
+/// `crate::docker`.
+fn is_engine(path: &str) -> bool {
+    path == "src/launcher/engine.rs" || path.starts_with("src/launcher/engine/")
+}
+
+/// Files that name the harness anywhere, or the SDK outside `src/docker` and the launcher's
+/// engine, in code or in a comment.
 fn sdk_problems(files: &[(String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
     for (path, text) in files {
+        let sdk_allowed = in_docker(path) || is_engine(path);
         for (index, line) in text.lines().enumerate() {
-            if let Some(found) = SDK_OR_HARNESS.find(line) {
+            if let Some(found) = SDK_OR_HARNESS.find(line)
+                && !(sdk_allowed && found.as_str() == "bollard")
+            {
                 problems.push(format!("{path}:{}: names {}", index + 1, found.as_str()));
             }
         }
@@ -480,7 +479,7 @@ fn src_names_neither_the_sdk_nor_the_harness() {
 }
 
 #[test]
-fn the_docker_client_is_docker_engine_on_the_unix_socket() {
+fn the_docker_client_is_docker_client_on_the_unix_socket() {
     let manifests = workspace_manifests();
     assert!(manifests.len() > 1, "no member manifest read");
     let problems = manifest_problems(&manifests);
@@ -499,33 +498,33 @@ fn another_client_configuration_is_refused() {
         changed[0].1 = text;
         changed
     };
-    let package = r#"docker-engine = { workspace = true, features = ["write", "attach"] }"#;
+    let package = r#"docker-client = { workspace = true, features = ["attach"] }"#;
     assert!(root.contains(package), "the root package's entry moved");
-    let pin = "docker-engine = { git = ";
+    let pin = "docker-client = { git = ";
     assert!(root.contains(pin), "the workspace pin moved");
     let mut member = manifests.clone();
     member[1]
         .1
-        .push_str("\n[target.'cfg(unix)'.dependencies]\ndocker-engine.workspace = true\n");
+        .push_str("\n[target.'cfg(unix)'.dependencies]\ndocker-client.workspace = true\n");
     let cases = [
         with_root(root.replacen(
             package,
-            r#"docker-engine = { workspace = true, features = ["write", "attach", "tcp"] }"#,
+            r#"docker-client = { workspace = true, features = ["attach", "tcp"] }"#,
             1,
         )),
         with_root(root.replacen(
-            r#"features = ["write", "attach", "test-util"]"#,
-            r#"features = ["write", "attach", "test-util", "tls"]"#,
+            r#"features = ["attach", "test-util"]"#,
+            r#"features = ["attach", "test-util", "tls"]"#,
             1,
         )),
         with_root(root.replacen(package, "", 1)),
         with_root(format!(
             "{root}\n[target.'cfg(unix)'.dependencies]\n{package}\n"
         )),
-        with_root(root.replacen(pin, r#"docker-engine = { features = ["tcp"], git = "#, 1)),
+        with_root(root.replacen(pin, r#"docker-client = { features = ["tcp"], git = "#, 1)),
         with_root(root.replacen(
             "[features]\n",
-            "[features]\nremote = [\"docker-engine/tcp\"]\n",
+            "[features]\nremote = [\"docker-client/tcp\"]\n",
             1,
         )),
         member,
@@ -653,11 +652,11 @@ fn a_write_path_is_refused() {
     let cases = [
         with(
             API,
-            "\nasync fn remove(&self) {\n    self.inner.exchange(\"/containers/x\", \"\", |_| {}).await;\n}\n",
+            "\nasync fn remove(&self, docker: Docker) {\n    docker.remove_container(\"x\", None).await;\n}\n",
         ),
         with(
             API,
-            "\nasync fn attach(&self) {\n    self.inner.exchange_upgrade(\"/x\", \"\", |_| {}).await;\n}\n",
+            "\nasync fn attach(&self, docker: Docker) {\n    attach::attach(&docker, \"x\", timeout, 8, cancel).await;\n}\n",
         ),
         with(
             API,
@@ -686,23 +685,20 @@ fn a_write_path_is_refused() {
         ),
         with(
             "src/daemon/mod.rs",
-            "\nfn raw(settings: Settings) {\n    let client = docker_engine::Client::new(settings);\n}\n",
+            "\nfn raw(config: Config) {\n    let client = docker_client::connect(config);\n}\n",
         ),
         with(
             "src/launcher/engine.rs",
-            "\nuse docker_engine::Client as Raw;\n",
+            "\nuse docker_client::attach as pumps;\n",
         ),
         with(
             API,
-            "\nasync fn kill(&self) {\n    self.inner.get_object(&format!(\"/containers/{id}/kill\")).await;\n}\n",
+            "\nasync fn kill(&self, docker: Docker) {\n    docker.kill_container(\"x\", None).await;\n}\n",
         ),
         with(
             API,
-            "\nasync fn version(&self) {\n    self.inner.get(\"/version\", \"\", &[]).await;\n}\n",
+            "\nasync fn version(&self, docker: Docker) {\n    docker.version().await;\n}\n",
         ),
-        with(API, "\n// Unlike bollard, this client is shared.\n"),
-        with("src/run.rs", "\nuse testenv::config::ENV_IDS;\n"),
-        with("src/run.rs", "\nuse testenv_core::host::HostSweep;\n"),
         files
             .iter()
             .map(|(path, text)| {
@@ -722,13 +718,62 @@ fn a_write_path_is_refused() {
     for (index, case) in cases.iter().enumerate() {
         assert!(!problems(case).is_empty(), "case {index} accepted");
     }
-    // A comment naming a method or the crate is not a request.
-    assert!(problems(&with(API, "\n// Method::POST would be a write.\n")).is_empty());
-    assert!(problems(&with("src/run.rs", "\n// docker_engine, via src/docker.\n")).is_empty());
     // Every path gone from the pattern's sight reads as a broken pattern, not as a pass.
     let renamed: Vec<(String, String)> = files
         .iter()
-        .map(|(path, text)| (path.clone(), text.replace("get_object(", "fetch_object(")))
+        .map(|(path, text)| {
+            (
+                path.clone(),
+                text.replace("inspect_container(", "inspect_one("),
+            )
+        })
         .collect();
     assert!(!problems(&renamed).is_empty());
+}
+
+/// Negative control: the SDK named outside `src/docker` and the launcher's engine, in code or in
+/// a comment, and the harness named anywhere, are refused; the SDK is allowed where its models
+/// are reached.
+#[test]
+fn the_sdk_and_the_harness_are_named_where_allowed_only() {
+    let files = sources();
+    assert!(problems(&files).is_empty());
+    let with = |path: &str, extra: &str| -> Vec<(String, String)> {
+        let mut changed = files.clone();
+        match changed.iter_mut().find(|(name, _)| name == path) {
+            Some((_, text)) => text.push_str(extra),
+            None => changed.push((path.to_owned(), extra.to_owned())),
+        }
+        changed
+    };
+    let cases = [
+        with(
+            "src/daemon/mod.rs",
+            "\n// Unlike bollard, this client is shared.\n",
+        ),
+        with("src/run.rs", "\nuse testenv::config::ENV_IDS;\n"),
+        with("src/run.rs", "\nuse testenv_core::host::HostSweep;\n"),
+        with("src/run.rs", "\nuse bollard::Docker;\n"),
+    ];
+    for (index, case) in cases.iter().enumerate() {
+        assert!(!problems(case).is_empty(), "case {index} accepted");
+    }
+    // A comment naming a method or the crate is not a request, and the SDK may be named where its
+    // models are reached.
+    assert!(
+        problems(&with(
+            "src/launcher/engine.rs",
+            "\nuse crate::docker::bollard::models;\n"
+        ))
+        .is_empty()
+    );
+    assert!(
+        !problems(&with(
+            "src/launcher/mod.rs",
+            "\nuse crate::docker::bollard;\n"
+        ))
+        .is_empty()
+    );
+    assert!(problems(&with(API, "\n// Method::POST would be a write.\n")).is_empty());
+    assert!(problems(&with("src/run.rs", "\n// docker_client, via src/docker.\n")).is_empty());
 }

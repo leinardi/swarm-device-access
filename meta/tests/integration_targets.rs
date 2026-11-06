@@ -52,7 +52,8 @@ const GATE: IntegrationGate<'static> = IntegrationGate {
 };
 
 /// The Docker SDK whose use, beside the docker CLI, counts as driving Docker. The daemon's own
-/// Engine client (docker-engine) talks to a fake Engine in the plain tests, so it is not one.
+/// Engine client (docker-client, on bollard, which `src/docker` and the launcher's engine name)
+/// talks to a fake Engine in the plain tests, so it is not one.
 const CLIENTS: &[&str] = &["bollard"];
 
 /// Go: `TestIntegrationTreesAreTagged`. Every harness source built without the `integration`
@@ -86,6 +87,11 @@ fn plain_tests_avoid_docker() {
         "only {} sources found; the check would pass on nothing",
         paths.len()
     );
+    // The daemon's client and the launcher's engine are the SDK's users in the plain build, and
+    // `docker_boundary.rs` pins that they are the only ones.
+    paths.retain(|path| {
+        !path.starts_with("src/docker/") && !path.starts_with("src/launcher/engine")
+    });
     let problems = docker_drivers(&repo.read_all(&paths), CLIENTS);
     assert!(problems.is_empty(), "{}", report(&problems));
 }

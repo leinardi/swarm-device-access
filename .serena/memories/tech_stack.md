@@ -7,8 +7,8 @@
 - **Key crates**:
   - `tokio`, `tokio-util` — runtime, cancellation, task tracking
   - rust-common (git, pinned by `rev`): `go-compat`, `clock`, `go-slog`,
-    `go-prom`, `go-http`, `docker-engine`, `service-kit`, `testenv-core`, `repo-meta`
-  - `hyper`, `hyper-util` — the launcher's writes and attach on docker-engine's transport
+    `go-prom`, `go-http`, `docker-client`, `service-kit`, `testenv-core`, `repo-meta`
+  - `serde_json` — the create body decoded into bollard's model (bollard comes with docker-client)
   - `rustix` — syscalls (openat2, fstat, pidfd); `libc` only for raw `bpf(2)` in `bpf_sys.rs`
   - `zbus` — systemd D-Bus watcher
   - `clap` — flags; `saphyr-parser` — config file; `serde`/`serde_json` — Engine API types

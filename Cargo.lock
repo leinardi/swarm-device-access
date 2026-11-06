@@ -313,18 +313,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "docker-engine"
+name = "docker-client"
 version = "0.3.0"
 source = "git+https://github.com/leinardi/rust-common?rev=16ea3044310039235b50846d4ddc58e355f8120c#16ea3044310039235b50846d4ddc58e355f8120c"
 dependencies = [
- "bytes",
- "go-compat",
- "http-body-util",
- "hyper",
- "hyper-util",
- "jiff",
- "serde",
- "serde_json",
+ "bollard",
+ "futures-util",
+ "http",
+ "thiserror",
  "tokio",
  "tokio-util",
 ]
@@ -1299,7 +1295,7 @@ dependencies = [
  "bytes",
  "clap",
  "clock",
- "docker-engine",
+ "docker-client",
  "futures-core",
  "go-compat",
  "http-body-util",

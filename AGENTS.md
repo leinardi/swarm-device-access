@@ -159,7 +159,8 @@ only Docker writes (`engine.rs`). Stops go by container ID and share one 20 s sh
 the rust-common crates)**
 
 - `docker` — the daemon's read-only `DockerApi` (ping, list, inspect, events: `GET` plus one
-  `HEAD /_ping`) and its types on docker-engine's client, over the configured unix socket only;
+  `GET /_ping`) and its types on docker-client's bollard client, over the configured unix socket
+  only;
   `Client::transport` hands that client to the launcher's engine alone.
 - logging (`src/logging.rs`) — `tracing` events (`info!`, `warn!`, ... with `key = value` fields,
   `error = %err` for an error) through rust-common's `tracing-setup`: tracing-subscriber's `text`
@@ -183,7 +184,7 @@ the rust-common crates)**
 
 ## Shared crates (rust-common)
 
-`go-compat`, `clock`, `docker-engine`,
+`go-compat`, `clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` (with `redact-go-slog` until the testenv is ported)
 and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
@@ -194,8 +195,8 @@ its own features.
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
   this daemon passes `Options` with no target and no span fields (tracing-setup),
-  moby's `User-Agent` and no
-  response-header timeout with only the `write` and `attach` features (docker-engine), its envid,
+  a `swarm-device-access/<version>` `User-Agent` and a response-header timeout with only the
+  `attach` feature (docker-client), its envid,
   labels and resources (`testenv/src/config.rs`) and runner settings
   (`testenv/tests/integration/main.rs`) to testenv-core, and
   `buildinfo!("SWARM_DEVICE_ACCESS", …)` (service-kit).

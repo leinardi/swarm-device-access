@@ -313,7 +313,7 @@ counts per-device failures.
 | `src/daemon` | Event loop (`run`, `events.rs`: `listen_events`, `consume_events`) and the coordinator (`coordinator.rs`) that owns passes, retries, the `processed` dedup, container reservations and `process_one` |
 | `src/processor` | `reconcile`, `terminate`, `sweep`, `publish_and_reconcile` (`reconcile.rs`); desired-set computation (`rules.rs`: `collect_mount_rules`; `devfs.rs`), process pinning (`pin.rs`), lifecycle history (`lifecycle.rs`) |
 | `src/cgroup` | Device-rule application behind `Interface::set_device_rules(handle, rules)`: cgroup v1 (`v1.rs`, `v1set.rs`, `ledger.rs`) and v2 (`v2.rs`, `v2plan.rs`, `v2ops.rs`, `owned.rs`, `ebpf.rs`, `asm.rs`, `bpf_sys.rs`); cgroup handles (`handle.rs`); `/proc` cgroup parsing (`api.rs`). NVIDIA-derived code. |
-| `src/docker` | The daemon's read-only `DockerApi` on rust-common's `docker-engine` client: `GET` plus the `HEAD /_ping` of API version negotiation, over the configured unix socket only; the decoded types and the event stream; `Client::transport`, which only the launcher's engine takes |
+| `src/docker` | The daemon's read-only `DockerApi` on rust-common's `docker-client` (bollard): `GET` only, over the configured unix socket only, each call bounded as a whole; the converted types, the event stream and Go's `CallContext`; `Client::transport`, which hands bollard's client to the launcher's engine alone |
 | `src/metrics`, `src/server.rs`, `src/server` | Prometheus metrics (`Recorder`, with a no-op form) on prometheus-client's registry and OpenMetrics text exposition (Q14); the `/metrics`, `/healthz` and `/readyz` routes as an axum router on service-kit's `http` server (5 s header-read timeout, 30 s write-stall timeout, 5 s drain; Q11) |
 | `src/systemd.rs` | D-Bus watcher for systemd's `Reloading` signal (zbus) |
 | `src/task.rs`, `src/version.rs` | Awaiting spawned work to completion; the build's version stamps (`BUILD`, service-kit's `buildinfo!`) |
@@ -467,6 +467,7 @@ cannot subscribe: the first failure is logged at `Warn`
 Check the socket path with `--docker-socket`. Default: `/var/run/docker.sock`. On some hosts Docker
 Desktop uses a different path.
 
-The daemon requires Docker Engine 19.03+ (API 1.40). Its Docker client (`src/docker`), which
-negotiates the API version as the 1.x moby client did, refuses older engines with
-`API version … is not supported by this client: the minimum supported API version is 1.40`.
+The daemon requires Docker Engine 19.03+ (API 1.40). Its Docker client (`src/docker`)
+negotiates the API version once, with `GET /version`, and sends its requests at bollard's version
+behind the engine's: an engine older than that answers an error, which the daemon logs
+(Q16).

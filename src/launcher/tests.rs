@@ -228,17 +228,17 @@ async fn run_log_stream_lost() {
 
     let error = result(done).await.unwrap_err();
     assert!(
-        matches!(&error, LaunchError::LogStream { copy, shutdown: None } if copy == "injected failure"),
+        matches!(&error, LaunchError::LogStream { copy, shutdown: None } if copy == "Docker stream error: injected failure"),
         "{error}"
     );
     assert_eq!(
         error.to_string(),
-        "daemon log stream lost while the daemon was running: injected failure"
+        "daemon log stream lost while the daemon was running: Docker stream error: injected failure"
     );
     require_stopped(&fake);
     assert!(run.logs.contents().contains(
         "level=ERROR daemon log stream lost; stopping the daemon component=launcher \
-         error=injected failure"
+         error=Docker stream error: injected failure"
     ));
 }
 

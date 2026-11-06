@@ -39,7 +39,7 @@ repository = "https://github.com/leinardi/swarm-device-access"
 # `[patch."https://github.com/leinardi/rust-common"]` table naming each crate with
 # `path = "../rust-common/crates/<name>"`.
 [workspace.dependencies]
-docker-engine = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
+docker-client = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 clock = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 go-compat = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 go-slog = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
@@ -120,19 +120,15 @@ jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 # The config file's YAML events; tag resolution, the shape checks and the strict decode are
 # ported from yaml.v3 in-tree (src/config/yaml), so no YAML value model or serde is used.
 saphyr-parser = { version = "0.3.2", default-features = false }
-# The Docker Engine client (rust-common), moby client v0.6.0's requests and error texts on a
-# unix socket: `write` for the launcher's calls (Client::exchange) and `attach` for its hijacked
-# attach, moby's stdcopy and the wait answer. No `tcp` or `tls`: the socket is the only endpoint.
-# The daemon reaches it through src/docker, the launcher's writes through src/launcher/engine.rs
-# only (meta/tests/docker_boundary.rs, meta/tests/launcher_boundary.rs).
-docker-engine = { workspace = true, features = ["write", "attach"] }
-# The launcher's write requests and the hijacked attach on docker-engine's transport; the metrics
-# and health endpoints' client.
-hyper = { version = "1.12.0", default-features = false, features = ["client", "http1"] }
-hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "http1"] }
-http-body-util = "0.1.5"
-bytes = "1.12.1"
-# The typed Engine API answers the daemon and the launcher read (docker-engine decodes them).
+# The Docker Engine client (rust-common): bollard on the unix socket, a whole-call timeout, an error
+# with a kind, the attach and wait pumps (`attach`). No `tcp` or `tls`: the socket is the only
+# endpoint. The daemon reaches it through src/docker, the launcher's writes through
+# src/launcher/engine.rs only (meta/tests/docker_boundary.rs, meta/tests/launcher_boundary.rs).
+docker-client = { workspace = true, features = ["attach"] }
+# The create body: the launcher's daemon spec (Go's JSON, built by hand) decoded into bollard's
+# model, which docker-client re-exports.
+serde_json = "1.0.154"
+# The derives of the cgroup types.
 serde = { version = "1.0.229", features = ["derive"] }
 # The cgroup directory descriptor and the openat, fstat and open calls on it, getrandom for the
 # wrapper nonce, openat2 beneath /dev, and the pidfd and its poll, without unsafe.
@@ -172,14 +168,15 @@ tokio = { version = "1.54.1", default-features = false, features = [
 service-kit = { workspace = true, features = ["runtime", "process-metrics", "http"] }
 
 [dev-dependencies]
-# TempDir, eventually and OrPanic, which the unit and wire tests share.
-docker-engine = { workspace = true, features = ["write", "attach", "test-util"] }
-# The golden fixtures, the wire captures and the decode errors of the tests.
-serde_json = "1.0.154"
+# The fake Engine on a unix socket that the docker and launcher tests share.
+docker-client = { workspace = true, features = ["attach", "test-util"] }
 # The log capture of the unit tests (Capture, set_default).
 tracing-setup = { workspace = true, features = ["testing"] }
 # The fake Engine of tests/parity.rs: hyper's HTTP/1 server.
 hyper = { version = "1.12.0", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
 # The paused clock (start_paused) needs the test runtime; tests/parity.rs builds a multi-threaded
 # one.
 tokio = { version = "1.54.1", default-features = false, features = [

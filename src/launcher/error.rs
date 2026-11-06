@@ -334,7 +334,7 @@ mod tests {
             .downcast_ref::<RemoveError>()
             .unwrap();
         let source = remove.source().unwrap().downcast_ref::<Error>().unwrap();
-        assert_eq!(source.kind(), crate::docker::ErrorKind::DeadlineExceeded);
+        assert_eq!(source.kind(), crate::docker::ErrorKind::Timeout);
         assert!(EstablishError::Timeout.source().is_none());
         assert!(LaunchError::NoImageId("tag".to_owned()).source().is_none());
         for cause in [ContextError::Canceled, ContextError::DeadlineExceeded] {

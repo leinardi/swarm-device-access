@@ -14,7 +14,9 @@ SDA_GO_BINARY=/path/to/swarm-device-access-v1.0.3 cargo test --test parity -- --
 - `go-requests.txt`: the requests one daemon run (`-dry-run -log-level=debug`, a config file, a
   metrics address) sent the Engine on the test's scripted Engine (the startup, a `SIGHUP` reload
   that applies, one that is rejected, a scrape and `SIGTERM`), with the user agent up to its
-  architecture.
+  architecture. The Rust daemon's Docker client is no longer moby's (Q16), so the test compares
+  what the two sent by path alone (the pings and the version negotiation, which belong to each
+  client, left out), not byte for byte.
 
 The run masks what changes from run to run: the version stamps, the temporary directory, the metrics
 port and the events `since`. The daemon's log lines are not compared

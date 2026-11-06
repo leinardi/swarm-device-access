@@ -198,7 +198,7 @@ impl DockerApi for FakeDocker {
             })
             .is_ok();
         let reply = if failing {
-            Err(Error::connection_failed("list failed".to_owned()))
+            Err(Error::unavailable("list failed".to_owned()))
         } else {
             if !self.list_blocks
                 && let Some(on_list) = &self.on_list

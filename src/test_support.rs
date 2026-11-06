@@ -18,13 +18,14 @@
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
 //! Helpers the unit tests share: a temporary directory, the files under `tests/testdata`, log
-//! capture through the logger's injectable sink, a bounded `eventually`, and a fake Docker
-//! ([`fake_docker`]).
+//! capture, a bounded `eventually`, and a fake Docker ([`fake_docker`]).
 
 pub(crate) mod fake_docker;
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use serde_json::Value;
 use tracing::dispatcher::DefaultGuard;
@@ -32,9 +33,65 @@ use tracing::level_filters::LevelFilter;
 use tracing_setup::testing::{Capture, set_default};
 use tracing_setup::{Format, Options};
 
-/// A temporary directory, removed on drop (`TempDir::new("sda-test")`), and a bounded wait:
-/// docker-engine's test helpers.
-pub(crate) use crate::docker::test_util::{TempDir, eventually};
+/// A temporary directory, removed with what it holds on drop (`TempDir::new("sda-test")`).
+#[derive(Debug)]
+pub(crate) struct TempDir(PathBuf);
+
+impl TempDir {
+    /// A new, empty directory under the system's temporary directory, named after `prefix`, the
+    /// process and a counter.
+    ///
+    /// # Panics
+    ///
+    /// When the directory cannot be created.
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn new(prefix: &str) -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "{prefix}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&path).unwrap_or_else(|error| {
+            panic!("create {}: {error}", path.display());
+        });
+        Self(path)
+    }
+
+    /// The directory.
+    #[must_use]
+    pub(crate) fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// How often [`eventually`] checks its condition.
+const EVENTUALLY_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Waits until `condition` holds, checking every 10ms of tokio time, and fails the test once
+/// `within` has passed: a wait for something that never happens fails instead of hanging, also
+/// under a paused clock that keeps advancing.
+///
+/// # Panics
+///
+/// When `within` passes first, naming `what`.
+pub(crate) async fn eventually(what: &str, within: Duration, mut condition: impl FnMut() -> bool) {
+    let deadline = tokio::time::Instant::now() + within;
+    while !condition() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out after {within:?} waiting for {what}"
+        );
+        tokio::time::sleep(EVENTUALLY_INTERVAL).await;
+    }
+}
 
 /// The bytes of `relative` under `tests/testdata`.
 pub(crate) fn testdata(relative: &str) -> Vec<u8> {

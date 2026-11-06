@@ -31,7 +31,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::time::Duration;
 
-use hyper::StatusCode;
 use jiff::{SignedDuration, Timestamp};
 
 use super::*;
@@ -278,14 +277,12 @@ fn privileged(mut info: ContainerInspect) -> ContainerInspect {
 }
 
 fn daemon_unavailable() -> Reply {
-    Err(docker::Error::connection_failed(
-        "daemon unavailable".to_owned(),
-    ))
+    Err(docker::Error::unavailable("daemon unavailable".to_owned()))
 }
 
 fn not_found() -> Reply {
     Err(docker::Error::response(
-        StatusCode::NOT_FOUND,
+        404,
         "Error response from daemon: No such container: abc".to_owned(),
     ))
 }
@@ -884,10 +881,7 @@ async fn reconcile_inspect_failure_revokes_known_identity() {
     let env = Env::new("all", false);
     env.inspector.then(vec![daemon_unavailable()]);
     let error = env.reconcile().await.unwrap_err();
-    assert!(
-        error.is_docker(docker::ErrorKind::ConnectionFailed),
-        "{error}"
-    );
+    assert!(error.is_docker(docker::ErrorKind::Unavailable), "{error}");
     assert_eq!(env.fake.calls(), 0);
 
     env.inspector
@@ -896,7 +890,7 @@ async fn reconcile_inspect_failure_revokes_known_identity() {
     env.inspector.then(vec![daemon_unavailable()]);
     let error = env.reconcile().await.unwrap_err();
     assert!(
-        error.is_docker(docker::ErrorKind::ConnectionFailed) && !error.is_container_gone(),
+        error.is_docker(docker::ErrorKind::Unavailable) && !error.is_container_gone(),
         "{error}"
     );
     assert_eq!(env.fake.calls(), 2);
@@ -1008,7 +1002,7 @@ async fn reconcile_cancelled_caller_keeps_grants() {
     context.cancel();
 
     let error = env.proc.reconcile(&context, "abc").await.unwrap_err();
-    assert!(error.is_docker(docker::ErrorKind::Canceled), "{error}");
+    assert!(error.is_docker_canceled(), "{error}");
     assert_eq!(env.fake.calls(), 1, "only the grant");
 }
 
@@ -1059,10 +1053,7 @@ async fn reconcile_deadline_exceeded_revokes() {
     let context = CallContext::default().with_timeout(Duration::ZERO);
 
     let error = env.proc.reconcile(&context, "abc").await.unwrap_err();
-    assert!(
-        error.is_docker(docker::ErrorKind::DeadlineExceeded),
-        "{error}"
-    );
+    assert!(error.is_docker(docker::ErrorKind::Timeout), "{error}");
     assert_eq!(env.fake.calls(), 2);
     assert!(env.fake.rules(1).is_empty(), "the empty set applied");
 }
@@ -1083,10 +1074,7 @@ async fn reconcile_inspect_failure_of_privileged_does_not_warn() {
     env.inspector.then(vec![daemon_unavailable()]);
 
     let error = env.reconcile().await.unwrap_err();
-    assert!(
-        error.is_docker(docker::ErrorKind::ConnectionFailed),
-        "{error}"
-    );
+    assert!(error.is_docker(docker::ErrorKind::Unavailable), "{error}");
     let after = &env.log()[before..];
     assert!(
         !after.contains("restart the container"),

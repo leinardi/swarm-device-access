@@ -256,8 +256,13 @@ async fn consume_events_arbitrary_stream_error_after_cancel_no_reconnect() {
 #[tokio::test(start_paused = true)]
 async fn event_list_options() {
     assert_eq!(
-        event_filters().to_json(),
-        r#"{"event":{"destroy":true,"die":true,"start":true,"unpause":true}}"#
+        event_filters().to_map(),
+        std::collections::HashMap::from([(
+            "event".to_owned(),
+            ["destroy", "die", "start", "unpause"]
+                .map(str::to_owned)
+                .to_vec()
+        )])
     );
 
     let docker = FakeDocker::default();
@@ -528,9 +533,7 @@ async fn subscribe_success_keeps_stream_open_until_cancel() {
 #[tokio::test(start_paused = true)]
 async fn subscribe_failures_are_worded_as_go() {
     let docker = FakeDocker {
-        ping_err: Some(crate::docker::Error::connection_failed(
-            "daemon down".to_owned(),
-        )),
+        ping_err: Some(crate::docker::Error::unavailable("daemon down".to_owned())),
         ..FakeDocker::default()
     };
     let error = subscribe(&CallContext::new(), &docker, base(), DOCKER_CALL_TIMEOUT)
@@ -562,7 +565,7 @@ async fn subscribe_failures_are_worded_as_go() {
 async fn refused_connect_is_a_stream_error() {
     let fixture = Loop::new(
         FakeDocker {
-            events_err: Some(crate::docker::Error::connection_failed(
+            events_err: Some(crate::docker::Error::unavailable(
                 "connection refused".to_owned(),
             )),
             ..FakeDocker::default()

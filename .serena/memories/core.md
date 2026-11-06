@@ -37,7 +37,7 @@ src/
     v1.rs, v1set.rs, ledger.rs                  # devices.allow/devices.deny, owned-exception ledger
     v2.rs, v2plan.rs, v2ops.rs, owned.rs, ebpf.rs, asm.rs  # owned wrapper around runtime filter
     bpf_sys.rs             # raw bpf(2); the only unsafe module
-  docker/                  # read-only DockerApi on docker-engine (GET + HEAD /_ping, unix socket only)
+  docker/                  # read-only DockerApi on docker-client/bollard (GET only, unix socket only)
   metrics/, server.rs      # Recorder (noop form) on go-prom; /metrics, /healthz, /readyz on go-http
   systemd.rs               # zbus D-Bus Reloading watcher
   version.rs               # BUILD stamps (service-kit's buildinfo!)

@@ -738,7 +738,7 @@ async fn hung_container_inspect_is_bounded() {
     .await
     .expect("the hung inspect is bounded");
     let error = result.unwrap_err();
-    assert!(error.is_docker(ErrorKind::DeadlineExceeded), "{error}");
+    assert!(error.is_docker(ErrorKind::Timeout), "{error}");
 }
 
 /// What the regression tests record of the transaction of [`Transactional`].

@@ -63,7 +63,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 use tokio::task::JoinHandle;
 
 use crate::daemon::DOCKER_CALL_TIMEOUT;
@@ -271,7 +271,7 @@ impl<E: EngineApi> Runner<E> {
     /// Removes a daemon container whose setup failed, so a failed launcher never leaves a
     /// daemon behind: Go's `errors.Join(cause, removeErr)`.
     async fn abandon(&self, container_id: &str, cause: LaunchError) -> LaunchError {
-        match self.remove_container(container_id).await {
+        match self.remove_by_id(container_id).await {
             Ok(()) => cause,
             Err(remove) => LaunchError::Abandoned {
                 cause: Box::new(cause),
@@ -497,7 +497,7 @@ impl Pump {
         } = console;
         Self {
             task: tokio::spawn(async move {
-                docker::std_copy(&mut stdout, &mut stderr, &mut attached).await
+                copy_output(&mut attached, &mut stdout, &mut stderr).await
             }),
             outcome: None,
         }
@@ -530,6 +530,30 @@ impl Drop for Pump {
         // Go closes the hijacked connection, which ends the copy.
         self.task.abort();
     }
+}
+
+/// Copies the daemon's output to the console, each piece written whole and flushed before the next
+/// is read, as Go's unbuffered writes are: the bytes copied once the stream ends, or the text of
+/// the error that broke the stream or a writer.
+async fn copy_output(
+    attached: &mut Attached,
+    stdout: &mut Output,
+    stderr: &mut Output,
+) -> Result<u64, String> {
+    let mut copied: u64 = 0;
+    while let Some(piece) = attached.recv().await {
+        let (writer, bytes) = match piece.map_err(|error| error.to_string())? {
+            docker::attach::Output::Stdout(bytes) => (&mut *stdout, bytes),
+            docker::attach::Output::Stderr(bytes) => (&mut *stderr, bytes),
+        };
+        writer
+            .write_all(&bytes)
+            .await
+            .map_err(|error| error.to_string())?;
+        writer.flush().await.map_err(|error| error.to_string())?;
+        copied += u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    }
+    Ok(copied)
 }
 
 /// The first 12 characters of a container ID.

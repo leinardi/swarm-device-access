@@ -48,7 +48,7 @@ impl<E: EngineApi> Runner<E> {
             self.check_stale(context, stale, launcher_id)
                 .await
                 .map_err(LaunchError::Stale)?;
-            self.remove_container(&stale.id)
+            self.remove_by_id(&stale.id)
                 .await
                 .map_err(|source| LaunchError::RemoveStale {
                     id: stale.id.clone(),
@@ -126,7 +126,7 @@ impl<E: EngineApi> Runner<E> {
 
     /// Force-removes `container_id` by ID; one already gone is fine. It runs under a context of
     /// its own, so a failed setup still cleans up after a signal.
-    pub(super) async fn remove_container(&self, container_id: &str) -> Result<(), RemoveError> {
+    pub(super) async fn remove_by_id(&self, container_id: &str) -> Result<(), RemoveError> {
         let removed = with_context(
             &CallContext::new().with_timeout(self.timing.call),
             self.engine.remove(container_id),
