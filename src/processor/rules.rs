@@ -467,8 +467,11 @@ fn escape_hop(dev: &dyn DevFs, rel: &str) -> Result<Hop, SysError> {
 /// is a clean relative path without `..`.
 fn canonical_name(dev: &dyn DevFs, id: DeviceId) -> Result<String, Cause> {
     let data = dev.read_uevent(id).map_err(Cause::Sys)?;
-    let names: Vec<String> = crate::text::lines(&data)
-        .map_while(Result::ok)
+    let lines = crate::text::lines(&data)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| Cause::BadDevname(BadDevname::LineTooLong))?;
+    let names: Vec<String> = lines
+        .into_iter()
         .filter_map(|line| {
             String::from_utf8_lossy(line)
                 .strip_prefix("DEVNAME=")
@@ -779,6 +782,8 @@ pub enum BadDevname {
     Count(usize),
     /// A value that is not a clean relative path without `..`.
     Invalid(String),
+    /// A line over the cap: the uevent is not read in part.
+    LineTooLong,
 }
 
 impl fmt::Display for BadDevname {
@@ -787,6 +792,7 @@ impl fmt::Display for BadDevname {
         match self {
             Self::Count(count) => write!(formatter, "{count} DEVNAME lines"),
             Self::Invalid(name) => formatter.write_str(&quote(name)),
+            Self::LineTooLong => formatter.write_str("a line longer than 65536 bytes"),
         }
     }
 }

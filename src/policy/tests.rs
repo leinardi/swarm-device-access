@@ -562,6 +562,15 @@ fn globs_that_read_differently_from_go_are_refused_at_load() {
         "/dev/sd[a-c",
         "/dev/sd[",
         "/dev/sd[^]",
+        // A class that could match `/` matched it in Go and cannot here: refused, because a
+        // deny glob like `/dev[^a]*` would otherwise stop denying `/dev/null`.
+        "/dev[^a]*",
+        "/dev/sd[^a-c]",
+        "/dev/sd[^x]",
+        "[^x]",
+        "/dev[+-9]null",
+        "/dev[/]null",
+        "/dev[ -/]null",
     ] {
         let error = validate_globs(&[pattern.to_owned()]).unwrap_err();
         assert!(
@@ -574,11 +583,6 @@ fn globs_that_read_differently_from_go_are_refused_at_load() {
         let found = Container::parse(&labels(&[(LABEL_DEVICE_DENY, pattern)]));
         assert!(found.is_err(), "{pattern}");
     }
-    // Go's `[^x]` is the crate's `[!x]`: the same set, so the same decision.
-    let policy = global(Mode::All, &[], &["/dev/sd[^a-c]"]);
-    let subject = container(Some(true), &[], &[]);
-    assert!(!policy.denied(&subject, "/dev/sda"));
-    assert!(policy.denied(&subject, "/dev/sdd"));
 }
 
 /// Booleans are `true` and `false` only; the other spellings Go's `ParseBool` read fail closed.

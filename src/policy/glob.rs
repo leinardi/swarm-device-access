@@ -18,19 +18,19 @@
 //! match is case-sensitive, and a leading dot is no special case.
 //!
 //! The 1.x matcher was Go's `filepath.Match`, and the two agree on `*`, `?`, plain classes and
-//! ranges. They disagree on five spellings, and a glob is how an operator allows or denies a
-//! device, so none of them may change meaning silently: [`compile`] reads the Go spelling of a
-//! negated class, `[^x]`, as the crate's `[!x]` (the same set, so the same decision), and refuses
-//! the rest, which means the pattern is rejected when the config or the label is loaded:
+//! ranges. They disagree on several spellings, and a glob is how an operator allows or denies a
+//! device, so none of them may change meaning silently: [`compile`] refuses
+//! each of them, which means the pattern is rejected when the config or the label is loaded:
 //!
 //! - `\` (Go's escape, which the crate has none of): refused, write the character in a class,
 //!   `[*]`;
 //! - `**` (a recursive match in the crate, `*` twice in Go): refused;
-//! - `[!x]` (a class of `!` and `x` in Go, a negated class in the crate): refused, write `[^x]`;
+//! - `[!x]` (a class of `!` and `x` in Go, a negated class in the crate): refused;
 //! - a class with an empty body, a dash that is not between two characters (`[a-]`, `[-a]`,
 //!   `[a-b-c]`) or no closing bracket: refused, as Go refuses them (the crate accepts some);
-//! - a negated class matches `/` in Go and not here, so `/dev/sd[^a]` no longer matches
-//!   `/dev/sd/`, a name no device has.
+//! - a class that could match `/`: every negated class (`[^x]`) and any item or range with
+//!   `low <= '/' <= high` (`[+-9]`). Go let them match `/`, the crate does not, so a deny glob
+//!   like `/dev[^a]*` would silently stop matching `/dev/null`: refused, never narrowed.
 
 use std::fmt;
 
@@ -76,7 +76,7 @@ pub fn matches(pattern: &str, name: &str) -> bool {
     compile(pattern).is_ok_and(|compiled| compiled.matches_with(name, OPTIONS))
 }
 
-/// Checks the spellings and returns the pattern with Go's `[^` written as the crate's `[!`.
+/// Checks the spellings and returns the pattern for the crate (unchanged, once accepted).
 fn translate(pattern: &str) -> Result<String, BadPattern> {
     if pattern.contains('\\') {
         return Err(bad(
@@ -98,10 +98,11 @@ fn translate(pattern: &str) -> Result<String, BadPattern> {
         }
         out.push('[');
         match chars.get(at) {
-            Some('!') => return Err(bad("[!x] is not supported, negate a class with [^x]")),
+            Some('!') => return Err(bad("[!x] is not supported")),
             Some('^') => {
-                out.push('!');
-                at += 1;
+                return Err(bad(
+                    "a negated class [^x] could match /, which fails open for a deny glob",
+                ));
             }
             _ => {}
         }
@@ -127,12 +128,18 @@ fn class_body(chars: &[char], mut at: usize, out: &mut String) -> Result<usize, 
             return Err(bad("empty class or a dash outside a range"));
         }
         out.push(low);
+        if low == '/' {
+            return Err(bad("a class naming / is not supported"));
+        }
         if chars.get(at) == Some(&'-') {
             let Some(&high) = chars.get(at + 1) else {
                 return Err(bad("missing ]"));
             };
             if high == ']' || high == '-' {
                 return Err(bad("a dash outside a range"));
+            }
+            if low <= '/' && '/' <= high {
+                return Err(bad("a class range spanning / is not supported"));
             }
             out.push('-');
             out.push(high);

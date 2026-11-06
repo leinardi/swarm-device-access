@@ -273,6 +273,23 @@ fn canonical_name_needs_one_clean_relative_devname() {
     }
 }
 
+/// A line over the cap is an error, never a silent cut: the device is rejected, even with a
+/// valid `DEVNAME` on either side.
+#[test]
+fn an_overlong_uevent_line_rejects_the_device() {
+    let uevent = format!("DEVNAME=sda\n{}\nDEVNAME=sdb\n", "x".repeat(70_000));
+    let mut dev = FakeDevFs::new();
+    dev.uevents.insert(DEV_SDA, uevent);
+    assert!(matches!(
+        canonical_name(&dev, DEV_SDA),
+        Err(Cause::BadDevname(BadDevname::LineTooLong))
+    ));
+    let mut dev = FakeDevFs::new();
+    dev.uevents
+        .insert(DEV_SDA, format!("{}\nDEVNAME=sda\n", "x".repeat(70_000)));
+    assert!(canonical_name(&dev, DEV_SDA).is_err());
+}
+
 /// The texts of a bad `DEVNAME`, as Go's `%d DEVNAME lines` and `%q`.
 #[test]
 fn bad_devname_texts() {
