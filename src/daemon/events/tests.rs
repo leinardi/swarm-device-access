@@ -816,6 +816,36 @@ async fn listen_events_reconnect_reenumerates() {
     );
 }
 
+/// A reconnect the engine refuses (a proxy that refuses `/events`) re-establishes nothing: it
+/// neither logs a re-subscription nor requests a re-enumeration, on any backoff cycle.
+#[tokio::test(start_paused = true)]
+async fn listen_events_refused_reconnect_does_not_reenumerate() {
+    let fixture = Arc::new(Loop::new(
+        FakeDocker {
+            events_err: Some(crate::docker::Error::unavailable(
+                "connection refused".to_owned(),
+            )),
+            ..FakeDocker::default()
+        },
+        FakeReconciler::default(),
+    ));
+    let docker = Arc::clone(&fixture.harness.docker);
+    let (closed, stream) = FakeEvents::channel();
+    drop(closed);
+
+    let (context, task) = spawn_listener(&fixture, base(), Some(stream));
+    eventually("three refused reconnects", WITHIN, || {
+        docker.events_calls().0 >= 3
+    })
+    .await;
+    context.cancel();
+    task.await.unwrap();
+
+    assert_eq!(fixture.harness.epoch(), 0, "a pass was requested");
+    assert!(!fixture.harness.logs().contains("re-subscribed"));
+    assert!(!fixture.readiness.is_ready());
+}
+
 /// A record the stream cannot decode (an unknown enum value of a newer Engine) would fail again
 /// from the same point on every reconnect: the loop skips to now instead, warns with the decode
 /// error, backs off, and re-enumerates on the reconnect, which covers what the record announced.

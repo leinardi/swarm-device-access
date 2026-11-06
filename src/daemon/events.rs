@@ -222,12 +222,19 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                 .await;
                 match resubscribed {
                     Ok(current) => {
-                        // since only replays what dockerd still buffers, and a restarted dockerd
-                        // has nothing buffered, so events of the gap can be lost: re-list and
-                        // reconcile every running container. The coordinator's processed map
-                        // skips replayed start events the pass already covered.
-                        info!("docker event stream re-subscribed; reconciling running containers");
-                        self.coordinator.request_reenumeration();
+                        // A refused subscription is no stream: nothing was re-established, so
+                        // neither the log nor a pass applies (it fails on its first item and
+                        // backs off).
+                        if matches!(current, Subscription::Open(_)) {
+                            // since only replays what dockerd still buffers, and a restarted
+                            // dockerd has nothing buffered, so events of the gap can be lost:
+                            // re-list and reconcile every running container. The coordinator's
+                            // processed map skips replayed start events the pass already covered.
+                            info!(
+                                "docker event stream re-subscribed; reconciling running containers"
+                            );
+                            self.coordinator.request_reenumeration();
+                        }
                         current
                     }
                     Err(error) => {
