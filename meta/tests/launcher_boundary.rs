@@ -39,7 +39,6 @@
 
 use std::sync::LazyLock;
 
-use meta::repo;
 use regex::Regex;
 
 /// The launcher's write engine.
@@ -219,13 +218,13 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
 /// The crate's sources: everything under `src/` but the unit tests (`tests.rs` and the modules
 /// under a `tests/` directory) and the test-only fakes.
 fn sources() -> Vec<(String, String)> {
-    repo::tracked_or_new(&["src/*.rs"])
+    let repo = meta::repo();
+    repo.tracked_or_new(&["src/*.rs"])
         .into_iter()
-        .filter(|path| repo::path(path).is_file())
         .filter(|path| !matches!(path.rsplit('/').next(), Some("tests.rs" | "fake.rs")))
         .filter(|path| !path.contains("/tests/"))
         .map(|path| {
-            let text = repo::read(&path);
+            let text = repo.read(&path);
             (path, text)
         })
         .collect()

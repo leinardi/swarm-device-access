@@ -26,16 +26,13 @@
 //!
 //! Every case that must be refused is the negative control of one that must pass: a missing
 //! header, another licence, another holder, NVIDIA's header outside its files, a header past the
-//! window, an incomplete provenance comment and a pasted MIT block. The scratch repositories run
-//! git and the script with an isolated git environment (`meta::gitenv`), so under the commit hook
-//! they never touch the index being committed.
+//! window, an incomplete provenance comment and a pasted MIT block. The harness is
+//! `repo_meta::scratch::HeaderHarness`: its scratch repositories run git and the script with an
+//! isolated git environment, so under the commit hook they never touch the index being
+//! committed, and it refuses a set of cases that lacks one to accept or one to reject.
 
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use std::process::{Command, Output};
-
-use meta::{gitenv, repo};
+use repo_meta::report;
+use repo_meta::scratch::{HeaderCase, HeaderHarness};
 
 const SCRIPT_PATH: &str = "scripts/check-license-headers.sh";
 
@@ -144,110 +141,30 @@ const MAKEFILE_WITH_HEADER: &str = concat!(
     "MK_COMMON_FILES := docker.mk help.mk\n"
 );
 
-fn run_git(directory: &Path, args: &[&str]) {
-    let output = gitenv::isolate(Command::new("git").args(args).current_dir(directory))
-        .output()
-        .unwrap_or_else(|error| panic!("run git {args:?}: {error}"));
-    assert!(
-        output.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-/// A git repository holding the checker, a Makefile (unless the case brings its own) and `files`,
-/// every one of them added except those under [`UNTRACKED_PREFIX`].
-fn scratch_repo(files: &[(&str, String)]) -> tempfile::TempDir {
-    let scratch = tempfile::tempdir().unwrap_or_else(|error| panic!("scratch directory: {error}"));
-    let directory = scratch.path();
-    let mut files = files.to_vec();
-    files.push((SCRIPT_PATH, repo::read(SCRIPT_PATH)));
-    if !files.iter().any(|(name, _)| *name == "Makefile") {
-        files.push(("Makefile", MAKEFILE_WITH_HEADER.to_owned()));
-    }
-
-    for (name, content) in &files {
-        let path = directory.join(name);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .unwrap_or_else(|error| panic!("create the directory of {name}: {error}"));
-        }
-        fs::write(&path, content).unwrap_or_else(|error| panic!("write {name}: {error}"));
-    }
-    fs::set_permissions(
-        directory.join(SCRIPT_PATH),
-        fs::Permissions::from_mode(0o700),
-    )
-    .unwrap_or_else(|error| panic!("make the checker executable: {error}"));
-
-    run_git(directory, &["init", "--quiet"]);
-    for (name, _) in &files {
-        if !name.starts_with(UNTRACKED_PREFIX) {
-            run_git(directory, &["add", "--", name]);
-        }
-    }
-    scratch
-}
-
-/// Runs the checker kept at [`SCRIPT_PATH`] inside the repository at `directory`.
-fn run_checker(directory: &Path) -> Output {
-    gitenv::isolate(Command::new(directory.join(SCRIPT_PATH)).current_dir(directory))
-        .output()
-        .unwrap_or_else(|error| panic!("run the checker: {error}"))
-}
+/// The checker, with the scratch repositories' Makefile (which the check governs too) unless a
+/// case brings its own.
+const HARNESS: HeaderHarness<'static> = HeaderHarness {
+    script: SCRIPT_PATH,
+    base_files: &[("Makefile", MAKEFILE_WITH_HEADER)],
+    untracked_prefix: UNTRACKED_PREFIX,
+};
 
 /// Go: `TestRepositoryHeaders`. The repository passes its own check. Run with the repository's
 /// own git environment: under the commit hook it names the index being committed.
 #[test]
 fn repository_headers() {
-    let output = Command::new(repo::path(SCRIPT_PATH))
-        .current_dir(repo::root())
-        .output()
-        .expect("run the checker");
-    assert!(
-        output.status.success(),
-        "the repository fails its own license header check:\n{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let problems = HARNESS.check_repository(&meta::repo());
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
-/// One scratch repository: its files, and whether the checker must accept it.
-struct HeaderCase {
-    name: &'static str,
-    files: Vec<(&'static str, String)>,
-    pass: bool,
+fn case(name: &str, files: &[(&str, &str)], pass: bool) -> HeaderCase {
+    HeaderCase::new(name, files, pass)
 }
 
-fn case(name: &'static str, files: &[(&'static str, &str)], pass: bool) -> HeaderCase {
-    HeaderCase {
-        name,
-        files: files
-            .iter()
-            .map(|(path, content)| (*path, (*content).to_owned()))
-            .collect(),
-        pass,
-    }
-}
-
-fn run_cases(cases: Vec<HeaderCase>) {
-    let mut failures = Vec::new();
-    for HeaderCase { name, files, pass } in cases {
-        let scratch = scratch_repo(&files);
-        let output = run_checker(scratch.path());
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        if pass && !output.status.success() {
-            failures.push(format!("{name}: rejected, want accepted:\n{text}"));
-        }
-        if !pass && output.status.success() {
-            failures.push(format!("{name}: accepted, want rejected:\n{text}"));
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+/// Runs the cases in scratch repositories, each with the checker copied from this repository.
+fn run_cases(cases: &[HeaderCase]) {
+    let problems = HARNESS.run_cases(&meta::repo(), cases);
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
 /// Go: `TestHeaderCases`, the edges of the window the header must sit in. `RUST_HEADER`'s last
@@ -257,7 +174,7 @@ fn run_cases(cases: Vec<HeaderCase>) {
 fn header_cases_for_the_window() {
     let at_the_edge = format!("{}{RUST_HEADER}", "// filler\n".repeat(13));
     let past_the_edge = format!("{}{RUST_HEADER}", "// filler\n".repeat(14));
-    run_cases(vec![
+    run_cases(&[
         case(
             "header ending on the last line of the window",
             &[("src/x.rs", &at_the_edge)],
@@ -272,11 +189,12 @@ fn header_cases_for_the_window() {
 }
 
 /// Go files are no longer governed: the Go code was removed at the Rust cutover. A tracked `.go`
-/// file passes without any header, NVIDIA's former Go originals included; the window cases above
-/// and the `.rs` cases below are its negative controls.
+/// file passes without any header, NVIDIA's former Go originals included. Its negative control is
+/// a Rust file without a header beside them, which is still refused; the window cases above and
+/// the `.rs` cases below are more.
 #[test]
 fn go_files_are_not_governed() {
-    run_cases(vec![
+    run_cases(&[
         case(
             "go file without a header",
             &[("internal/x/x.go", "package x\n")],
@@ -292,6 +210,14 @@ fn go_files_are_not_governed() {
             &[("internal/cgroup/api.go", "package cgroup\n")],
             true,
         ),
+        case(
+            "rust file without a header beside an unheaded go file",
+            &[
+                ("internal/x/x.go", "package x\n"),
+                ("src/x.rs", "//! A module.\n"),
+            ],
+            false,
+        ),
     ]);
 }
 
@@ -299,7 +225,7 @@ fn go_files_are_not_governed() {
 /// never governed: untracked files, make-common's files, Markdown, YAML and TOML.
 #[test]
 fn header_cases_for_other_kinds_and_exemptions() {
-    run_cases(vec![
+    run_cases(&[
         case(
             "shell script with the header",
             &[("scripts/a.sh", SHELL_HEADER)],
@@ -363,7 +289,7 @@ fn header_cases_for_other_kinds_and_exemptions() {
 #[test]
 fn header_cases_for_rust() {
     let other_holder = RUST_HEADER.replace("Roberto Leinardi", "Someone Else");
-    run_cases(vec![
+    run_cases(&[
         case(
             "rust file with the header",
             &[("src/x.rs", RUST_HEADER)],
@@ -424,7 +350,7 @@ fn header_cases_for_the_nvidia_ports() {
         "Copyright 2026 Roberto Leinardi.",
         "Copyright (c) 2021, NVIDIA CORPORATION.",
     );
-    run_cases(vec![
+    run_cases(&[
         case(
             "nvidia header on the rust api port",
             &[("src/cgroup/api.rs", RUST_NVIDIA_HEADER)],
@@ -485,7 +411,7 @@ fn header_cases_for_the_provenance_comment() {
         "{}{PROVENANCE_LINE}",
         APACHE_BLOCK.replacen(" *\n", &format!(" *\n{MIT_PERMISSION}"), 1)
     );
-    run_cases(vec![
+    run_cases(&[
         case(
             "provenance on one line",
             &[("src/clock.rs", &one_line)],

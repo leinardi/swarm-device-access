@@ -27,7 +27,6 @@
 
 use std::sync::LazyLock;
 
-use meta::repo;
 use regex::Regex;
 
 /// Where the one publication lives.
@@ -182,20 +181,18 @@ fn scan<'file>(files: impl Iterator<Item = (&'file str, String)>) -> (usize, Vec
 
 #[test]
 fn only_the_processor_publishes() {
-    let files = repo::tracked_or_new(&["*.rs"]);
+    let repo = meta::repo();
+    let files = repo.tracked_or_new(&["*.rs"]);
     assert!(
         files.iter().any(|path| path == DEFINITION),
         "the scan does not see {DEFINITION}: {files:?}"
     );
     assert!(
-        repo::read(DEFINITION).contains("pub fn publish("),
+        repo.read(DEFINITION).contains("pub fn publish("),
         "{DEFINITION} no longer defines publish; this test guards the wrong name"
     );
-    let present: Vec<&String> = files
-        .iter()
-        .filter(|path| repo::path(path).is_file())
-        .collect();
-    let (allowed, offenders) = scan(present.iter().map(|path| (path.as_str(), repo::read(path))));
+    let present: Vec<&String> = files.iter().collect();
+    let (allowed, offenders) = scan(present.iter().map(|path| (path.as_str(), repo.read(path))));
     assert!(
         offenders.is_empty(),
         "the config is published outside the processor: {offenders:?}"
@@ -203,7 +200,7 @@ fn only_the_processor_publishes() {
     let want = usize::from(
         present
             .iter()
-            .any(|path| path.starts_with(PROCESSOR) && repo::read(path).contains(PUBLISHER)),
+            .any(|path| path.starts_with(PROCESSOR) && repo.read(path).contains(PUBLISHER)),
     );
     assert_eq!(
         allowed, want,

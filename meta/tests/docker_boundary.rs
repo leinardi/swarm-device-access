@@ -36,7 +36,7 @@
 //!   `src/` builds the client from the environment (`Settings::from_env`);
 //! - nothing under `src/` names bollard, `testenv`, the harness that creates and removes
 //!   containers on purpose, or `testenv_core`, its shared half, whose `bollard` feature brings the
-//!   SDK.
+//!   SDK; and the root package declares none of them in any dependency table.
 //!
 //! The launcher's write calls take docker-engine's client through `Client::transport` and set
 //! their method outside `src/docker`, in the launcher's engine; who may do that is pinned by
@@ -46,7 +46,6 @@
 
 use std::sync::LazyLock;
 
-use meta::repo;
 use regex::Regex;
 use toml::{Table, Value};
 
@@ -247,6 +246,48 @@ fn manifest_problems(manifests: &[(String, String)]) -> Vec<String> {
     problems
 }
 
+/// The crates the root package never depends on: the SDK, the harness that creates and removes
+/// containers on purpose, and its shared half (whose `bollard` feature brings the SDK). The
+/// workspace may pin `testenv-core` for the harness member; the root package's own tables, test
+/// and build tables and target-specific ones included, never name any of them.
+const HARNESS_CRATES: &[&str] = &["bollard", "testenv", "testenv-core"];
+
+/// Every dependency entry of the root package (`manifest`, the root `Cargo.toml`'s text) on one of
+/// [`HARNESS_CRATES`], by its crate name: a rename (`package = ...`) in the entry, or in the
+/// workspace pin an entry inherits, is followed.
+fn harness_dependency_problems(manifest: &str) -> Vec<String> {
+    let manifest: Table = manifest
+        .parse()
+        .unwrap_or_else(|error| panic!("parse Cargo.toml: {error}"));
+    let pins = manifest
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(Value::as_table);
+    let mut problems = Vec::new();
+    for dependency in dependencies(&manifest) {
+        if dependency.table == "workspace.dependencies" {
+            continue;
+        }
+        let inherited = dependency.entry.get("workspace").and_then(Value::as_bool) == Some(true);
+        let crate_name = if inherited {
+            pins.and_then(|pins| pins.get(&dependency.crate_name))
+                .and_then(|pin| pin.get("package"))
+                .and_then(Value::as_str)
+                .unwrap_or(&dependency.crate_name)
+        } else {
+            &dependency.crate_name
+        };
+        if HARNESS_CRATES.contains(&crate_name) {
+            problems.push(format!(
+                "Cargo.toml [{}] {crate_name}: the root package depends on neither the Docker \
+                 SDK nor the harness",
+                dependency.table
+            ));
+        }
+    }
+    problems
+}
+
 /// The client crate, by its Rust name.
 static ENGINE_CRATE: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bdocker_engine\b"));
 /// A request being built: a `Request` constructor or the `request::Builder` type.
@@ -391,24 +432,23 @@ fn sdk_problems(files: &[(String, String)]) -> Vec<String> {
 /// The crate's sources: everything under `src/` but the unit tests (`tests.rs` and the modules
 /// under a `tests/` directory) and the test-only helpers (`src/test_support`).
 fn sources() -> Vec<(String, String)> {
-    repo::tracked_or_new(&["src/*.rs"])
+    let repo = meta::repo();
+    let paths: Vec<String> = repo
+        .tracked_or_new(&["src/*.rs"])
         .into_iter()
-        .filter(|path| repo::path(path).is_file())
         .filter(|path| {
             !matches!(path.rsplit('/').next(), Some("tests.rs"))
                 && !path.contains("/tests/")
                 && !path.starts_with("src/test_support")
         })
-        .map(|path| {
-            let text = repo::read(&path);
-            (path, text)
-        })
-        .collect()
+        .collect();
+    repo.read_all(&paths)
 }
 
 /// The workspace manifests: the root, then each member's.
 fn workspace_manifests() -> Vec<(String, String)> {
-    let root = repo::read("Cargo.toml");
+    let repo = meta::repo();
+    let root = repo.read("Cargo.toml");
     let parsed: Table = root
         .parse()
         .unwrap_or_else(|error| panic!("parse Cargo.toml: {error}"));
@@ -424,7 +464,7 @@ fn workspace_manifests() -> Vec<(String, String)> {
         .collect();
     let mut manifests = vec![("Cargo.toml".to_owned(), root)];
     for member in members {
-        let text = repo::read(&member);
+        let text = repo.read(&member);
         manifests.push((member, text));
     }
     manifests
@@ -432,14 +472,8 @@ fn workspace_manifests() -> Vec<(String, String)> {
 
 #[test]
 fn src_names_neither_the_sdk_nor_the_harness() {
-    let files: Vec<(String, String)> = repo::tracked_or_new(&["src/*.rs"])
-        .into_iter()
-        .filter(|path| repo::path(path).is_file())
-        .map(|path| {
-            let text = repo::read(&path);
-            (path, text)
-        })
-        .collect();
+    let repo = meta::repo();
+    let files = repo.read_all(&repo.tracked_or_new(&["src/*.rs"]));
     assert!(files.iter().any(|(path, _)| path == "src/lib.rs"));
     let problems = sdk_problems(&files);
     assert!(problems.is_empty(), "{}", problems.join("\n"));
@@ -499,6 +533,82 @@ fn another_client_configuration_is_refused() {
     for (index, case) in cases.iter().enumerate() {
         assert!(!manifest_problems(case).is_empty(), "case {index} accepted");
     }
+}
+
+/// The root package depends on neither bollard nor the harness (`testenv`, `testenv-core`), in
+/// any of its dependency tables.
+#[test]
+fn the_root_package_depends_on_neither_the_sdk_nor_the_harness() {
+    let root = meta::repo().read("Cargo.toml");
+    assert!(
+        root.contains("testenv-core = { git = "),
+        "the workspace pin of testenv-core moved; the control below would not see it allowed"
+    );
+    let problems = harness_dependency_problems(&root);
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Negative control: the SDK or either half of the harness in each of the root package's tables,
+/// renamed in the entry or in the workspace pin it inherits, is refused; the workspace pin alone
+/// is not.
+#[test]
+fn a_harness_dependency_of_the_root_package_is_refused() {
+    let root = meta::repo().read("Cargo.toml");
+    assert!(harness_dependency_problems(&root).is_empty());
+    for (name, extra, want) in [
+        (
+            "bollard in [dependencies]",
+            "\n[dependencies.bollard]\nversion = \"0.19\"\n",
+            "[dependencies] bollard",
+        ),
+        (
+            "testenv in [dev-dependencies]",
+            "\n[dev-dependencies.testenv]\npath = \"testenv\"\n",
+            "[dev-dependencies] testenv",
+        ),
+        (
+            "testenv-core in [build-dependencies]",
+            "\n[build-dependencies]\ntestenv-core.workspace = true\n",
+            "[build-dependencies] testenv-core",
+        ),
+        (
+            "testenv-core in a target table",
+            "\n[target.'cfg(unix)'.dependencies]\ntestenv-core.workspace = true\n",
+            "[target.cfg(unix).dependencies] testenv-core",
+        ),
+        (
+            "bollard in a target's dev-dependencies",
+            "\n[target.'cfg(unix)'.dev-dependencies]\nbollard = \"0.19\"\n",
+            "[target.cfg(unix).dev-dependencies] bollard",
+        ),
+        (
+            "bollard renamed in the entry",
+            "\n[dependencies.engine]\npackage = \"bollard\"\nversion = \"0.19\"\n",
+            "[dependencies] bollard",
+        ),
+    ] {
+        let problems = harness_dependency_problems(&format!("{root}{extra}"));
+        assert!(
+            problems.len() == 1 && problems[0].contains(want),
+            "{name}: want one problem naming {want:?}, got {problems:?}"
+        );
+    }
+    let renamed_pin = root.replacen(
+        "[workspace.dependencies]\n",
+        "[workspace.dependencies]\nharness = { package = \"testenv-core\", path = \"x\" }\n",
+        1,
+    );
+    assert_ne!(
+        renamed_pin, root,
+        "the [workspace.dependencies] table moved"
+    );
+    let problems = harness_dependency_problems(&format!(
+        "{renamed_pin}\n[dev-dependencies.harness]\nworkspace = true\n"
+    ));
+    assert!(
+        problems.len() == 1 && problems[0].contains("[dev-dependencies] testenv-core"),
+        "testenv-core renamed in the workspace pin: {problems:?}"
+    );
 }
 
 #[test]
