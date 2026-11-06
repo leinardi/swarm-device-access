@@ -24,7 +24,7 @@ use super::error::{LaunchError, RemoveError, StaleError};
 use super::spec::{LABEL_LAUNCHER, LABEL_ROLE, ROLE_DAEMON};
 use super::{Runner, short_id};
 use crate::docker::{CallContext, with_context};
-use crate::logger::Attr;
+use go_slog::Attr;
 
 /// Identifies a daemon started by the sh wrapper of earlier releases, which recorded no owner.
 const LABEL_IMAGE_TITLE: &str = "org.opencontainers.image.title";

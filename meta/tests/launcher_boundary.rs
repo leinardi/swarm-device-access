@@ -17,15 +17,18 @@
 //! Only the launcher reaches the Docker write calls (`docs/rust-port.md`, the Docker launcher
 //! path; the `trust-boundary` skill): the privileged daemon can create, start, stop or remove
 //! nothing. The write calls are the launcher's engine, `src/launcher/engine.rs`, sent through
-//! the two crate-private hooks of the shared client, `Client::exchange` and
-//! `Client::exchange_upgrade`. This pins it on the text of the non-test sources under `src/`:
+//! the two write calls of rust-common's docker-engine client, its sanctioned `pub`
+//! `Client::exchange` and `Client::exchange_upgrade` (the crate's `write` and `attach`, which
+//! only the root package enables: `docker_boundary.rs`). The daemon's `docker::Client` hands
+//! that client out through one crate-private hook, `Client::transport`. This pins it on the text
+//! of the non-test sources under `src/`:
 //!
-//! - the hooks stay `pub(crate)`, declared in `src/docker/client.rs`, and only
-//!   `src/launcher/engine.rs` calls them;
-//! - outside `src/docker` (whose own methods `docker_boundary.rs` pins), only
-//!   `src/launcher/engine.rs` sets a request's method or names a write method (`POST`, `PUT`,
-//!   `DELETE`, `PATCH`, or one parsed from text); the metrics server compares a request's
-//!   method with `HEAD`, `OPTIONS` and `CONNECT`, which write nothing;
+//! - the hook stays `pub(crate)`, declared once in `src/docker/api.rs`, and only
+//!   `src/launcher/engine.rs` calls it or a write call; nothing in-tree declares a function of
+//!   the write calls' names, so no wrapper can widen them;
+//! - only `src/launcher/engine.rs` sets a request's method or names a write method (`POST`,
+//!   `PUT`, `DELETE`, `PATCH`, or one parsed from text): `src/docker` names no method at all
+//!   (`docker_boundary.rs`), and the metrics server (`src/server.rs`, on go-http) neither;
 //! - outside `src/launcher`, nothing names the engine: its module, `Engine`, `EngineApi`, or a
 //!   launcher path to them;
 //! - outside `src/launcher` and the CLI entry modules that run the `launch` subcommand
@@ -36,13 +39,12 @@
 
 use std::sync::LazyLock;
 
-use meta::repo;
 use regex::Regex;
 
 /// The launcher's write engine.
 const ENGINE: &str = "src/launcher/engine.rs";
-/// Where the hooks are declared.
-const CLIENT: &str = "src/docker/client.rs";
+/// Where the hook is declared.
+const CLIENT: &str = "src/docker/api.rs";
 /// The modules that run the `launch` subcommand, a trailing `/` standing for a directory.
 const CLI_ENTRY: &[&str] = &["src/main.rs", "src/run.rs", "src/cli.rs", "src/cli/"];
 
@@ -58,11 +60,19 @@ fn pattern(text: &str) -> Regex {
     Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
 }
 
-/// A write hook's declaration, with its visibility.
+/// A function of a write call's name or of the hook's, with its visibility.
 static HOOK_DECLARED: LazyLock<Regex> =
-    LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+exchange(?:_upgrade)?\b"));
-/// A call to a write hook.
-static HOOK_CALLED: LazyLock<Regex> = LazyLock::new(|| pattern(r"\.\s*exchange(?:_upgrade)?\s*\("));
+    LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+(?:exchange(?:_upgrade)?|transport)\b"));
+/// A function handing out docker-engine's client (whatever its name), or the client renamed so
+/// one could hand it out under another type name.
+static CLIENT_HANDED_OUT: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(
+        r"\bfn\s+\w+[^{;]*->[^{;]*\bdocker_engine\s*::\s*Client\b|\bdocker_engine\s*::\s*(?:\{[^}]*\b)?Client\s+as\b",
+    )
+});
+/// A use of a write call or of the hook: a method call or a path to it.
+static HOOK_CALLED: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(?:\.|::)\s*(?:exchange(?:_upgrade)?|transport)\b"));
 /// A write method named or set: a `Method` constant or conversion, a `Request` shortcut, a
 /// method setter or a write method's name as a string.
 static WRITE_METHOD: LazyLock<Regex> = LazyLock::new(|| {
@@ -120,6 +130,31 @@ fn found_in(
         .collect()
 }
 
+/// What hands out docker-engine's client besides `transport` in the client file.
+fn handout_problems(files: &[(String, String)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut handed_out = 0;
+    for (path, text) in files {
+        for found in CLIENT_HANDED_OUT.find_iter(text) {
+            if path == CLIENT && found.as_str().starts_with("fn transport(") {
+                handed_out += 1;
+            } else {
+                problems.push(format!(
+                    "{path}:{}: {}: only transport in {CLIENT} hands out docker-engine's client",
+                    line_of(text, found.start()),
+                    found.as_str()
+                ));
+            }
+        }
+    }
+    if handed_out != 1 {
+        problems.push(format!(
+            "transport in {CLIENT} hands out docker-engine's client {handed_out} times, want once"
+        ));
+    }
+    problems
+}
+
 /// What is wrong with the sources, given as `(path, text)` pairs.
 fn problems(sources: &[(String, String)]) -> Vec<String> {
     let files: Vec<(String, String)> = sources
@@ -128,8 +163,8 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
         .collect();
     let mut problems = Vec::new();
 
-    // The hooks: declared crate-private in the client, and nowhere else, called only by the
-    // engine.
+    // The hook: declared crate-private in the client, and nowhere else; it and the write calls
+    // used only by the engine.
     let mut hooks = Vec::new();
     for (path, text) in &files {
         for found in HOOK_DECLARED.find_iter(text) {
@@ -138,27 +173,26 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
                 line_of(text, found.start()),
                 found.as_str()
             );
-            if path != CLIENT || !found.as_str().starts_with("pub(crate) async fn exchange") {
+            if path != CLIENT || found.as_str() != "pub(crate) fn transport" {
                 problems.push(format!(
-                    "{site}: the write hooks are pub(crate), in {CLIENT}"
+                    "{site}: only the hook is declared, pub(crate) fn transport in {CLIENT}"
                 ));
             }
             hooks.push(found.as_str().to_owned());
         }
     }
-    if hooks.len() != 2 {
+    if hooks.len() != 1 {
+        problems.push(format!("hooks declared: {hooks:?}; want transport alone"));
+    }
+    problems.extend(handout_problems(&files));
+    for site in found_in(&files, &HOOK_CALLED, |path| path == ENGINE) {
         problems.push(format!(
-            "write hooks declared: {hooks:?}; want exchange and exchange_upgrade"
+            "{site}: only {ENGINE} takes the transport and calls the writes"
         ));
     }
-    for site in found_in(&files, &HOOK_CALLED, |path| path == ENGINE) {
-        problems.push(format!("{site}: only {ENGINE} calls the write hooks"));
-    }
 
-    // HTTP methods: outside the client, only the engine sets one or names a write method.
-    for site in found_in(&files, &WRITE_METHOD, |path| {
-        path == ENGINE || path.starts_with("src/docker/")
-    }) {
+    // HTTP methods: only the engine sets one or names a write method.
+    for site in found_in(&files, &WRITE_METHOD, |path| path == ENGINE) {
         problems.push(format!("{site}: only {ENGINE} names a write method"));
     }
 
@@ -181,14 +215,16 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     problems
 }
 
-/// The crate's sources: everything under `src/` but the unit tests and the test-only fakes.
+/// The crate's sources: everything under `src/` but the unit tests (`tests.rs` and the modules
+/// under a `tests/` directory) and the test-only fakes.
 fn sources() -> Vec<(String, String)> {
-    repo::tracked_or_new(&["src/*.rs"])
+    let repo = meta::repo();
+    repo.tracked_or_new(&["src/*.rs"])
         .into_iter()
-        .filter(|path| repo::path(path).is_file())
         .filter(|path| !matches!(path.rsplit('/').next(), Some("tests.rs" | "fake.rs")))
+        .filter(|path| !path.contains("/tests/"))
         .map(|path| {
-            let text = repo::read(&path);
+            let text = repo.read(&path);
             (path, text)
         })
         .collect()
@@ -229,11 +265,28 @@ fn a_write_call_outside_the_launcher_is_refused() {
     let mut widened = files.clone();
     for (path, text) in &mut widened {
         if path == CLIENT {
-            *text = client.replace("pub(crate) async fn exchange(", "pub async fn exchange(");
+            *text = client.replace("pub(crate) fn transport", "pub fn transport");
         }
     }
+    assert_ne!(widened, files, "the hook moved");
     let cases = [
         widened,
+        with(
+            CLIENT,
+            "\npub(crate) async fn exchange(&self) {\n    self.inner.exchange(\"/x\", \"\", |_| {}).await;\n}\n",
+        ),
+        with(
+            "src/daemon/mod.rs",
+            "\nfn raw(client: &Client) -> &docker_engine::Client {\n    client.transport()\n}\n",
+        ),
+        with(
+            "src/processor/reconcile.rs",
+            "\nasync fn kill(client: &Client) {\n    docker_engine::Client::exchange(client.transport(), \"/x\", \"\", |_| {}).await;\n}\n",
+        ),
+        with(
+            "src/docker/api.rs",
+            "\nfn shape(request: &mut Request) {\n    *request.method_mut() = Method::POST;\n}\n",
+        ),
         with(
             "src/processor/reconcile.rs",
             "\nasync fn kill(client: &Client) {\n    client.exchange(\"/containers/x/kill\", \"\", |_| {}).await;\n}\n",
@@ -288,5 +341,24 @@ fn a_write_call_outside_the_launcher_is_refused() {
     ];
     for (index, case) in cases.iter().enumerate() {
         assert!(!problems(case).is_empty(), "case {index} was not refused");
+    }
+}
+
+/// Negative control: a second function handing out docker-engine's client from the client
+/// file, under another name or through a renamed import, is refused.
+#[test]
+fn a_second_handout_of_the_client_is_refused() {
+    let files = sources();
+    assert!(problems(&files).is_empty());
+    for extra in [
+        "\npub(crate) fn raw(&self) -> &docker_engine::Client {\n    &self.inner\n}\n",
+        "\nuse docker_engine::Client as Transport;\nfn raw(client: &Client) -> &Transport {\n    &client.inner\n}\n",
+    ] {
+        let mut changed = files.clone();
+        let Some((_, text)) = changed.iter_mut().find(|(path, _)| path == CLIENT) else {
+            panic!("{CLIENT} not scanned");
+        };
+        text.push_str(extra);
+        assert!(!problems(&changed).is_empty(), "accepted: {extra}");
     }
 }

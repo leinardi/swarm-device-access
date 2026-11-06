@@ -37,12 +37,10 @@ src/
     v1.rs, v1set.rs, ledger.rs                  # devices.allow/devices.deny, owned-exception ledger
     v2.rs, v2plan.rs, v2ops.rs, owned.rs, ebpf.rs, asm.rs  # owned wrapper around runtime filter
     bpf_sys.rs             # raw bpf(2); the only unsafe module
-  docker/                  # read-only Engine client on hyper (GET + HEAD /_ping, unix socket only)
-  metrics/, server.rs      # Recorder (noop form), exposition; /metrics, /healthz, /readyz
-  logger/                  # slog-compatible text/json/plain handlers behind LogHandle
+  docker/                  # read-only DockerApi on docker-engine (GET + HEAD /_ping, unix socket only)
+  metrics/, server.rs      # Recorder (noop form) on go-prom; /metrics, /healthz, /readyz on go-http
   systemd.rs               # zbus D-Bus Reloading watcher
-  go_compat/               # Go stdlib formatting/parsing the 1.x text depends on
-  clock.rs                 # the one wall-clock read; Clock trait
+  version.rs               # BUILD stamps (service-kit's buildinfo!)
 tests/                     # goldens vs frozen 1.x captures (tests/testdata), wire, parity
 meta/                      # repository meta-tests (pins, Dockerfile, CI gates, links, boundaries)
 testenv/                   # integration harness (feature integration), host Docker
@@ -58,6 +56,9 @@ docs/                      # architecture.md, testing.md, release.md, rust-port.
 - Log, error, metric and Engine-request text is the 1.x contract; a difference needs a README Q entry.
 - `docs/rust-port.md` is the reuse ledger: check and update it when a reused component changes or
   an upstream fix is taken.
+- Shared code (logger, Go ports, clock, metrics registry, HTTP server, Engine client, runtime,
+  harness and meta-test helpers) is rust-common's crates: a difference is a parameter there, a fix
+  lands there first, never a fork here (`AGENTS.md`, Shared crates).
 - Container dedup: the coordinator's `processed` map bridges enumeration and the event stream.
 
 See `mem:tech_stack`, `mem:conventions`, `mem:suggested_commands`, `mem:task_completion`.

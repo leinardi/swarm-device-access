@@ -30,13 +30,14 @@ publish = false
 [lints]
 workspace = true
 
-# The Dockerfile and Markdown readers of the library, and the source scans of the tests.
+# The repository checks the meta-tests run (repo-meta, rust-common) and the repository root
+# (testenv-core's repo_root!, rust-common).
 [dependencies]
-regex = "1.13.1"
+repo-meta.workspace = true
+testenv-core.workspace = true
 
-# The pre-commit configuration and the workflows (YAML), the scratch repositories of the script
-# tests, and the workspace manifests and droast.toml (TOML).
+# This repository's own rules: the source scans (regex), and the workspace manifests and
+# droast.toml (TOML).
 [dev-dependencies]
-serde_yaml_ng = "0.10"
-tempfile = "3.27.0"
+regex = "1.13.1"
 toml = "1.1.8"

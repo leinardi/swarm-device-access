@@ -38,8 +38,8 @@ use super::testing::{canonical, rule, runtime_original};
 use super::v2::CgroupV2;
 use super::v2ops::{Attached, F_ALLOW_MULTI, LoadError, OpsError, ReplaceProbe, V2Ops};
 use super::v2plan::FilterCache;
-use crate::logger::{Level, MemorySink};
 use crate::test_support::capture_logs;
+use go_slog::{Level, MemorySink};
 
 /// Go's `errInjected`.
 pub(super) const INJECTED: Errno = Errno::IO;

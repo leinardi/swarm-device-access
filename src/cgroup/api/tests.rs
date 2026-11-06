@@ -192,7 +192,7 @@ fn proc_cgroup_errors_read_as_go() {
 /// Go: `TestNew_ValidVersions`.
 #[test]
 fn the_factory_builds_both_versions() {
-    let (log, _) = crate::test_support::capture_logs(crate::logger::Level::DEBUG);
+    let (log, _) = crate::test_support::capture_logs(go_slog::Level::DEBUG);
     for version in [CgroupVersion::V1, CgroupVersion::V2] {
         let _controller: Box<dyn Interface> = new(
             version,

@@ -24,15 +24,12 @@
 //! Inverted ([`check_go_identity`]), the same answer proves that the Go image the cross-language
 //! upgrade test runs is Go: never a Go image standing in for Rust, nor the reverse.
 //!
-//! Also here, since it needs no daemon either: whether an ELF binary is static, as the binary the
-//! suite copies out of the image under test is.
+//! The flag, the matching of a whole answer, the excerpt and the ELF check are testenv-core's
+//! `identity`; the two answers and the messages are this suite's.
 
-use swarm_device_access::go_compat::quote;
-
-use crate::Error;
-
-/// The argument the check runs the daemon with.
-pub const IDENTITY_FLAG: &str = "-help";
+use go_compat::quote;
+use testenv_core::Error;
+use testenv_core::identity::{Answer, IDENTITY_FLAG, Quoting, Text, excerpt};
 
 /// The exit code the Rust daemon refuses a single-dash long flag with: clap's usage error.
 pub const RUST_REFUSAL_EXIT_CODE: i64 = 2;
@@ -42,9 +39,16 @@ pub const RUST_REFUSAL_EXIT_CODE: i64 = 2;
 pub const RUST_REFUSAL: &str =
     "error: single-dash long flags are not supported: '-help'; use '--help'\n";
 
+/// The Rust daemon's whole answer: exit [`RUST_REFUSAL_EXIT_CODE`], nothing on stdout, exactly
+/// [`RUST_REFUSAL`] on stderr.
+pub const RUST_ANSWER: Answer = Answer {
+    exit_code: RUST_REFUSAL_EXIT_CODE,
+    stdout: Text::Empty,
+    stderr: Text::Exact(RUST_REFUSAL),
+};
+
 /// Checks the answer `subject` (an image or a binary, as the message names it) gave to
-/// [`IDENTITY_FLAG`]: exit [`RUST_REFUSAL_EXIT_CODE`], [`RUST_REFUSAL`] on stderr and nothing on
-/// stdout.
+/// [`IDENTITY_FLAG`]: [`RUST_ANSWER`].
 ///
 /// # Errors
 ///
@@ -55,15 +59,15 @@ pub fn check_identity(
     stdout: &str,
     stderr: &str,
 ) -> Result<(), Error> {
-    if exit_code == RUST_REFUSAL_EXIT_CODE && stderr == RUST_REFUSAL && stdout.is_empty() {
+    if RUST_ANSWER.matches(Some(exit_code), stdout, stderr) {
         return Ok(());
     }
     Err(Error::new(format!(
         "{subject} is not the Rust daemon: {IDENTITY_FLAG} exited {exit_code} with stdout {} and \
          stderr {}, want exit {RUST_REFUSAL_EXIT_CODE} with {} on stderr alone (a Go build \
          prints its usage and exits 0)",
-        excerpt(stdout),
-        excerpt(stderr),
+        excerpt(stdout, Quoting::Go),
+        excerpt(stderr, Quoting::Go),
         quote::quote(RUST_REFUSAL)
     )))
 }
@@ -75,10 +79,17 @@ pub const GO_HELP_EXIT_CODE: i64 = 0;
 /// How the Go daemon's usage starts on stderr (`run` in `cmd/swarm-device-access/main.go`).
 pub const GO_USAGE_PREFIX: &str = "Usage: swarm-device-access [flags]\n";
 
+/// The Go daemon's whole answer: exit [`GO_HELP_EXIT_CODE`], nothing on stdout, its usage on
+/// stderr ([`GO_USAGE_PREFIX`], then the flags).
+pub const GO_ANSWER: Answer = Answer {
+    exit_code: GO_HELP_EXIT_CODE,
+    stdout: Text::Empty,
+    stderr: Text::Prefix(GO_USAGE_PREFIX),
+};
+
 /// The identity check inverted, for the Go image the cross-language upgrade test needs: the
-/// answer `subject` gave to [`IDENTITY_FLAG`] must be the Go daemon's (exit
-/// [`GO_HELP_EXIT_CODE`], its usage on stderr, nothing on stdout). The Rust refusal, or anything
-/// else, is refused, so the Rust image can never stand in for the Go one.
+/// answer `subject` gave to [`IDENTITY_FLAG`] must be [`GO_ANSWER`]. The Rust refusal, or
+/// anything else, is refused, so the Rust image can never stand in for the Go one.
 ///
 /// # Errors
 ///
@@ -89,101 +100,22 @@ pub fn check_go_identity(
     stdout: &str,
     stderr: &str,
 ) -> Result<(), Error> {
-    if exit_code == GO_HELP_EXIT_CODE && stderr.starts_with(GO_USAGE_PREFIX) && stdout.is_empty() {
+    if GO_ANSWER.matches(Some(exit_code), stdout, stderr) {
         return Ok(());
     }
     Err(Error::new(format!(
         "{subject} is not the Go daemon: {IDENTITY_FLAG} exited {exit_code} with stdout {} and \
          stderr {}, want exit {GO_HELP_EXIT_CODE} with stderr starting {} (the Rust daemon \
          refuses the flag with exit {RUST_REFUSAL_EXIT_CODE})",
-        excerpt(stdout),
-        excerpt(stderr),
+        excerpt(stdout, Quoting::Go),
+        excerpt(stderr, Quoting::Go),
         quote::quote(GO_USAGE_PREFIX)
     )))
 }
 
-/// The ELF program header type of the dynamic loader's path: a binary that has one needs a loader
-/// (and its libraries) that the static runtime image does not have.
-const PT_INTERP: u32 = 3;
-
-/// Whether the ELF binary `bytes` is static: it has no `PT_INTERP` program header, as a static or
-/// static-pie binary has none.
-///
-/// # Errors
-///
-/// `bytes` is not a 64-bit little-endian ELF file (the two host architectures the suite builds
-/// for), or its program headers lie outside it.
-pub fn is_static_elf(bytes: &[u8]) -> Result<bool, Error> {
-    let not_elf = || Error::new("not a 64-bit little-endian ELF file");
-    if bytes.get(..4) != Some(b"\x7fELF".as_slice())
-        || bytes.get(4) != Some(&2)
-        || bytes.get(5) != Some(&1)
-    {
-        return Err(not_elf());
-    }
-    let table = read_u64(bytes, 0x20).ok_or_else(not_elf)?;
-    let entry_size = read_u16(bytes, 0x36).ok_or_else(not_elf)?;
-    let entries = read_u16(bytes, 0x38).ok_or_else(not_elf)?;
-    let table = usize::try_from(table).map_err(|_| not_elf())?;
-    for index in 0..usize::from(entries) {
-        let offset = index
-            .checked_mul(usize::from(entry_size))
-            .and_then(|relative| relative.checked_add(table))
-            .ok_or_else(not_elf)?;
-        let kind = read_u32(bytes, offset)
-            .ok_or_else(|| Error::new(format!("program header {index} lies outside the file")))?;
-        if kind == PT_INTERP {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-/// The first line of `text`, quoted, with the byte count when there is more.
-fn excerpt(text: &str) -> String {
-    let first = text.lines().next().unwrap_or_default();
-    if first.len() + 1 >= text.len() {
-        return quote::quote(text);
-    }
-    format!(
-        "{} (first line of {} bytes)",
-        quote::quote(first),
-        text.len()
-    )
-}
-
-fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    let end = offset.checked_add(2)?;
-    bytes
-        .get(offset..end)?
-        .try_into()
-        .ok()
-        .map(u16::from_le_bytes)
-}
-
-fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    let end = offset.checked_add(4)?;
-    bytes
-        .get(offset..end)?
-        .try_into()
-        .ok()
-        .map(u32::from_le_bytes)
-}
-
-fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
-    let end = offset.checked_add(8)?;
-    bytes
-        .get(offset..end)?
-        .try_into()
-        .ok()
-        .map(u64::from_le_bytes)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        RUST_REFUSAL, RUST_REFUSAL_EXIT_CODE, check_go_identity, check_identity, is_static_elf,
-    };
+    use super::{RUST_REFUSAL, RUST_REFUSAL_EXIT_CODE, check_go_identity, check_identity};
 
     /// What the Go daemon answers to `-help`, captured from `make go-build`'s binary (go1.26.10,
     /// at the commit before this harness): `dist/swarm-device-access -help`, which exited 0 with
@@ -215,13 +147,14 @@ mod tests {
         assert!(GO_STDERR.starts_with("Usage: swarm-device-access [flags]\n"));
         let error = check_identity("image go:x", GO_EXIT_CODE, GO_STDOUT, GO_STDERR)
             .expect_err("the Go answer was accepted");
-        let message = error.to_string();
-        assert!(
-            message.starts_with(concat!(
+        assert_eq!(
+            error.to_string(),
+            concat!(
                 "image go:x is not the Rust daemon: -help exited 0 with stdout \"\" and stderr ",
-                "\"Usage: swarm-device-access [flags]\" (first line of 1285 bytes)"
-            )),
-            "{message}"
+                "\"Usage: swarm-device-access [flags]\" (first line of 1285 bytes), want exit 2 ",
+                "with \"error: single-dash long flags are not supported: '-help'; use '--help'\\n\" ",
+                "on stderr alone (a Go build prints its usage and exits 0)"
+            )
         );
     }
 
@@ -262,11 +195,14 @@ mod tests {
     fn the_rust_answer_is_refused_as_go() {
         let error = check_go_identity("image rust:x", RUST_REFUSAL_EXIT_CODE, "", RUST_REFUSAL)
             .expect_err("the Rust answer was accepted as Go");
-        assert!(
-            error
-                .to_string()
-                .starts_with("image rust:x is not the Go daemon: -help exited 2"),
-            "{error}"
+        assert_eq!(
+            error.to_string(),
+            concat!(
+                "image rust:x is not the Go daemon: -help exited 2 with stdout \"\" and stderr ",
+                "\"error: single-dash long flags are not supported: '-help'; use '--help'\\n\", ",
+                "want exit 0 with stderr starting \"Usage: swarm-device-access [flags]\\n\" (the ",
+                "Rust daemon refuses the flag with exit 2)"
+            )
         );
         for (name, exit_code, stdout, stderr) in [
             ("exit 2", 2, GO_STDOUT, GO_STDERR),
@@ -280,49 +216,5 @@ mod tests {
                 "{name} was accepted as Go"
             );
         }
-    }
-
-    /// A minimal ELF64 header with `kinds` as its program header types.
-    fn elf(kinds: &[u32]) -> Vec<u8> {
-        let mut bytes = vec![0_u8; 64];
-        bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
-        bytes[0x20..0x28].copy_from_slice(&64_u64.to_le_bytes());
-        bytes[0x36..0x38].copy_from_slice(&56_u16.to_le_bytes());
-        let count = u16::try_from(kinds.len()).expect("too many headers");
-        bytes[0x38..0x3a].copy_from_slice(&count.to_le_bytes());
-        for kind in kinds {
-            let mut header = vec![0_u8; 56];
-            header[..4].copy_from_slice(&kind.to_le_bytes());
-            bytes.extend(header);
-        }
-        bytes
-    }
-
-    #[test]
-    fn a_loader_makes_a_binary_dynamic() {
-        assert!(is_static_elf(&elf(&[6, 1, 1])).expect("parse"));
-        assert!(!is_static_elf(&elf(&[6, 3, 1])).expect("parse"));
-        assert!(is_static_elf(&elf(&[])).expect("parse"));
-    }
-
-    #[test]
-    fn what_is_not_an_elf64_file_is_refused() {
-        assert!(is_static_elf(b"#!/bin/sh\n").is_err());
-        assert!(is_static_elf(&[]).is_err());
-        let mut thirty_two_bit = elf(&[1]);
-        thirty_two_bit[4] = 1;
-        assert!(is_static_elf(&thirty_two_bit).is_err());
-        let mut truncated = elf(&[1, 1]);
-        truncated.truncate(64 + 56);
-        assert!(is_static_elf(&truncated).is_err());
-    }
-
-    /// The real-file control: this test binary, linked against glibc, names its loader.
-    #[cfg(target_env = "gnu")]
-    #[test]
-    fn this_glibc_test_binary_is_dynamic() {
-        let path = std::env::current_exe().expect("current exe");
-        let bytes = std::fs::read(&path).expect("read the test binary");
-        assert!(!is_static_elf(&bytes).expect("parse"), "{}", path.display());
     }
 }

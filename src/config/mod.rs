@@ -37,9 +37,9 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use crate::go_compat::errno::io_error_text;
-use crate::go_compat::quote::quote;
 use crate::policy::{self, Global, PolicyError};
+use go_compat::errno::io_error_text;
+use go_compat::quote::quote;
 
 pub use yaml::{DecodeError, Shape, ShapeError, SyntaxError};
 

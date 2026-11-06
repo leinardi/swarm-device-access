@@ -57,7 +57,7 @@ fn injected() -> io::Error {
 impl Model {
     fn new(list: &str) -> Arc<Self> {
         let model = Arc::new(Self {
-            dir: TempDir::new(),
+            dir: TempDir::new("sda-test"),
             state: Mutex::new(ModelState {
                 entries: parse_devices_list(list.as_bytes()).unwrap(),
                 ..ModelState::default()
@@ -587,7 +587,7 @@ fn the_ledger_is_keyed_by_inode() {
 /// The production files' errors read as Go's `openatFiles` (texts from a scratch Go test).
 #[test]
 fn openat_file_errors_read_as_go() {
-    let dir = TempDir::new();
+    let dir = TempDir::new("sda-test");
     std::fs::create_dir(dir.path().join(DEVICES_ALLOW)).unwrap();
     let handle = CgroupHandle::open(dir.path().to_str().unwrap()).unwrap();
     assert_eq!(

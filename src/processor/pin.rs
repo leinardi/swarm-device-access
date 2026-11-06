@@ -34,8 +34,8 @@ use rustix::process::{Pid, PidfdFlags};
 
 use super::devfs::SysError;
 use crate::cgroup::{ParseError, ProcCgroup, parse_proc_cgroup};
-use crate::go_compat::filepath;
-use crate::go_compat::quote::quote;
+use go_compat::filepath;
+use go_compat::quote::quote;
 
 /// A process held by a pidfd: while it is alive its pid cannot be reused, so a pid read once stays
 /// meaningful. The pidfd closes when the value is dropped.

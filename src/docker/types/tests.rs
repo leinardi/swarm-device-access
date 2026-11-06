@@ -141,13 +141,22 @@ fn decode_first_reads_like_a_go_decoder() {
         decode_first::<Vec<ContainerSummary>>(b"  [] trailing garbage").unwrap(),
         []
     );
-    assert_eq!(decode_first::<ContainerSummary>(b"").unwrap_err(), "EOF");
     assert_eq!(
-        decode_first::<ContainerSummary>(b" \n\t").unwrap_err(),
+        decode_first::<ContainerSummary>(b"")
+            .unwrap_err()
+            .to_string(),
         "EOF"
     );
     assert_eq!(
-        decode_first::<ContainerSummary>(br#"{"Id":"n"#).unwrap_err(),
+        decode_first::<ContainerSummary>(b" \n\t")
+            .unwrap_err()
+            .to_string(),
+        "EOF"
+    );
+    assert_eq!(
+        decode_first::<ContainerSummary>(br#"{"Id":"n"#)
+            .unwrap_err()
+            .to_string(),
         "unexpected EOF"
     );
     assert!(decode_first::<ContainerSummary>(br#"{"Id":5}"#).is_err());

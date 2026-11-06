@@ -24,7 +24,7 @@ use crate::test_support::TempDir;
 /// Go: `TestOpenCgroup_RecordsInode`.
 #[test]
 fn opening_records_the_inode() {
-    let dir = TempDir::new();
+    let dir = TempDir::new("sda-test");
     let path = dir.path().to_str().unwrap();
     let handle = CgroupHandle::open(path).unwrap();
     assert_eq!(
@@ -40,7 +40,7 @@ fn opening_records_the_inode() {
 /// even after the directory is renamed.
 #[test]
 fn membership_reads_cgroup_procs_through_the_descriptor() {
-    let dir = TempDir::new();
+    let dir = TempDir::new("sda-test");
     let cgroup = dir.path().join("cgroup");
     std::fs::create_dir(&cgroup).unwrap();
     std::fs::write(cgroup.join("cgroup.procs"), "1\n234\n").unwrap();
@@ -54,7 +54,7 @@ fn membership_reads_cgroup_procs_through_the_descriptor() {
 /// The errors read as Go's.
 #[test]
 fn errors_read_as_go() {
-    let dir = TempDir::new();
+    let dir = TempDir::new("sda-test");
     let missing = dir.path().join("missing");
     let missing = missing.to_str().unwrap();
     assert_eq!(

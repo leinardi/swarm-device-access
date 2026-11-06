@@ -59,7 +59,7 @@ impl DevNode for FakeNode {
 
 impl FakeDevFs {
     pub(super) fn new() -> Self {
-        let dir = TempDir::new();
+        let dir = TempDir::new("sda-test");
         let root = dir.path().to_str().unwrap().to_owned();
         Self {
             dir,

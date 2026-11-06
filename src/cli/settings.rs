@@ -31,11 +31,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::Parsed;
 use crate::config::{self, FileSchema, LoadError, Runtime};
-use crate::go_compat::errors;
-use crate::logger::{Attr, LogHandle};
 use crate::policy::Global;
 use crate::server;
 use crate::task::finish;
+use go_compat::errors;
+use go_slog::{Attr, LogHandle};
 
 /// Go's `errDryRunEnable`.
 const DRY_RUN_ENABLE: &str = "dry-run cannot be enabled on a running daemon; to stop enforcing, \

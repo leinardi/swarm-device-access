@@ -6,11 +6,13 @@
   static musl release binaries with cargo-zigbuild and pinned zig
 - **Key crates**:
   - `tokio`, `tokio-util` — runtime, cancellation, task tracking
-  - `hyper`, `hyper-util` — in-tree Docker Engine client and the metrics server
+  - rust-common (git, pinned by release tag `v0.2.1`): `go-compat`, `go-clock`, `go-slog`,
+    `go-prom`, `go-http`, `docker-engine`, `service-kit`, `testenv-core`, `repo-meta`
+  - `hyper`, `hyper-util` — the launcher's writes and attach on docker-engine's transport
   - `rustix` — syscalls (openat2, fstat, pidfd); `libc` only for raw `bpf(2)` in `bpf_sys.rs`
   - `zbus` — systemd D-Bus watcher
   - `clap` — flags; `saphyr-parser` — config file; `serde`/`serde_json` — Engine API types
-  - `jiff` — time; `sha2` — wrapper digest; `flate2` — gzip exposition
+  - `jiff` — time; `sha2` — wrapper digest
   - `bollard` — integration harness only (`testenv`, feature `integration`)
 - **Linters**: clippy (pedantic + restriction lints, `-D warnings`), rustfmt, cargo-deny,
   cargo-machete, droast, ShellCheck; enforced via pre-commit hooks

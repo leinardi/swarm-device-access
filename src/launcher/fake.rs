@@ -46,8 +46,8 @@ use super::engine::{
 use super::spec::{DEFAULT_HOST_DOCKER_SOCKET, DaemonSpec, Options};
 use super::{Console, Launch, LaunchError, Timing};
 use crate::docker::{CallContext, Error};
-use crate::logger::{Level, MemorySink};
 use crate::test_support::capture_logs;
+use go_slog::{Level, MemorySink};
 
 pub(super) const TEST_LAUNCHER_ID: &str =
     "1111111111111111111111111111111111111111111111111111111111111111";

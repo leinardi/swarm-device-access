@@ -23,8 +23,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use jiff::Timestamp;
 
 use crate::cgroup::{CgroupVersion, Identity};
-use crate::clock::Clock;
-use crate::go_compat::time_layout::{go_zero_time, parse_rfc3339_nano};
+use go_clock::Clock;
+use go_compat::time_layout::{go_zero_time, parse_rfc3339_nano};
 
 /// How much is known about one run of a container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

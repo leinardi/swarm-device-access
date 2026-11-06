@@ -244,10 +244,10 @@ The daemon serves HTTP only when told to: `--metrics-addr` (metrics, `/healthz`,
 empty by default, there is no debug listener (`--debug-addr` must be empty, Q2), and the
 launcher's daemon has network `none` unless `--host-network` is set. Whatever listens is reachable
 by anything on that network, so the server (`src/server.rs`) enforces 1.x's `http.Server`
-deadlines on every connection from the accept (`src/server/timeouts.rs`: 5 s to read the request
-head, 10 s to read the request, 30 s to write, 60 s idle): a client that never finishes its
-headers cannot hold a connection open. The handlers read no request body and take no input that
-becomes a decision.
+deadlines on every connection from the accept (`TIMEOUTS` in `src/server.rs`, kept by go-http's
+`Timeouts`: 5 s to read the request head, 10 s to read the request, 30 s to write, 60 s idle): a
+client that never finishes its headers cannot hold a connection open. The handlers read no request
+body and take no input that becomes a decision.
 
 - [ ] A new listener is off by default, named by its own address flag, and documented with it.
 - [ ] Every connection is bounded by the read-header, read, write and idle deadlines before the

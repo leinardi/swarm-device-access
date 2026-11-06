@@ -92,8 +92,8 @@ gates, the relative links, the suppression and license-header checks, the worksp
 unsafe allowlist, the Docker read/write boundary, Docker kept out of the plain tests. Try to make
 the guarded thing go wrong and see whether the test still notices. A test that passes because its
 input is empty, its rule never ran or its negative control is missing is a false pass, and so is
-one whose scratch repository runs git without `meta::gitenv::isolate`, which under the commit hook
-acts on the real index.
+one whose scratch repository runs git without `testenv_core::gitenv::isolate` (repo-meta's
+`ScratchRepo` does), which under the commit hook acts on the real index.
 
 No skill matches (bash, Makefile, `.mk/**`, plain YAML, Markdown, workflows)? Fall back to the
 passes in §4 plus the invariants in §3. **Same rigor** — an unmatched language is not a lighter
@@ -246,9 +246,10 @@ in this repo (copied from another project) is a finding too.
 ### (d) Cross-file duplication
 
 Before accepting a new helper, search for the one that already exists in the workspace (`src/**`,
-`meta/**`, `testenv/**`), by *behavior*, not by the name the author chose. Check the logger, the
+`meta/**`, `testenv/**`) and in the rust-common crates it depends on, by *behavior*, not by the
+name the author chose. Shared code is changed in rust-common, never forked here. Check the logger, the
 `/dev` mount check, the injected clock, backoff, the metrics recorder and its no-op form, test
-waits and the `go_compat` ports. The reuse ledger in `docs/rust-port.md` lists the SSE and SRD
+waits and the go-compat ports. The reuse ledger in `docs/rust-port.md` lists the SSE and SRD
 code a component must start from. Two implementations of the same rule drift apart, and the one the
 reviewer did not read is the one that keeps the bug.
 

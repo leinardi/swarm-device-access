@@ -20,34 +20,17 @@
 //! The build's version stamps, logged when the daemon and the launcher start. They are read at
 //! compile time from `SWARM_DEVICE_ACCESS_VERSION`, `_COMMIT` and `_DATE` (`make rust-build` sets
 //! them from git and the clock, as Go's `-ldflags -X` did), and fall back to Go's defaults when
-//! unset.
+//! unset; a variable set to the empty string stamps the empty string, as `-X main.version=` did.
 
-/// The version, `dev` unless stamped.
-pub const VERSION: &str = stamp(option_env!("SWARM_DEVICE_ACCESS_VERSION"), "dev");
+use service_kit::{BuildInfo, Defaults, EmptyStamp, buildinfo};
 
-/// The commit, `none` unless stamped.
-pub const COMMIT: &str = stamp(option_env!("SWARM_DEVICE_ACCESS_COMMIT"), "none");
-
-/// The build date, `unknown` unless stamped.
-pub const DATE: &str = stamp(option_env!("SWARM_DEVICE_ACCESS_DATE"), "unknown");
-
-/// The stamp, or `default` when the variable was unset at build time. A variable set to the empty
-/// string stamps the empty string, as `-X main.version=` did.
-const fn stamp(value: Option<&'static str>, default: &'static str) -> &'static str {
-    match value {
-        Some(value) => value,
-        None => default,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unset_stamps_fall_back_to_go_defaults() {
-        assert_eq!(stamp(None, "dev"), "dev");
-        assert_eq!(stamp(Some(""), "dev"), "");
-        assert_eq!(stamp(Some("v1.2.3"), "dev"), "v1.2.3");
-    }
-}
+/// The version (`dev` unless stamped), the commit (`none`) and the build date (`unknown`).
+pub const BUILD: BuildInfo = buildinfo!(
+    "SWARM_DEVICE_ACCESS",
+    Defaults {
+        version: "dev",
+        commit: "none",
+        date: "unknown",
+        empty: EmptyStamp::Kept,
+    },
+);

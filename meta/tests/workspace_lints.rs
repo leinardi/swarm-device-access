@@ -23,7 +23,8 @@
 //! The checks are functions of the manifests, so each one is also run on manifests built to break
 //! it: the negative controls.
 
-use meta::repo;
+use repo_meta::workspace::{lint_opt_in, member_opt_in_problems, root_lint_problems};
+use repo_meta::{Problem, report, strings};
 use toml::Table;
 
 fn parse(text: &str, origin: &str) -> Table {
@@ -31,80 +32,13 @@ fn parse(text: &str, origin: &str) -> Table {
         .unwrap_or_else(|error| panic!("parse {origin}: {error}"))
 }
 
-fn read_manifest(relative: &str) -> Table {
-    parse(&repo::read(relative), relative)
-}
-
-/// What is wrong with the root manifest's `[workspace.lints]`, if anything.
-fn workspace_lints_problems(root: &Table) -> Vec<String> {
-    let Some(lints) = root
-        .get("workspace")
-        .and_then(|workspace| workspace.get("lints"))
-        .and_then(toml::Value::as_table)
-    else {
-        return vec!["the root Cargo.toml has no [workspace.lints] table".to_owned()];
-    };
-    ["rust", "clippy"]
-        .into_iter()
-        .filter(|section| !lints.contains_key(*section))
-        .map(|section| format!("[workspace.lints.{section}] is missing"))
-        .collect()
-}
-
-/// Every workspace member whose manifest does not opt into the workspace lints, and every member
-/// listed as a glob (which this check could not follow), as messages. `read_member` reads a
-/// member's manifest from its path.
-fn members_without_workspace_lints(
-    root: &Table,
-    read_member: impl Fn(&str) -> Table,
-) -> Vec<String> {
-    let Some(members) = root
-        .get("workspace")
-        .and_then(|workspace| workspace.get("members"))
-        .and_then(toml::Value::as_array)
-    else {
-        return vec!["the root Cargo.toml lists no [workspace] members".to_owned()];
-    };
-    if members.is_empty() {
-        return vec!["the workspace lists no members".to_owned()];
-    }
-    let mut problems = Vec::new();
-    for member in members {
-        let Some(member) = member.as_str() else {
-            problems.push(format!("member {member} is not a path string"));
-            continue;
-        };
-        if member.contains('*') {
-            problems.push(format!(
-                "member {member:?} is a glob; list members explicitly so this check sees each one"
-            ));
-            continue;
-        }
-        let opts_in = read_member(member)
-            .get("lints")
-            .and_then(|lints| lints.get("workspace"))
-            .and_then(toml::Value::as_bool);
-        if opts_in != Some(true) {
-            problems.push(format!(
-                "{member}/Cargo.toml does not declare [lints] workspace = true"
-            ));
-        }
-    }
-    problems
-}
-
-#[test]
-fn root_manifest_declares_workspace_lints() {
-    let problems = workspace_lints_problems(&read_manifest("Cargo.toml"));
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
-}
-
+/// The root manifest declares `[workspace.lints.rust]` and `[workspace.lints.clippy]`, lists its
+/// members explicitly (no glob), and every member declares `[lints] workspace = true`
+/// (`repo_meta::workspace::lint_opt_in`).
 #[test]
 fn every_workspace_member_opts_into_the_workspace_lints() {
-    let problems = members_without_workspace_lints(&read_manifest("Cargo.toml"), |member| {
-        read_manifest(&format!("{member}/Cargo.toml"))
-    });
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let problems = lint_opt_in(&meta::repo(), None);
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
 /// Negative control: a root without the lint tables is refused.
@@ -112,12 +46,12 @@ fn every_workspace_member_opts_into_the_workspace_lints() {
 fn a_root_without_workspace_lints_is_refused() {
     let missing = parse("[workspace]\nmembers = [\".\"]\n", "fixture");
     assert_eq!(
-        workspace_lints_problems(&missing),
+        strings(&root_lint_problems(&missing)),
         ["the root Cargo.toml has no [workspace.lints] table"]
     );
     let clippy_only = parse("[workspace.lints.clippy]\npedantic = \"warn\"\n", "fixture");
     assert_eq!(
-        workspace_lints_problems(&clippy_only),
+        strings(&root_lint_problems(&clippy_only)),
         ["[workspace.lints.rust] is missing"]
     );
 }
@@ -130,17 +64,40 @@ fn a_member_without_the_opt_in_is_refused() {
         "[workspace]\nmembers = [\".\", \"silent\", \"opted-out\", \"crates/*\"]\n",
         "fixture",
     );
-    let problems = members_without_workspace_lints(&root, |member| match member {
-        "." => parse("[lints]\nworkspace = true\n", member),
-        "opted-out" => parse("[lints]\nworkspace = false\n", member),
-        _ => parse("[package]\nname = \"silent\"\n", member),
-    });
+    let problems = member_opt_in_problems(
+        &root,
+        |member| -> Result<Table, Problem> {
+            Ok(match member {
+                "." => parse("[lints]\nworkspace = true\n", member),
+                "opted-out" => parse("[lints]\nworkspace = false\n", member),
+                _ => parse("[package]\nname = \"silent\"\n", member),
+            })
+        },
+        None,
+    );
     assert_eq!(
-        problems,
+        strings(&problems),
         [
             "silent/Cargo.toml does not declare [lints] workspace = true",
             "opted-out/Cargo.toml does not declare [lints] workspace = true",
             "member \"crates/*\" is a glob; list members explicitly so this check sees each one",
         ]
     );
+}
+
+/// Negative control: a member whose manifest cannot be read is a problem, not a pass.
+#[test]
+fn an_unreadable_member_is_refused() {
+    let root = parse("[workspace]\nmembers = [\"gone\"]\n", "fixture");
+    let problems = member_opt_in_problems(
+        &root,
+        |member| {
+            Err(Problem::at(
+                format!("{member}/Cargo.toml"),
+                "cannot be read",
+            ))
+        },
+        None,
+    );
+    assert_eq!(strings(&problems), ["gone/Cargo.toml: cannot be read"]);
 }

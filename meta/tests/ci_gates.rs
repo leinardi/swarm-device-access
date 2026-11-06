@@ -16,128 +16,44 @@
 
 //! Every CI gate is required: each job of ci.yaml that is a gate rather than an annotation is
 //! needed by `ci-result`, the one required check, and `pre-commit-all` skips only the hooks a
-//! needed job runs instead. Ported from this project's Go meta-test `test/toolchain/ci_test.go`;
-//! SSE has no counterpart.
+//! needed job runs instead, and the rustdoc gate fails both. Ported from this project's Go
+//! meta-test `test/toolchain/ci_test.go`; the checks are `repo_meta::ci`'s, extracted from this
+//! file, with this workflow's jobs.
 
-use std::collections::BTreeMap;
-
-use meta::repo;
-use serde_yaml_ng::Value;
+use repo_meta::ci::{CiGates, MAKE_COMMON_RUSTDOC};
+use repo_meta::yaml::{self, Value};
+use repo_meta::{report, strings};
 
 const CI_WORKFLOW: &str = ".github/workflows/ci.yaml";
-const RESULT_JOB: &str = "ci-result";
-const PRE_COMMIT_JOB: &str = "pre-commit-all";
+const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
 
-/// For each hook `pre-commit-all` may skip, the ci.yaml job that runs it instead. A skip is only
-/// safe when that job exists and `ci-result` needs it.
-const SKIPPED_HOOK_RUNNERS: [(&str, &str); 2] = [("cargo-test", "rust"), ("cargo-deny", "rust")];
+/// `ci-result`, the one required check, needs every gate; the jobs that only post review
+/// comments on a pull request are not gates, because `pre-commit-all` runs the same hooks on
+/// every file. For each hook `pre-commit-all` may skip, the ci.yaml job that runs it instead: a
+/// skip is only safe when that job exists and `ci-result` needs it.
+const GATES: CiGates<'static> = CiGates {
+    result_job: "ci-result",
+    pre_commit_job: "pre-commit-all",
+    annotate_only: &[
+        "actionlint",
+        "pre-commit-hooks",
+        "markdownlint",
+        "shellcheck",
+        "yamllint",
+    ],
+    skipped_hook_runners: &[("cargo-test", "rust"), ("cargo-deny", "rust")],
+};
 
-/// The jobs that only post review comments on a pull request; `ci-result` does not need them,
-/// because `pre-commit-all` runs the same hooks on every file.
-const ANNOTATE_ONLY_JOBS: [&str; 5] = [
-    "actionlint",
-    "pre-commit-hooks",
-    "markdownlint",
-    "shellcheck",
-    "yamllint",
-];
-
-/// One job of the workflow: the jobs it needs, and the `SKIP` value of each of its steps.
-#[derive(Debug, Default)]
-struct Job {
-    needs: Vec<String>,
-    skips: Vec<String>,
+fn parse(file: &str, content: &str) -> Value {
+    yaml::parse(file, content).unwrap_or_else(|problem| panic!("{problem}"))
 }
 
-/// The part of ci.yaml these checks read, by job name.
-fn parse_ci(content: &str) -> BTreeMap<String, Job> {
-    let document: Value = serde_yaml_ng::from_str(content)
-        .unwrap_or_else(|error| panic!("parse the CI workflow: {error}"));
-    let Some(jobs) = document.get("jobs").and_then(Value::as_mapping) else {
-        return BTreeMap::new();
-    };
-    jobs.iter()
-        .filter_map(|(name, job)| {
-            let needs = match job.get("needs") {
-                Some(Value::String(need)) => vec![need.clone()],
-                Some(Value::Sequence(needs)) => needs
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect(),
-                Some(
-                    Value::Null
-                    | Value::Bool(_)
-                    | Value::Number(_)
-                    | Value::Mapping(_)
-                    | Value::Tagged(_),
-                )
-                | None => Vec::new(),
-            };
-            let skips = job
-                .get("steps")
-                .and_then(Value::as_sequence)
-                .map(|steps| {
-                    steps
-                        .iter()
-                        .filter_map(|step| step.get("env")?.get("SKIP")?.as_str())
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            Some((name.as_str()?.to_owned(), Job { needs, skips }))
-        })
-        .collect()
+fn read_yaml(file: &str) -> Value {
+    parse(file, &meta::repo().read(file))
 }
 
-/// Every gate job `ci-result` does not need.
-fn ci_result_problems(jobs: &BTreeMap<String, Job>) -> Vec<String> {
-    let Some(result) = jobs.get(RESULT_JOB) else {
-        return vec![format!("the CI workflow has no {RESULT_JOB} job")];
-    };
-    jobs.keys()
-        .filter(|name| *name != RESULT_JOB && !ANNOTATE_ONLY_JOBS.contains(&name.as_str()))
-        .filter(|name| !result.needs.contains(name))
-        .map(|name| format!("{RESULT_JOB} does not need the {name} job"))
-        .collect()
-}
-
-/// Every hook `pre-commit-all` skips that is not a hook of `hooks` (the pre-commit
-/// configuration), or is not run by a job `ci-result` needs.
-fn skip_problems(jobs: &BTreeMap<String, Job>, hooks: &str) -> Vec<String> {
-    let Some(job) = jobs.get(PRE_COMMIT_JOB) else {
-        return vec![format!("the CI workflow has no {PRE_COMMIT_JOB} job")];
-    };
-    let needed: &[String] = jobs
-        .get(RESULT_JOB)
-        .map_or(&[], |result| result.needs.as_slice());
-    let mut problems = Vec::new();
-    for hook in job.skips.iter().flat_map(|skip| skip.split(',')) {
-        let hook = hook.trim();
-        if hook.is_empty() {
-            continue;
-        }
-        if !hooks.contains(&format!("- id: {hook}\n")) {
-            problems.push(format!("{PRE_COMMIT_JOB} skips {hook}, which is no hook"));
-            continue;
-        }
-        match SKIPPED_HOOK_RUNNERS
-            .iter()
-            .find(|(skipped, _)| *skipped == hook)
-        {
-            None => problems.push(format!(
-                "{PRE_COMMIT_JOB} skips {hook}, which no dedicated job is recorded to run"
-            )),
-            Some((_, runner)) if !needed.iter().any(|need| need == runner) => {
-                problems.push(format!(
-                    "{PRE_COMMIT_JOB} skips {hook}, run by the {runner} job, which {RESULT_JOB} \
-                     does not need"
-                ));
-            }
-            Some(_) => {}
-        }
-    }
-    problems
+fn hooks(file: &str, document: &Value) -> Vec<(String, Value)> {
+    yaml::pre_commit_hooks(file, document).unwrap_or_else(|problem| panic!("{problem}"))
 }
 
 /// Go: `TestCIGatesAreRequired`. Every job of ci.yaml that is a gate rather than an annotation
@@ -145,29 +61,27 @@ fn skip_problems(jobs: &BTreeMap<String, Job>, hooks: &str) -> Vec<String> {
 /// the pull request.
 #[test]
 fn ci_gates_are_required() {
-    let problems = ci_result_problems(&parse_ci(&repo::read(CI_WORKFLOW)));
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let problems = GATES.result_problems(&yaml::jobs(&read_yaml(CI_WORKFLOW)));
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
 /// Go: `TestPreCommitAllSkipsOnlyHooksRunElsewhere`. `pre-commit-all` runs every hook on every
-/// file except the ones in its `SKIP` list, and each of those must be run by a job `ci-result`
-/// needs.
+/// file except the ones in its `SKIP` list, and each of those must be a hook of the pre-commit
+/// configuration run by a job `ci-result` needs; a job that skips nothing is a problem, on which
+/// the check would pass having read nothing.
 #[test]
 fn pre_commit_all_skips_only_hooks_run_elsewhere() {
-    let jobs = parse_ci(&repo::read(CI_WORKFLOW));
-    assert!(
-        jobs.get(PRE_COMMIT_JOB)
-            .is_some_and(|job| !job.skips.is_empty()),
-        "{PRE_COMMIT_JOB} skips nothing; the check would pass on nothing"
-    );
-    let problems = skip_problems(&jobs, &repo::read(".pre-commit-config.yaml"));
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let jobs = yaml::jobs(&read_yaml(CI_WORKFLOW));
+    let hooks = hooks(PRE_COMMIT_CONFIG, &read_yaml(PRE_COMMIT_CONFIG));
+    let problems = GATES.skip_problems(&jobs, &hooks);
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
 /// Go: `TestCIStructureRules`, the negative control of the two checks above.
 #[test]
 fn ci_structure_rules() {
-    let jobs = parse_ci(
+    let jobs = yaml::jobs(&parse(
+        "ci.yaml",
         "jobs:
   pre-commit-all:
     steps:
@@ -182,82 +96,125 @@ fn ci_structure_rules() {
   ci-result:
     needs: [pre-commit-all, test]
 ",
+    ));
+    let hooks = hooks(
+        "hooks.yaml",
+        &parse(
+            "hooks.yaml",
+            "repos:\n  - repo: local\n    hooks:\n      - id: cargo-test\n      - id: cargo-clippy\n",
+        ),
     );
-    let hooks = "      - id: cargo-test\n      - id: cargo-clippy\n";
 
     // rust is a gate ci-result does not need; markdownlint only annotates.
-    let problems = ci_result_problems(&jobs);
-    assert!(
-        problems.len() == 1 && problems[0].contains("rust"),
-        "want one problem naming rust, got {problems:?}"
+    assert_eq!(
+        strings(&GATES.result_problems(&jobs)),
+        ["ci-result does not need the rust job"]
     );
 
     // cargo-test is run by rust, which ci-result does not need; cargo-clippy is run by no
     // dedicated job; unknown-hook is not a hook at all.
-    let problems = skip_problems(&jobs, hooks);
-    assert_eq!(problems.len(), 3, "{problems:#?}");
-
-    let problems = skip_problems(&parse_ci("jobs:\n  ci-result:\n    needs: []\n"), hooks);
     assert_eq!(
-        problems.len(),
-        1,
-        "a workflow without pre-commit-all: {problems:?}"
+        strings(&GATES.skip_problems(&jobs, &hooks)),
+        [
+            "pre-commit-all skips cargo-test, run by the rust job, which ci-result does not need",
+            "pre-commit-all skips cargo-clippy, which no dedicated job is recorded to run",
+            "pre-commit-all skips unknown-hook, which is no hook",
+        ]
     );
-    let problems = ci_result_problems(&parse_ci("jobs:\n  test:\n    steps: []\n"));
+
+    let without_pre_commit = yaml::jobs(&parse("ci.yaml", "jobs:\n  ci-result:\n    needs: []\n"));
     assert_eq!(
-        problems.len(),
-        1,
-        "a workflow without ci-result: {problems:?}"
+        strings(&GATES.skip_problems(&without_pre_commit, &hooks)),
+        ["the CI workflow has no pre-commit-all job"]
+    );
+    let skips_nothing = yaml::jobs(&parse(
+        "ci.yaml",
+        "jobs:\n  pre-commit-all:\n    steps: []\n  ci-result:\n    needs: [pre-commit-all]\n",
+    ));
+    assert_eq!(
+        strings(&GATES.skip_problems(&skips_nothing, &hooks)),
+        ["pre-commit-all skips nothing; the check would pass on nothing"]
+    );
+    let without_result = yaml::jobs(&parse("ci.yaml", "jobs:\n  test:\n    steps: []\n"));
+    assert_eq!(
+        strings(&GATES.result_problems(&without_result)),
+        ["the CI workflow has no ci-result job"]
     );
 }
 
-/// Rustdoc warnings must fail both the local verify target and the required Rust CI job.
-fn rustdoc_gate_present(fragment: &str, workflow: &str) -> bool {
-    let verify = fragment.lines().any(|line| {
-        line.starts_with("verify-rust:")
-            && line.split_whitespace().any(|target| target == "rust-doc")
-    });
-    let recipe = fragment.contains(
-        "rust-doc: ## Check the Rust documentation, warnings as errors\n\tRUSTDOCFLAGS=\"$(RUSTDOCFLAGS) -D warnings\" $(CARGO) doc --workspace $(RUST_FEATURES) --no-deps --locked\n",
-    );
-    let workflow: Value = serde_yaml_ng::from_str(workflow)
-        .unwrap_or_else(|error| panic!("parse the CI workflow: {error}"));
-    let ci = workflow
-        .get("jobs")
-        .and_then(|jobs| jobs.get("rust"))
-        .and_then(|job| job.get("steps"))
-        .and_then(Value::as_sequence)
-        .is_some_and(|steps| {
-            steps.iter().any(|step| {
-                step.get("run").and_then(Value::as_str) == Some("make rust-doc")
-                    && step.get("if").is_none()
-                    && step.get("continue-on-error").is_none()
-            })
-        });
-    verify && recipe && ci
-}
-
+/// Rustdoc warnings must fail both the local verify target and the required Rust CI job, over
+/// every feature (make-common's `rust.mk`, `repo_meta::ci::MAKE_COMMON_RUSTDOC`).
 #[test]
 fn rust_documentation_is_a_required_gate() {
-    assert!(rustdoc_gate_present(
-        &repo::read(".mk/rust.mk"),
-        &repo::read(CI_WORKFLOW),
-    ));
+    let repo = meta::repo();
+    let problems = MAKE_COMMON_RUSTDOC.problems(
+        &repo.read(".mk/rust.mk"),
+        &repo.read("Makefile"),
+        &read_yaml(CI_WORKFLOW),
+    );
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
-/// Negative controls: a gate absent from verify or CI, or one allowing warnings, must fail.
+/// Negative controls: a gate absent from verify or CI, one allowing warnings, one narrowed to
+/// fewer features, and a CI step allowed to fail must each fail.
 #[test]
 fn weakened_rustdoc_gates_are_refused() {
-    let fragment = repo::read(".mk/rust.mk");
-    let workflow = repo::read(CI_WORKFLOW);
-    for broken in [
-        fragment.replace("rust-test rust-doc", "rust-test"),
-        fragment.replace(" -D warnings", ""),
+    let repo = meta::repo();
+    let fragment = repo.read(".mk/rust.mk");
+    let makefile = repo.read("Makefile");
+    let workflow_text = repo.read(CI_WORKFLOW);
+    let workflow = parse(CI_WORKFLOW, &workflow_text);
+    for (name, broken) in [
+        (
+            "not in verify-rust",
+            fragment.replace("rust-test rust-doc", "rust-test"),
+        ),
+        ("warnings allowed", fragment.replace(" -D warnings", "")),
+        (
+            "fewer features",
+            fragment.replace("RUST_FEATURES ?= --all-features", "RUST_FEATURES ?="),
+        ),
     ] {
-        assert!(!rustdoc_gate_present(&broken, &workflow));
+        assert_ne!(
+            broken, fragment,
+            "{name}: the sample is the fragment itself"
+        );
+        assert!(
+            !MAKE_COMMON_RUSTDOC
+                .problems(&broken, &makefile, &workflow)
+                .is_empty(),
+            "{name} was accepted"
+        );
     }
-    assert!(!rustdoc_gate_present(
-        &fragment,
-        &workflow.replace("run: make rust-doc", "run: echo missing documentation gate"),
-    ));
+    let narrowed = format!("RUST_FEATURES := --features x\n{makefile}");
+    assert!(
+        !MAKE_COMMON_RUSTDOC
+            .problems(&fragment, &narrowed, &workflow)
+            .is_empty(),
+        "a Makefile narrowing the features was accepted"
+    );
+    for (name, broken) in [
+        (
+            "no CI step",
+            workflow_text.replace("run: make rust-doc", "run: echo missing documentation gate"),
+        ),
+        (
+            "a CI step allowed to fail",
+            workflow_text.replace(
+                "run: make rust-doc",
+                "run: make rust-doc\n        continue-on-error: true",
+            ),
+        ),
+    ] {
+        assert_ne!(
+            broken, workflow_text,
+            "{name}: the sample is the workflow itself"
+        );
+        assert!(
+            !MAKE_COMMON_RUSTDOC
+                .problems(&fragment, &makefile, &parse(CI_WORKFLOW, &broken))
+                .is_empty(),
+            "{name} was accepted"
+        );
+    }
 }

@@ -33,9 +33,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use go_compat::filepath;
+use go_compat::parse_bool::parse_bool;
 use serde_json::Value as Json;
-use swarm_device_access::go_compat::filepath;
-use swarm_device_access::go_compat::parse_bool::parse_bool;
 use swarm_device_access::policy::{
     Container, Global, LABEL_DEVICE_ALLOW, LABEL_DEVICE_DENY, LABEL_ENABLE, Mode, parse_mode,
     unknown_labels, validate_globs,

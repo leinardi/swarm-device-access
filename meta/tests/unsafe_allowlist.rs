@@ -31,13 +31,17 @@
 //! without `unsafe` (a safe `libc` function still reaches the kernel unchecked).
 //!
 //! The lint's name is assembled at compile time below, so this file does not mention it itself.
-//! The checks are functions of the text, and each is also run on input built to break it.
+//! The level, override and allowlist checks are `repo_meta::workspace`'s and
+//! `repo_meta::allowlist`'s (extracted from this file); the libc confinement is this
+//! repository's. Each check is also run on input built to break it.
 
-use std::fs;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use meta::repo;
 use regex::Regex;
+use repo_meta::allowlist::{Exemption, LintAllowlist, allowlist_problems};
+use repo_meta::workspace::{LintLevel, lint_level_problems, override_problems};
+use repo_meta::{report, strings};
 use toml::Table;
 
 /// The lint, spelled so that this file never contains its name.
@@ -46,8 +50,28 @@ const LINT: &str = concat!("unsafe", "_code");
 /// This test's own path.
 const THIS_FILE: &str = "meta/tests/unsafe_allowlist.rs";
 
-/// The only Rust files that may lift the lint.
-const ALLOWLIST: &[&str] = &["src/cgroup/bpf_sys.rs"];
+/// The only Rust file that may lift the lint.
+const ALLOWED: &str = "src/cgroup/bpf_sys.rs";
+
+/// The only Rust files that may lift the lint (or call libc).
+const ALLOWLIST: &[&str] = &[ALLOWED];
+
+/// The lint lifted only by the allowlisted module's one file-level expect, which must be there
+/// (not reserved): an exemption that matches nothing is a problem, so it cannot outlive the code.
+const UNSAFE_ALLOWLIST: LintAllowlist<'static> = LintAllowlist {
+    lint: LINT,
+    exemptions: &[Exemption::FileLevel {
+        file: ALLOWED,
+        reserved: false,
+    }],
+};
+
+/// The level the root manifest sets: deny, which only `#[expect]` can lift.
+const LEVEL: LintLevel<'static> = LintLevel {
+    table: "rust",
+    lint: LINT,
+    level: "deny",
+};
 
 /// Files that could change the lint's level from outside the manifest: Cargo configuration
 /// (`rustflags`) and the make targets that run cargo (`RUSTFLAGS`). A missing file is fine.
@@ -57,40 +81,18 @@ fn pattern(text: &str) -> Regex {
     Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
 }
 
-/// The lint's name as a whole word.
-static LINT_WORD: LazyLock<Regex> = LazyLock::new(|| pattern(&format!(r"\b{LINT}\b")));
-
-/// The one form the allowlisted module may use: a file-level expect with a non-empty reason.
-static FILE_LEVEL_EXPECT: LazyLock<Regex> = LazyLock::new(|| {
-    pattern(&format!(
-        r#"(?m)^#!\[expect\(\s*{LINT}\s*,\s*reason\s*=\s*"[^"]+"\s*\)\]"#
-    ))
-});
-
-/// What is wrong with how one Rust file names the lint, if anything.
-fn file_problems(path: &str, text: &str) -> Vec<String> {
-    let mentions: Vec<usize> = LINT_WORD
-        .find_iter(text)
-        .map(|found| text[..found.start()].matches('\n').count() + 1)
+/// The allowlist's problems on `files`.
+fn lint_problems(files: &[(&str, &str)]) -> Vec<String> {
+    let files: BTreeMap<String, String> = files
+        .iter()
+        .map(|(path, text)| ((*path).to_owned(), (*text).to_owned()))
         .collect();
-    if mentions.is_empty() {
-        return Vec::new();
-    }
-    if !ALLOWLIST.contains(&path) {
-        return mentions
-            .iter()
-            .map(|line| format!("{path}:{line}: names {LINT}, which only {ALLOWLIST:?} may lift"))
-            .collect();
-    }
-    let expects = FILE_LEVEL_EXPECT.find_iter(text).count();
-    if expects == 1 && mentions.len() == 1 {
-        return Vec::new();
-    }
-    vec![format!(
-        "{path}: names {LINT} {} time(s), {expects} of them in a file-level \
-         #![expect(..., reason = \"...\")]; want exactly one, and no other mention",
-        mentions.len()
-    )]
+    strings(&allowlist_problems(&files, &[UNSAFE_ALLOWLIST], &[]))
+}
+
+/// The allowlisted module as it must read: one file-level expect with a reason.
+fn good_module() -> String {
+    format!("//! Docs.\n\n#![expect({LINT}, reason = \"raw bpf(2) calls\")]\n")
 }
 
 /// A use of the `libc` crate in code: a path through it, an import or an `extern crate`.
@@ -111,87 +113,102 @@ fn libc_problems(path: &str, text: &str) -> Vec<String> {
         .collect()
 }
 
-/// What is wrong with the root manifest's level for the lint, if anything.
-fn manifest_problems(root: &Table) -> Vec<String> {
-    let level = root
-        .get("workspace")
-        .and_then(|workspace| workspace.get("lints"))
-        .and_then(|lints| lints.get("rust"))
-        .and_then(|rust| rust.get(LINT));
-    let level = level.and_then(|value| {
-        value
-            .as_str()
-            .or_else(|| value.get("level").and_then(toml::Value::as_str))
-    });
-    match level {
-        Some("deny") => Vec::new(),
-        Some(other) => vec![format!(
-            "[workspace.lints.rust] sets {LINT} = {other:?}; it must be \"deny\""
-        )],
-        None => vec![format!("[workspace.lints.rust] does not set {LINT}")],
-    }
+fn parse(text: &str) -> Table {
+    text.parse::<Table>()
+        .unwrap_or_else(|error| panic!("parse fixture: {error}"))
 }
 
 #[test]
 fn the_workspace_denies_the_lint() {
-    let root = repo::read("Cargo.toml")
+    let root = meta::repo()
+        .read("Cargo.toml")
         .parse::<Table>()
         .unwrap_or_else(|error| panic!("parse Cargo.toml: {error}"));
-    let problems = manifest_problems(&root);
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let problems = lint_level_problems(&root, &[LEVEL]);
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
-#[test]
-fn nothing_outside_the_manifest_names_the_lint() {
-    let make_fragments = repo::tracked_or_new(&[".mk/*.mk"]);
+/// The Cargo configuration, the Makefile and every make fragment that exists.
+fn override_files() -> Vec<(String, String)> {
+    let repo = meta::repo();
+    let make_fragments = repo.tracked_or_new(&[".mk/*.mk"]);
     assert!(
         make_fragments.iter().any(|path| path == ".mk/rust.mk"),
         "the scan saw no make fragment, not even .mk/rust.mk: {make_fragments:?}"
     );
-    for file in LEVEL_OVERRIDES
+    let paths: Vec<String> = LEVEL_OVERRIDES
         .iter()
         .map(|path| (*path).to_owned())
+        .filter(|path| repo.path(path).is_file())
         .chain(make_fragments)
-    {
-        let Ok(text) = fs::read_to_string(repo::path(&file)) else {
-            continue;
-        };
+        .collect();
+    repo.read_all(&paths)
+}
+
+/// Neither Cargo configuration nor a make target names the lint, in a flag or anywhere else: the
+/// match is on the text (`repo_meta::workspace::override_problems`).
+#[test]
+fn nothing_outside_the_manifest_names_the_lint() {
+    let problems = override_problems(&override_files(), &[LINT]);
+    assert!(problems.is_empty(), "{}", report(&problems));
+}
+
+/// Negative control: a make target or Cargo configuration naming the lint is refused, wherever
+/// the mention sits.
+#[test]
+fn an_override_of_the_level_is_refused() {
+    let files = override_files();
+    assert!(override_problems(&files, &[LINT]).is_empty());
+    for (file, extra) in [
+        ("Makefile", format!("\nexport RUSTFLAGS += -A {LINT}\n")),
+        (".mk/rust.mk", format!("\n# {LINT} is lifted here\n")),
+        (
+            ".cargo/config.toml",
+            format!("[build]\nrustflags = [\"--warn={LINT}\"]\n"),
+        ),
+    ] {
+        let mut changed = files.clone();
+        match changed.iter_mut().find(|(path, _)| path == file) {
+            Some((_, text)) => text.push_str(&extra),
+            None => changed.push((file.to_owned(), extra)),
+        }
+        let problems = override_problems(&changed, &[LINT]);
         assert!(
-            !LINT_WORD.is_match(&text),
-            "{file} names {LINT}: rustflags must not change its level"
+            problems.len() == 1 && problems[0].location == file,
+            "{file}: want one problem there, got {problems:?}"
         );
     }
 }
 
+/// The lint's name appears in no Rust file, tracked or new, but the allowlisted one, and there
+/// only in its one file-level expect (`repo_meta::allowlist`).
 #[test]
 fn only_the_allowlisted_module_lifts_the_lint() {
-    let files = repo::tracked_or_new(&["*.rs"]);
+    let repo = meta::repo();
+    let paths = repo.tracked_or_new(&["*.rs"]);
     assert!(
-        files.iter().any(|path| path == THIS_FILE),
-        "the scan saw no Rust file at all, not even this one: {files:?}"
+        paths.iter().any(|path| path == THIS_FILE),
+        "the scan saw no Rust file at all, not even this one: {paths:?}"
     );
-    // A tracked file deleted in the worktree is about to go; it cannot lift anything.
-    let problems: Vec<String> = files
-        .iter()
-        .filter(|path| repo::path(path).is_file())
-        .flat_map(|path| file_problems(path, &repo::read(path)))
-        .collect();
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let files: BTreeMap<String, String> = repo.read_all(&paths).into_iter().collect();
+    let problems = allowlist_problems(&files, &[UNSAFE_ALLOWLIST], &[]);
+    assert!(problems.is_empty(), "{}", report(&problems));
 }
 
 #[test]
 fn only_the_allowlisted_module_calls_libc() {
-    let files = repo::tracked_or_new(&["*.rs"]);
+    let repo = meta::repo();
+    let files = repo.tracked_or_new(&["*.rs"]);
     let allowed = ALLOWLIST[0];
     assert!(
-        LIBC_USE.is_match(&repo::read(allowed)),
+        LIBC_USE.is_match(&repo.read(allowed)),
         "{allowed} no longer calls libc: the scan would pass on nothing"
     );
     // This file names libc in its fixtures; it calls nothing.
     let problems: Vec<String> = files
         .iter()
-        .filter(|path| *path != THIS_FILE && repo::path(path).is_file())
-        .flat_map(|path| libc_problems(path, &repo::read(path)))
+        .filter(|path| *path != THIS_FILE)
+        .flat_map(|path| libc_problems(path, &repo.read(path)))
         .collect();
     assert!(
         files.iter().any(|path| path == "src/cgroup/v2ops.rs"),
@@ -222,9 +239,11 @@ fn a_libc_use_outside_the_allowlist_is_refused() {
 }
 
 /// Negative control: every way to name the lint outside the allowlist is refused, wherever the
-/// mention sits.
+/// mention sits; the allowlisted module beside it passes.
 #[test]
 fn a_mention_outside_the_allowlist_is_refused() {
+    let good = good_module();
+    assert_eq!(lint_problems(&[(ALLOWED, &good)]), Vec::<String>::new());
     for text in [
         format!("#![expect({LINT}, reason = \"x\")]\n"),
         format!("#[allow({LINT})]\nfn run() {{}}\n"),
@@ -232,28 +251,26 @@ fn a_mention_outside_the_allowlist_is_refused() {
         format!("#![cfg_attr(test, expect({LINT}, reason = \"x\"))]\n"),
         format!("// {LINT} is fine here, says a comment\n"),
     ] {
-        assert_eq!(
-            file_problems("src/cgroup/v2.rs", &text).len(),
-            1,
-            "accepted outside the allowlist:\n{text}"
+        let problems = lint_problems(&[(ALLOWED, &good), ("src/cgroup/v2.rs", &text)]);
+        assert!(
+            problems.len() == 1 && problems[0].starts_with("src/cgroup/v2.rs:"),
+            "accepted outside the allowlist, or refused other than once:\n{text}\n{problems:?}"
         );
     }
     let two = format!("fn run() {{}}\n#[allow({LINT})]\n#[allow({LINT})]\nfn walk() {{}}\n");
-    assert_eq!(
-        file_problems("src/x.rs", &two),
-        [
-            format!("src/x.rs:2: names {LINT}, which only {ALLOWLIST:?} may lift"),
-            format!("src/x.rs:3: names {LINT}, which only {ALLOWLIST:?} may lift"),
-        ]
-    );
+    let problems = lint_problems(&[(ALLOWED, &good), ("src/x.rs", &two)]);
+    let lines: Vec<&str> = problems
+        .iter()
+        .filter_map(|problem| problem.split(": ").next())
+        .collect();
+    assert_eq!(lines, ["src/x.rs:2", "src/x.rs:3"], "{problems:?}");
 }
 
-/// Negative control: in the allowlisted module, only one file-level expect with a reason passes.
+/// Negative control: in the allowlisted module, only one file-level expect with a reason passes,
+/// and a module that no longer lifts the lint leaves an exemption that matches nothing.
 #[test]
 fn the_allowlisted_module_uses_only_the_file_level_expect() {
-    let allowed = ALLOWLIST[0];
-    let good = format!("//! Docs.\n\n#![expect({LINT}, reason = \"raw bpf(2) calls\")]\n");
-    assert!(file_problems(allowed, &good).is_empty());
+    let good = good_module();
     for text in [
         format!("#![allow({LINT})]\n"),
         format!("#![expect({LINT})]\n"),
@@ -261,9 +278,10 @@ fn the_allowlisted_module_uses_only_the_file_level_expect() {
         format!("#[expect({LINT}, reason = \"item level\")]\nfn run() {{}}\n"),
         format!("{good}#[allow({LINT})]\nfn run() {{}}\n"),
         format!("{good}{good}"),
+        "//! Docs, and no expect.\n".to_owned(),
     ] {
         assert!(
-            !file_problems(allowed, &text).is_empty(),
+            !lint_problems(&[(ALLOWED, &text)]).is_empty(),
             "accepted in the allowlisted module:\n{text}"
         );
     }
@@ -279,17 +297,13 @@ fn a_level_other_than_deny_is_refused() {
         ("\"warn\"", true),
         ("\"allow\"", true),
     ] {
-        let root = format!("[workspace.lints.rust]\n{LINT} = {level}\n")
-            .parse::<Table>()
-            .unwrap_or_else(|error| panic!("parse fixture: {error}"));
+        let root = parse(&format!("[workspace.lints.rust]\n{LINT} = {level}\n"));
         assert_eq!(
-            !manifest_problems(&root).is_empty(),
+            !lint_level_problems(&root, &[LEVEL]).is_empty(),
             refused,
             "level {level}"
         );
     }
-    let missing = "[workspace.lints.rust]\n"
-        .parse::<Table>()
-        .unwrap_or_else(|error| panic!("parse fixture: {error}"));
-    assert!(!manifest_problems(&missing).is_empty());
+    let missing = parse("[workspace.lints.rust]\n");
+    assert!(!lint_level_problems(&missing, &[LEVEL]).is_empty());
 }

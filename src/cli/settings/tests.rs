@@ -21,9 +21,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use super::*;
 use crate::config::{Store, new_store};
-use crate::logger::{Level, MemorySink};
 use crate::policy::Mode;
 use crate::test_support::capture_logs;
+use go_slog::{Level, MemorySink};
 
 /// The flag defaults, as [`Settings::from_flags`] returns them without any flag.
 fn default_settings() -> Settings {
@@ -256,7 +256,7 @@ async fn reload_keeps_async_work_running_during_a_blocked_read() {
     use std::io::Write as _;
     use std::time::Duration;
 
-    let dir = crate::test_support::TempDir::new();
+    let dir = crate::test_support::TempDir::new("sda-test");
     let fifo = dir.path().join("config.fifo");
     rustix::fs::mknodat(
         rustix::fs::CWD,
@@ -295,7 +295,7 @@ async fn reload_keeps_async_work_running_during_a_blocked_read() {
 
 #[test]
 fn fifo_writer_times_out_without_a_reader() {
-    let dir = crate::test_support::TempDir::new();
+    let dir = crate::test_support::TempDir::new("sda-test");
     let fifo = dir.path().join("no-reader.fifo");
     rustix::fs::mknodat(
         rustix::fs::CWD,

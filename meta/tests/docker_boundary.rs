@@ -17,36 +17,38 @@
 // Adapted from swarm-scheduler-exporter/meta/tests/docker_boundary.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! The daemon's Docker client is read-only (`docs/rust-port.md`, the Docker transport): it
-//! sends `GET` requests, plus the one `HEAD /_ping` of moby's lazy version negotiation, through
-//! one request builder, and its trait has the ping, list, inspect and events calls only. This pins
-//! it on the text of the non-test sources under `src/docker`:
+//! The daemon's Docker client is read-only (`docs/rust-port.md`, the Docker transport): it is
+//! rust-common's `docker-engine`, reached through `src/docker` alone, and the daemon's trait has
+//! the ping, list, inspect and events calls only. This pins it on the manifests and on the text of
+//! the non-test sources under `src/`:
 //!
-//! - one request is built in one place, `Client::request` in `src/docker/client.rs`, which sets
-//!   `Method::GET`; the only other method set is `Method::HEAD`, in `Client::ping`; those are the
-//!   only two method setters and the only two `Method` items named, so no helper can take a
-//!   method from a caller, and no method string appears;
-//! - `DockerApi` declares exactly `ping`, `container_list`, `container_inspect` and `events`;
-//! - it asks only for the daemon's paths: `/_ping`, `/containers/json`, `/containers/{id}/json`
-//!   and `/events`;
-//! - nothing reads an environment variable or dials TCP: the client dials the configured unix
-//!   socket;
-//! - nothing under `src/` names bollard or `testenv`, the harness that creates and removes
-//!   containers on purpose.
+//! - `docker-engine` is the sanctioned client: only the root package declares it, once in
+//!   `[dependencies]` with `write` and `attach` at most (the launcher's calls) and in
+//!   `[dev-dependencies]` with `test-util` besides; never `tcp` or `tls`, so the client dials the
+//!   configured unix socket only and reads no `DOCKER_*` variable;
+//! - only `src/docker` names the crate, and there no request is built, no method named or set and
+//!   no write (`exchange`, `exchange_upgrade`) called: `DockerApi` is built on the client's
+//!   `GET`s and its ping;
+//! - `DockerApi` declares exactly `ping`, `container_list`, `container_inspect` and `events`, and
+//!   asks only for the daemon's paths: `/_ping`, `/containers/json`, `/containers/{id}/json` and
+//!   `/events`;
+//! - nothing under `src/docker` reads an environment variable or dials TCP, and nothing under
+//!   `src/` builds the client from the environment (`Settings::from_env`);
+//! - nothing under `src/` names bollard, `testenv`, the harness that creates and removes
+//!   containers on purpose, or `testenv_core`, its shared half, whose `bollard` feature brings the
+//!   SDK; and the root package declares none of them in any dependency table.
 //!
-//! The launcher's write calls take the builder's request through the client's two crate-private
-//! hooks and set their method outside `src/docker`, in the launcher's engine; who may do that is
-//! pinned by `launcher_boundary.rs`.
+//! The launcher's write calls take docker-engine's client through `Client::transport` and set
+//! their method outside `src/docker`, in the launcher's engine; who may do that is pinned by
+//! `launcher_boundary.rs`.
 //!
 //! The checks are functions of the text, and each is also run on input built to break it.
 
 use std::sync::LazyLock;
 
-use meta::repo;
 use regex::Regex;
+use toml::{Table, Value};
 
-/// Where the request builder lives.
-const CLIENT: &str = "src/docker/client.rs";
 /// Where the trait lives.
 const API: &str = "src/docker/api.rs";
 /// The trait's calls, in declaration order.
@@ -58,6 +60,13 @@ const PATHS: &[&str] = &[
     "/containers/{id}/json",
     "/events",
 ];
+/// The sanctioned Docker client.
+const CLIENT: &str = "docker-engine";
+/// What the root package may enable: in its `[dependencies]` (the launcher's writes and attach),
+/// and in its `[dev-dependencies]`.
+const CLIENT_FEATURES: &[&str] = &["write", "attach"];
+const CLIENT_TEST_FEATURES: &[&str] = &["write", "attach", "test-util"];
+const DEPENDENCY_TABLES: &[&str] = &["dependencies", "dev-dependencies", "build-dependencies"];
 
 fn pattern(text: &str) -> Regex {
     Regex::new(text).unwrap_or_else(|error| panic!("pattern {text}: {error}"))
@@ -81,193 +90,303 @@ fn code(text: &str) -> String {
         .join("\n")
 }
 
-/// The name of the function whose body holds byte `offset`: the last `fn` declared before it.
-fn enclosing_fn(text: &str, offset: usize) -> String {
-    FUNCTION_NAME
-        .captures_iter(&text[..offset])
-        .last()
-        .map(|captures| captures[1].to_owned())
-        .unwrap_or_default()
-}
-
 fn line_of(text: &str, offset: usize) -> usize {
     text[..offset].matches('\n').count() + 1
 }
 
-/// Every place `regex` matches, as `(path, line, enclosing function, match)`.
-fn sites(files: &[(String, String)], regex: &Regex) -> Vec<(String, usize, String, String)> {
+/// Every place `regex` matches in the files `selected` accepts, as `path:line: match`.
+fn found_in(
+    files: &[(String, String)],
+    regex: &Regex,
+    selected: impl Fn(&str) -> bool,
+) -> Vec<String> {
     files
         .iter()
+        .filter(|(path, _)| selected(path))
         .flat_map(|(path, text)| {
             regex.find_iter(text).map(move |found| {
-                (
-                    path.clone(),
+                format!(
+                    "{path}:{}: {}",
                     line_of(text, found.start()),
-                    enclosing_fn(text, found.start()),
-                    found.as_str().to_owned(),
+                    found.as_str()
                 )
             })
         })
         .collect()
 }
 
-/// Requires `regex` to match exactly once in `files`, in `function` of `path`.
-fn exactly_once(
-    files: &[(String, String)],
-    regex: &Regex,
-    path: &str,
-    function: &str,
-) -> Vec<String> {
-    let found = sites(files, regex);
-    if let [(found_path, _, found_fn, _)] = found.as_slice()
-        && found_path == path
-        && found_fn == function
-    {
-        return Vec::new();
-    }
-    let places: Vec<String> = found
-        .iter()
-        .map(|(path, line, function, text)| format!("{path}:{line} in {function}: {text}"))
-        .collect();
-    vec![format!(
-        "want `{}` exactly once, in {function} of {path}; found {places:?}",
-        regex.as_str()
-    )]
+fn in_docker(path: &str) -> bool {
+    path.starts_with("src/docker/")
 }
 
-/// A request being built: a `Request` constructor or the `request::Builder` type.
-static REQUEST_BUILT: LazyLock<Regex> =
-    LazyLock::new(|| pattern(r"\bRequest\s*::\s*\w+|\brequest\s*::\s*Builder\b"));
-/// The `GET` method constant.
-static METHOD_GET: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bMethod\s*::\s*GET\b"));
-/// The `HEAD` method constant.
-static METHOD_HEAD: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bMethod\s*::\s*HEAD\b"));
-/// Any item named through `Method`.
-static METHOD_ITEM: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bMethod\s*::\s*\w+"));
-/// The end of a `Method` item that is one of the two read-only constants.
-static READ_ONLY_METHOD_END: LazyLock<Regex> = LazyLock::new(|| pattern(r"::\s*(?:GET|HEAD)$"));
-/// A method setter, with the value it assigns when there is one.
-static METHOD_SETTER: LazyLock<Regex> =
-    LazyLock::new(|| pattern(r"\bmethod_mut\s*\(\s*\)(?:\s*=\s*[^;]*)?"));
-/// A method set another way: a builder's `.method(..)`, a `Parts` field, a parsed name, an
-/// alias or a write method's name as a string.
-static OTHER_METHOD: LazyLock<Regex> = LazyLock::new(|| {
-    pattern(
-        r"\.method\s*\(\s*[^)\s]|\.method\s*=[^=]|\.parse\s*::\s*<\s*Method|\bMethod\s+as\b|\x22(?:POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE)\x22",
-    )
-});
-
-/// The method rules: one builder, `GET` in it, `HEAD` in the ping, nothing else.
-fn method_problems(files: &[(String, String)]) -> Vec<String> {
-    let mut problems = Vec::new();
-    // One request built, in one place.
-    problems.extend(exactly_once(files, &REQUEST_BUILT, CLIENT, "request"));
-    problems.extend(exactly_once(files, &METHOD_GET, CLIENT, "request"));
-    problems.extend(exactly_once(files, &METHOD_HEAD, CLIENT, "ping"));
-    // No other method is named: only the two constants, so no conversion (`try_from`,
-    // `from_bytes`) and no other constant.
-    for (path, line, function, text) in sites(files, &METHOD_ITEM) {
-        if !READ_ONLY_METHOD_END.is_match(&text) {
-            problems.push(format!(
-                "{path}:{line} in {function}: {text}: not a read-only method"
-            ));
-        }
-    }
-    // Exactly two method setters, each assigning its constant: `GET` in the builder and `HEAD`
-    // in the ping. A setter fed from a parameter would let a caller choose the method.
-    let mut setters = Vec::new();
-    for (path, line, function, text) in sites(files, &METHOD_SETTER) {
-        let assigned = text
-            .split_once('=')
-            .map(|(_, value)| value.trim().to_owned());
-        let wanted = match (path.as_str(), function.as_str()) {
-            (CLIENT, "request") => Some("Method::GET"),
-            (CLIENT, "ping") => Some("Method::HEAD"),
-            _ => None,
-        };
-        if wanted.is_none() || assigned.as_deref() != wanted {
-            problems.push(format!(
-                "{path}:{line} in {function}: {text}: only request sets Method::GET and only \
-                 ping sets Method::HEAD"
-            ));
-        }
-        setters.push((path, function));
-    }
-    setters.sort();
-    if setters
-        != [
-            (CLIENT.to_owned(), "ping".to_owned()),
-            (CLIENT.to_owned(), "request".to_owned()),
-        ]
-    {
-        problems.push(format!(
-            "method setters in {setters:?}; want one in request and one in ping of {CLIENT}"
-        ));
-    }
-    // Nor set another way: a builder's `.method(..)`, a `Parts` field, a parsed name, an alias.
-    for (path, line, function, text) in sites(files, &OTHER_METHOD) {
-        problems.push(format!(
-            "{path}:{line} in {function}: {text}: not a read-only method"
-        ));
-    }
-    problems
+/// One dependency entry: the table it sits in (`dependencies`, `target.'cfg(unix)'.dependencies`,
+/// `workspace.dependencies`), the crate it names (its `package` if renamed), and the entry.
+struct Dependency {
+    table: String,
+    crate_name: String,
+    entry: Value,
 }
 
-/// A request path: an API call's path argument or a path joined onto the version prefix.
-static REQUEST_PATH: LazyLock<Regex> = LazyLock::new(|| {
-    pattern(
-        r#"(?:\b(?:get_list|get_object|get)\(\s*(?:&format!\(\s*)?|join_path\(&\[(?:[^\]]*,\s*)?)"(/[^"]*)""#,
-    )
-});
-
-/// The path rule: only the daemon's paths, and the pattern still sees them.
-fn path_problems(files: &[(String, String)]) -> Vec<String> {
-    let mut problems = Vec::new();
-    // Only the daemon's paths.
-    let mut paths = 0;
-    for (path, text) in files {
-        for captures in REQUEST_PATH.captures_iter(text) {
-            paths += 1;
-            if !PATHS.contains(&&captures[1]) {
-                problems.push(format!(
-                    "{path}:{}: {} is not one of the daemon's paths {PATHS:?}",
-                    line_of(text, captures.get(1).map_or(0, |found| found.start())),
-                    &captures[1]
-                ));
+/// Every dependency entry of a manifest, target-specific and workspace tables included.
+fn dependencies(manifest: &Table) -> Vec<Dependency> {
+    let mut tables: Vec<(String, &Table)> = Vec::new();
+    for name in DEPENDENCY_TABLES {
+        if let Some(table) = manifest.get(*name).and_then(Value::as_table) {
+            tables.push(((*name).to_owned(), table));
+        }
+    }
+    if let Some(targets) = manifest.get("target").and_then(Value::as_table) {
+        for (target, contents) in targets {
+            for name in DEPENDENCY_TABLES {
+                if let Some(table) = contents.get(*name).and_then(Value::as_table) {
+                    tables.push((format!("target.{target}.{name}"), table));
+                }
             }
         }
     }
-    if paths < PATHS.len() {
+    if let Some(table) = manifest
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(Value::as_table)
+    {
+        tables.push(("workspace.dependencies".to_owned(), table));
+    }
+    tables
+        .into_iter()
+        .flat_map(|(table, entries)| {
+            entries.iter().map(move |(key, entry)| Dependency {
+                table: table.clone(),
+                crate_name: entry
+                    .get("package")
+                    .and_then(Value::as_str)
+                    .unwrap_or(key)
+                    .to_owned(),
+                entry: entry.clone(),
+            })
+        })
+        .collect()
+}
+
+/// The client's manifest rules over `(path, text)` pairs, the root manifest at `Cargo.toml`: the
+/// workspace pins [`CLIENT`] without features (features unify across a workspace build), only the
+/// root package declares it, once in `[dependencies]` with [`CLIENT_FEATURES`] at most and in its
+/// `[dev-dependencies]` with [`CLIENT_TEST_FEATURES`] at most.
+fn manifest_problems(manifests: &[(String, String)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut declared = 0;
+    for (path, text) in manifests {
+        let manifest: Table = text
+            .parse()
+            .unwrap_or_else(|error| panic!("parse {path}: {error}"));
+        for dependency in dependencies(&manifest) {
+            if dependency.crate_name != CLIENT {
+                continue;
+            }
+            let place = format!("{path} [{}] {CLIENT}", dependency.table);
+            let features: Vec<&str> = dependency
+                .entry
+                .get("features")
+                .and_then(Value::as_array)
+                .map(|features| features.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            let allowed: &[&str] = match (path.as_str(), dependency.table.as_str()) {
+                ("Cargo.toml", "workspace.dependencies") => &[],
+                ("Cargo.toml", "dependencies") => {
+                    declared += 1;
+                    CLIENT_FEATURES
+                }
+                ("Cargo.toml", "dev-dependencies") => CLIENT_TEST_FEATURES,
+                _ => {
+                    problems.push(format!(
+                        "{place}: only the root package declares {CLIENT}, in [dependencies] \
+                         and [dev-dependencies]"
+                    ));
+                    continue;
+                }
+            };
+            for feature in features {
+                if !allowed.contains(&feature) {
+                    problems.push(format!(
+                        "{place}: feature `{feature}` is not one of {allowed:?}; the client \
+                         dials the configured unix socket only"
+                    ));
+                }
+            }
+        }
+    }
+    if declared != 1 {
         problems.push(format!(
-            "{paths} request paths found, want at least {}: the path pattern no longer matches",
-            PATHS.len()
+            "Cargo.toml declares {CLIENT} {declared} times in [dependencies], want once"
         ));
+    }
+    // A package feature forwarding one of the client's features would turn on what the entries
+    // above refuse.
+    for (path, text) in manifests {
+        let manifest: Table = text
+            .parse()
+            .unwrap_or_else(|error| panic!("parse {path}: {error}"));
+        let Some(features) = manifest.get("features").and_then(Value::as_table) else {
+            continue;
+        };
+        for (name, enables) in features {
+            let enables = enables.as_array().map(Vec::as_slice).unwrap_or_default();
+            for enabled in enables.iter().filter_map(Value::as_str) {
+                if enabled.starts_with(&format!("{CLIENT}/"))
+                    || enabled.starts_with(&format!("{CLIENT}?/"))
+                    || enabled == format!("dep:{CLIENT}")
+                {
+                    problems.push(format!(
+                        "{path} [features] {name}: enables `{enabled}`; {CLIENT}'s features are \
+                         set on its dependency entries only"
+                    ));
+                }
+            }
+        }
     }
     problems
 }
 
+/// The crates the root package never depends on: the SDK, the harness that creates and removes
+/// containers on purpose, and its shared half (whose `bollard` feature brings the SDK). The
+/// workspace may pin `testenv-core` for the harness member; the root package's own tables, test
+/// and build tables and target-specific ones included, never name any of them.
+const HARNESS_CRATES: &[&str] = &["bollard", "testenv", "testenv-core"];
+
+/// Every dependency entry of the root package (`manifest`, the root `Cargo.toml`'s text) on one of
+/// [`HARNESS_CRATES`], by its crate name: a rename (`package = ...`) in the entry, or in the
+/// workspace pin an entry inherits, is followed.
+fn harness_dependency_problems(manifest: &str) -> Vec<String> {
+    let manifest: Table = manifest
+        .parse()
+        .unwrap_or_else(|error| panic!("parse Cargo.toml: {error}"));
+    let pins = manifest
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(Value::as_table);
+    let mut problems = Vec::new();
+    for dependency in dependencies(&manifest) {
+        if dependency.table == "workspace.dependencies" {
+            continue;
+        }
+        let inherited = dependency.entry.get("workspace").and_then(Value::as_bool) == Some(true);
+        let crate_name = if inherited {
+            pins.and_then(|pins| pins.get(&dependency.crate_name))
+                .and_then(|pin| pin.get("package"))
+                .and_then(Value::as_str)
+                .unwrap_or(&dependency.crate_name)
+        } else {
+            &dependency.crate_name
+        };
+        if HARNESS_CRATES.contains(&crate_name) {
+            problems.push(format!(
+                "Cargo.toml [{}] {crate_name}: the root package depends on neither the Docker \
+                 SDK nor the harness",
+                dependency.table
+            ));
+        }
+    }
+    problems
+}
+
+/// The client crate, by its Rust name.
+static ENGINE_CRATE: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bdocker_engine\b"));
+/// A request being built: a `Request` constructor or the `request::Builder` type.
+static REQUEST_BUILT: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\bRequest\s*::\s*\w+|\brequest\s*::\s*Builder\b"));
+/// A method named or set: any `Method` item, a setter, a builder's `.method(..)`, a `Parts`
+/// field, a parsed name, an alias or a method's name as a string.
+static METHOD: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(
+        r"\bMethod\s*::\s*\w+|\bmethod_mut\s*\(|\.method\s*\(\s*[^)\s]|\.method\s*=[^=]|\bMethod\s+as\b|\x22(?:GET|HEAD|POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE)\x22",
+    )
+});
+/// A write call of docker-engine's client.
+static WRITE_CALL: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bexchange(?:_upgrade)?\s*\("));
 /// An environment read or a TCP dial: anything but the configured unix socket.
 static ENV_OR_TCP: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"\benv\s*::\s*var|\bTcpStream\b|DOCKER_"));
+/// The client built from the environment (`DOCKER_HOST` and the rest).
+static FROM_ENV: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bfrom_env\b"));
+/// A request path: a client call's path argument.
+static REQUEST_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(r#"\b(?:get_list|get_object|get_body|get)\(\s*(?:&format!\(\s*)?"(/[^"]*)""#)
+});
+/// The client's `events` and `ping`, whose paths (`/events`, `/_ping`) are the crate's.
+static FIXED_PATH_CALL: LazyLock<Regex> = LazyLock::new(|| pattern(r"\.\s*(events|ping)\s*\("));
 /// The `DockerApi` trait's block, up to its closing brace.
 static DOCKER_API_TRAIT: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"(?s)pub trait DockerApi\b.*?\n\}"));
 
-/// What is wrong with the client's sources, given as `(path, text)` pairs.
+/// The path rule: only the daemon's paths, and the pattern still sees each of them.
+fn path_problems(files: &[(String, String)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut seen = Vec::new();
+    for (path, text) in files.iter().filter(|(path, _)| in_docker(path)) {
+        let calls = REQUEST_PATH
+            .captures_iter(text)
+            .filter_map(|captures| captures.get(1))
+            .map(|found| (found.start(), found.as_str().to_owned()))
+            .chain(FIXED_PATH_CALL.captures_iter(text).filter_map(|captures| {
+                captures.get(1).map(|found| {
+                    let fixed = if found.as_str() == "events" {
+                        "/events"
+                    } else {
+                        "/_ping"
+                    };
+                    (found.start(), fixed.to_owned())
+                })
+            }));
+        for (offset, request_path) in calls {
+            if !PATHS.contains(&request_path.as_str()) {
+                problems.push(format!(
+                    "{path}:{}: {request_path} is not one of the daemon's paths {PATHS:?}",
+                    line_of(text, offset)
+                ));
+            }
+            seen.push(request_path);
+        }
+    }
+    for wanted in PATHS {
+        if !seen.iter().any(|found| found == wanted) {
+            problems.push(format!(
+                "{wanted} not found: the path pattern no longer matches"
+            ));
+        }
+    }
+    problems
+}
+
+/// What is wrong with the sources, given as `(path, text)` pairs.
 fn problems(sources: &[(String, String)]) -> Vec<String> {
     let files: Vec<(String, String)> = sources
         .iter()
         .map(|(path, text)| (path.clone(), code(text)))
         .collect();
     let mut problems = Vec::new();
-    problems.extend(method_problems(&files));
-    problems.extend(path_problems(&files));
-    // Neither the environment nor TCP.
-    for (path, line, function, text) in sites(&files, &ENV_OR_TCP) {
+    for site in found_in(&files, &ENGINE_CRATE, |path| !in_docker(path)) {
         problems.push(format!(
-            "{path}:{line} in {function}: {text}: dials only the unix socket"
+            "{site}: names docker_engine; the client is reached through src/docker"
         ));
     }
+    for regex in [&*REQUEST_BUILT, &*METHOD] {
+        for site in found_in(&files, regex, in_docker) {
+            problems.push(format!(
+                "{site}: src/docker builds no request and names no method"
+            ));
+        }
+    }
+    for site in found_in(&files, &WRITE_CALL, in_docker) {
+        problems.push(format!("{site}: src/docker calls no write"));
+    }
+    for site in found_in(&files, &ENV_OR_TCP, in_docker) {
+        problems.push(format!("{site}: dials only the unix socket"));
+    }
+    for site in found_in(&files, &FROM_ENV, |_| true) {
+        problems.push(format!(
+            "{site}: the client is built from --docker-socket, not the environment"
+        ));
+    }
+    problems.extend(path_problems(&files));
     // Comments included: a comment naming the SDK is how it creeps back.
     problems.extend(sdk_problems(sources));
     // The trait's calls.
@@ -293,10 +412,11 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     problems
 }
 
-/// The SDK or the harness, by name.
-static SDK_OR_HARNESS: LazyLock<Regex> = LazyLock::new(|| pattern(r"\b(bollard|testenv)\b"));
+/// The SDK, the harness or its shared half (rust-common's testenv-core), by name.
+static SDK_OR_HARNESS: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\b(bollard|testenv(_core)?)\b"));
 
-/// Files under `src/` that name the SDK or the harness, in code or in a comment.
+/// Files that name the SDK or the harness, in code or in a comment.
 fn sdk_problems(files: &[(String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
     for (path, text) in files {
@@ -309,38 +429,197 @@ fn sdk_problems(files: &[(String, String)]) -> Vec<String> {
     problems
 }
 
-/// The Docker client's sources: everything under `src/docker` but its unit tests.
-fn client_sources() -> Vec<(String, String)> {
-    repo::tracked_or_new(&["src/docker/*.rs"])
+/// The crate's sources: everything under `src/` but the unit tests (`tests.rs` and the modules
+/// under a `tests/` directory) and the test-only helpers (`src/test_support`).
+fn sources() -> Vec<(String, String)> {
+    let repo = meta::repo();
+    let paths: Vec<String> = repo
+        .tracked_or_new(&["src/*.rs"])
         .into_iter()
-        .filter(|path| repo::path(path).is_file())
-        .filter(|path| path.rsplit('/').next() != Some("tests.rs"))
-        .map(|path| {
-            let text = repo::read(&path);
-            (path, text)
+        .filter(|path| {
+            !matches!(path.rsplit('/').next(), Some("tests.rs"))
+                && !path.contains("/tests/")
+                && !path.starts_with("src/test_support")
         })
-        .collect()
+        .collect();
+    repo.read_all(&paths)
+}
+
+/// The workspace manifests: the root, then each member's.
+fn workspace_manifests() -> Vec<(String, String)> {
+    let repo = meta::repo();
+    let root = repo.read("Cargo.toml");
+    let parsed: Table = root
+        .parse()
+        .unwrap_or_else(|error| panic!("parse Cargo.toml: {error}"));
+    let members: Vec<String> = parsed
+        .get("workspace")
+        .and_then(|workspace| workspace.get("members"))
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("the root Cargo.toml lists no [workspace] members"))
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|member| *member != ".")
+        .map(|member| format!("{member}/Cargo.toml"))
+        .collect();
+    let mut manifests = vec![("Cargo.toml".to_owned(), root)];
+    for member in members {
+        let text = repo.read(&member);
+        manifests.push((member, text));
+    }
+    manifests
 }
 
 #[test]
 fn src_names_neither_the_sdk_nor_the_harness() {
-    let files: Vec<(String, String)> = repo::tracked_or_new(&["src/*.rs"])
-        .into_iter()
-        .filter(|path| repo::path(path).is_file())
-        .map(|path| {
-            let text = repo::read(&path);
-            (path, text)
-        })
-        .collect();
+    let repo = meta::repo();
+    let files = repo.read_all(&repo.tracked_or_new(&["src/*.rs"]));
     assert!(files.iter().any(|(path, _)| path == "src/lib.rs"));
     let problems = sdk_problems(&files);
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 #[test]
+fn the_docker_client_is_docker_engine_on_the_unix_socket() {
+    let manifests = workspace_manifests();
+    assert!(manifests.len() > 1, "no member manifest read");
+    let problems = manifest_problems(&manifests);
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Negative control: a feature that dials TCP or reads the environment, a second declaration,
+/// a member's declaration and a feature in the workspace pin are refused.
+#[test]
+fn another_client_configuration_is_refused() {
+    let manifests = workspace_manifests();
+    assert!(manifest_problems(&manifests).is_empty());
+    let root = &manifests[0].1;
+    let with_root = |text: String| -> Vec<(String, String)> {
+        let mut changed = manifests.clone();
+        changed[0].1 = text;
+        changed
+    };
+    let package = r#"docker-engine = { workspace = true, features = ["write", "attach"] }"#;
+    assert!(root.contains(package), "the root package's entry moved");
+    let pin = "docker-engine = { git = ";
+    assert!(root.contains(pin), "the workspace pin moved");
+    let mut member = manifests.clone();
+    member[1]
+        .1
+        .push_str("\n[target.'cfg(unix)'.dependencies]\ndocker-engine.workspace = true\n");
+    let cases = [
+        with_root(root.replacen(
+            package,
+            r#"docker-engine = { workspace = true, features = ["write", "attach", "tcp"] }"#,
+            1,
+        )),
+        with_root(root.replacen(
+            r#"features = ["write", "attach", "test-util"]"#,
+            r#"features = ["write", "attach", "test-util", "tls"]"#,
+            1,
+        )),
+        with_root(root.replacen(package, "", 1)),
+        with_root(format!(
+            "{root}\n[target.'cfg(unix)'.dependencies]\n{package}\n"
+        )),
+        with_root(root.replacen(pin, r#"docker-engine = { features = ["tcp"], git = "#, 1)),
+        with_root(root.replacen(
+            "[features]\n",
+            "[features]\nremote = [\"docker-engine/tcp\"]\n",
+            1,
+        )),
+        member,
+    ];
+    for (index, case) in cases.iter().enumerate() {
+        assert!(!manifest_problems(case).is_empty(), "case {index} accepted");
+    }
+}
+
+/// The root package depends on neither bollard nor the harness (`testenv`, `testenv-core`), in
+/// any of its dependency tables.
+#[test]
+fn the_root_package_depends_on_neither_the_sdk_nor_the_harness() {
+    let root = meta::repo().read("Cargo.toml");
+    assert!(
+        root.contains("testenv-core = { git = "),
+        "the workspace pin of testenv-core moved; the control below would not see it allowed"
+    );
+    let problems = harness_dependency_problems(&root);
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Negative control: the SDK or either half of the harness in each of the root package's tables,
+/// renamed in the entry or in the workspace pin it inherits, is refused; the workspace pin alone
+/// is not.
+#[test]
+fn a_harness_dependency_of_the_root_package_is_refused() {
+    let root = meta::repo().read("Cargo.toml");
+    assert!(harness_dependency_problems(&root).is_empty());
+    for (name, extra, want) in [
+        (
+            "bollard in [dependencies]",
+            "\n[dependencies.bollard]\nversion = \"0.19\"\n",
+            "[dependencies] bollard",
+        ),
+        (
+            "testenv in [dev-dependencies]",
+            "\n[dev-dependencies.testenv]\npath = \"testenv\"\n",
+            "[dev-dependencies] testenv",
+        ),
+        (
+            "testenv-core in [build-dependencies]",
+            "\n[build-dependencies]\ntestenv-core.workspace = true\n",
+            "[build-dependencies] testenv-core",
+        ),
+        (
+            "testenv-core in a target table",
+            "\n[target.'cfg(unix)'.dependencies]\ntestenv-core.workspace = true\n",
+            "[target.cfg(unix).dependencies] testenv-core",
+        ),
+        (
+            "bollard in a target's dev-dependencies",
+            "\n[target.'cfg(unix)'.dev-dependencies]\nbollard = \"0.19\"\n",
+            "[target.cfg(unix).dev-dependencies] bollard",
+        ),
+        (
+            "bollard renamed in the entry",
+            "\n[dependencies.engine]\npackage = \"bollard\"\nversion = \"0.19\"\n",
+            "[dependencies] bollard",
+        ),
+    ] {
+        let problems = harness_dependency_problems(&format!("{root}{extra}"));
+        assert!(
+            problems.len() == 1 && problems[0].contains(want),
+            "{name}: want one problem naming {want:?}, got {problems:?}"
+        );
+    }
+    let renamed_pin = root.replacen(
+        "[workspace.dependencies]\n",
+        "[workspace.dependencies]\nharness = { package = \"testenv-core\", path = \"x\" }\n",
+        1,
+    );
+    assert_ne!(
+        renamed_pin, root,
+        "the [workspace.dependencies] table moved"
+    );
+    let problems = harness_dependency_problems(&format!(
+        "{renamed_pin}\n[dev-dependencies.harness]\nworkspace = true\n"
+    ));
+    assert!(
+        problems.len() == 1 && problems[0].contains("[dev-dependencies] testenv-core"),
+        "testenv-core renamed in the workspace pin: {problems:?}"
+    );
+}
+
+#[test]
 fn the_docker_client_is_read_only() {
-    let files = client_sources();
-    for wanted in [CLIENT, API, "src/docker/pool.rs"] {
+    let files = sources();
+    for wanted in [
+        API,
+        "src/docker/mod.rs",
+        "src/launcher/engine.rs",
+        "src/run.rs",
+    ] {
         assert!(
             files.iter().any(|(path, _)| path == wanted),
             "the scan did not see {wanted}: {:?}",
@@ -351,11 +630,12 @@ fn the_docker_client_is_read_only() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// Negative control: each way to send something other than a `GET` or the ping's `HEAD`, or to
-/// grow the trait, is refused.
+/// Negative control: each way to send something other than the client's `GET`s and ping from
+/// `src/docker`, to reach the crate around it, to grow the trait or to leave the socket is
+/// refused.
 #[test]
 fn a_write_path_is_refused() {
-    let files = client_sources();
+    let files = sources();
     assert!(problems(&files).is_empty());
     let with = |path: &str, extra: &str| -> Vec<(String, String)> {
         let mut changed = files.clone();
@@ -372,60 +652,57 @@ fn a_write_path_is_refused() {
         .unwrap_or_default();
     let cases = [
         with(
-            CLIENT,
-            "\nfn remove() {\n    *request.method_mut() = Method::DELETE;\n}\n",
+            API,
+            "\nasync fn remove(&self) {\n    self.inner.exchange(\"/containers/x\", \"\", |_| {}).await;\n}\n",
         ),
         with(
-            CLIENT,
-            "\nfn create() {\n    *request.method_mut() = Method::GET;\n}\n",
+            API,
+            "\nasync fn attach(&self) {\n    self.inner.exchange_upgrade(\"/x\", \"\", |_| {}).await;\n}\n",
         ),
         with(
-            CLIENT,
-            "\nfn stop() {\n    *request.method_mut() = Method::HEAD;\n}\n",
+            API,
+            "\nfn shape(request: &mut Request<Body>) {\n    *request.method_mut() = Method::DELETE;\n}\n",
         ),
         with(
-            CLIENT,
-            "\nfn request_as(&self, method: Method) {\n    let mut request = \
-             self.request(target, &[]);\n    *request.method_mut() = method;\n}\n",
-        ),
-        with(
-            CLIENT,
-            "\nfn ping() {\n    let method = Method::try_from(\"DELETE\");\n}\n",
-        ),
-        with(CLIENT, "\nfn ping() {\n    parts.method = verb;\n}\n"),
-        with(CLIENT, "\nuse hyper::Method as Verb;\n"),
-        with(
-            "src/docker/pool.rs",
+            "src/docker/mod.rs",
             "\nfn build() {\n    let request = Request::new(body);\n}\n",
         ),
         with(
-            "src/docker/api.rs",
+            "src/docker/types.rs",
             "\nfn start() {\n    let request = hyper::Request::builder().method(\"POST\");\n}\n",
         ),
+        with("src/docker/mod.rs", "\nuse hyper::Method as Verb;\n"),
         with(
-            "src/docker/engine.rs",
-            "fn wait() {\n    let method = Method::from_bytes(b\"PUT\");\n}\n",
-        ),
-        with(
-            "src/docker/connect.rs",
+            "src/docker/mod.rs",
             "\nfn host() {\n    let host = std::env::var(\"DOCKER_HOST\");\n}\n",
         ),
         with(
-            API,
-            "\nfn remove(&self) {\n    self.get_object(&format!(\"/containers/{id}/kill\"));\n}\n",
-        ),
-        with(
-            API,
-            "\nfn version(&self) {\n    self.get(\"/version\", \"\", &[]);\n}\n",
-        ),
-        with(
-            "src/docker/client.rs",
-            "\n// Unlike bollard, this client is in-tree.\n",
-        ),
-        with(
-            "src/docker/connect.rs",
+            "src/docker/mod.rs",
             "\nfn dial() {\n    let stream = TcpStream::connect(addr);\n}\n",
         ),
+        with(
+            "src/run.rs",
+            "\nfn settings() {\n    let settings = docker::Settings::from_env(getenv);\n}\n",
+        ),
+        with(
+            "src/daemon/mod.rs",
+            "\nfn raw(settings: Settings) {\n    let client = docker_engine::Client::new(settings);\n}\n",
+        ),
+        with(
+            "src/launcher/engine.rs",
+            "\nuse docker_engine::Client as Raw;\n",
+        ),
+        with(
+            API,
+            "\nasync fn kill(&self) {\n    self.inner.get_object(&format!(\"/containers/{id}/kill\")).await;\n}\n",
+        ),
+        with(
+            API,
+            "\nasync fn version(&self) {\n    self.inner.get(\"/version\", \"\", &[]).await;\n}\n",
+        ),
+        with(API, "\n// Unlike bollard, this client is shared.\n"),
+        with("src/run.rs", "\nuse testenv::config::ENV_IDS;\n"),
+        with("src/run.rs", "\nuse testenv_core::host::HostSweep;\n"),
         files
             .iter()
             .map(|(path, text)| {
@@ -445,8 +722,9 @@ fn a_write_path_is_refused() {
     for (index, case) in cases.iter().enumerate() {
         assert!(!problems(case).is_empty(), "case {index} accepted");
     }
-    // A comment naming a method is not a request.
-    assert!(problems(&with(CLIENT, "\n// Method::POST would be a write.\n")).is_empty());
+    // A comment naming a method or the crate is not a request.
+    assert!(problems(&with(API, "\n// Method::POST would be a write.\n")).is_empty());
+    assert!(problems(&with("src/run.rs", "\n// docker_engine, via src/docker.\n")).is_empty());
     // Every path gone from the pattern's sight reads as a broken pattern, not as a pass.
     let renamed: Vec<(String, String)> = files
         .iter()

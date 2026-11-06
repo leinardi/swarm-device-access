@@ -36,9 +36,9 @@ use super::api::DeviceRule;
 use super::error::{Error, FileError, ListEntryCause};
 use super::handle::CgroupHandle;
 use super::v1::CgroupV1;
-use crate::go_compat::parse_int::parse_int;
-use crate::go_compat::scanner;
-use crate::go_compat::strings::{fields, trim_space};
+use go_compat::parse_int::parse_int;
+use go_compat::scanner;
+use go_compat::strings::{fields, trim_space};
 
 /// The access bits of a cgroup v1 device exception.
 pub(super) const ACC_READ: u8 = 1;

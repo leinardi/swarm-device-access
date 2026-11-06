@@ -42,9 +42,9 @@ fn real_dev_fs_openat2_containment() {
         // Go skips without openat2; the daemon refuses to start there.
         return;
     }
-    let outside_dir = TempDir::new();
+    let outside_dir = TempDir::new("sda-test");
     let outside = outside_dir.path().join("secret");
-    let root = TempDir::new();
+    let root = TempDir::new("sda-test");
     std::fs::write(&outside, b"").unwrap();
     std::fs::write(root.path().join("inside"), b"").unwrap();
     symlink(&outside, root.path().join("abs")).unwrap();
@@ -72,7 +72,7 @@ fn real_dev_fs_openat2_containment() {
 /// The texts of the real seam's failures, each the output of the Go code failing the same way.
 #[test]
 fn real_dev_fs_error_texts() {
-    let missing = TempDir::new();
+    let missing = TempDir::new("sda-test");
     let gone = missing.path().join("gone");
     let gone = gone.to_str().unwrap();
     assert_eq!(
@@ -80,7 +80,7 @@ fn real_dev_fs_error_texts() {
         format!("open {gone}: no such file or directory")
     );
 
-    let root = TempDir::new();
+    let root = TempDir::new("sda-test");
     let dev = RealDevFs::open(root.path().to_str().unwrap(), gone).unwrap();
     assert_eq!(
         dev.open_beneath("nope").err().unwrap().to_string(),
@@ -130,7 +130,7 @@ fn real_dev_fs_identifies_dev_null() {
 /// their contents; a directory that cannot be listed is visited again with the error.
 #[test]
 fn walk_dir_visits_in_lexical_order() {
-    let root = TempDir::new();
+    let root = TempDir::new("sda-test");
     std::fs::create_dir_all(root.path().join("b/c")).unwrap();
     std::fs::write(root.path().join("b/c/z"), b"").unwrap();
     std::fs::write(root.path().join("a"), b"").unwrap();
@@ -203,7 +203,7 @@ fn relative_beneath_keeps_only_names_under_the_directory() {
 
 #[test]
 fn sysfs_root_prefers_the_host_mount() {
-    let host = TempDir::new();
+    let host = TempDir::new("sda-test");
     let host_root = host.path().to_str().unwrap();
     assert_eq!(sysfs_root_for(host_root), "/sys");
     std::fs::create_dir_all(host.path().join("sys/dev")).unwrap();

@@ -31,7 +31,7 @@ use rustix::io::Errno;
 use rustix::process::{Resource, Rlimit, getrlimit, prlimit};
 
 use super::bpf_sys;
-use crate::go_compat::errno::errno_string;
+use go_compat::errno::errno_string;
 
 /// Why the limit could not be removed, with cilium's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

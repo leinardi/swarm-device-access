@@ -21,8 +21,8 @@
 //! succeeds matters here, never the value. `ParseInt`, `ParseUint` and `underscoreOK` are the
 //! shared ports in `go_compat`.
 
-use crate::go_compat::parse_float::underscore_ok;
-use crate::go_compat::parse_int::{parse_int, parse_uint};
+use go_compat::parse_float::underscore_ok;
+use go_compat::parse_int::{parse_int, parse_uint};
 
 /// `!!null`.
 pub(super) const NULL_TAG: &str = "!!null";

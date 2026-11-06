@@ -24,11 +24,11 @@ use std::io;
 use super::asm::DecodeError;
 use super::owned::{CanonicalError, EmitError, GateError, NonceError, OwnedError};
 use super::v2ops::{OpsError, describe_attach_flags};
-use crate::go_compat::errno::io_error_text;
-use crate::go_compat::errors;
-use crate::go_compat::parse_int::NumError;
-use crate::go_compat::quote::{quote, quote_rune};
-use crate::go_compat::scanner::TokenTooLong;
+use go_compat::errno::io_error_text;
+use go_compat::errors;
+use go_compat::parse_int::NumError;
+use go_compat::quote::{quote, quote_rune};
+use go_compat::scanner::TokenTooLong;
 
 /// Why `set_device_rules` failed.
 #[derive(Debug)]

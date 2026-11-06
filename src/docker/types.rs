@@ -26,21 +26,10 @@
 //! behind a pointer is an `Option`, so its presence stays visible. `StartedAt` stays the string the
 //! Engine sent: the Go daemon compares it as one to tell two runs of a container apart.
 
-use std::collections::BTreeMap;
+use serde::Deserialize;
 
-use serde::{Deserialize, Deserializer};
-
-/// Labels, as the daemon sends them.
-pub type Labels = BTreeMap<String, String>;
-
-/// Go decodes a JSON `null` into the zero value; derived serde would refuse it.
-pub(crate) fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Default + Deserialize<'de>,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
-}
+pub use docker_engine::types::Labels;
+pub(crate) use docker_engine::types::{decode_first, decode_list, null_default};
 
 /// container `Summary`, one entry of the container list.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -151,44 +140,6 @@ pub struct Actor {
     /// `Attributes`.
     #[serde(rename = "Attributes", deserialize_with = "null_default")]
     pub attributes: Labels,
-}
-
-/// Decodes the first JSON value of `body` the way Go's `json.NewDecoder(body).Decode(&out)`
-/// does: leading whitespace skipped, whatever follows the value ignored, a `null` the zero value,
-/// and an empty body `EOF`.
-pub(crate) fn decode_first<T>(body: &[u8]) -> Result<T, String>
-where
-    T: Default + for<'de> Deserialize<'de>,
-{
-    match serde_json::Deserializer::from_slice(body)
-        .into_iter::<Option<T>>()
-        .next()
-    {
-        None => Err("EOF".to_owned()),
-        Some(Ok(value)) => Ok(value.unwrap_or_default()),
-        Some(Err(error)) if error.is_eof() => Err("unexpected EOF".to_owned()),
-        Some(Err(error)) => Err(error.to_string()),
-    }
-}
-
-/// Decodes a list the way Go decodes it into a slice: `null` is an empty list and a `null`
-/// element the zero value.
-pub(crate) fn decode_list<T>(body: &[u8]) -> Result<Vec<T>, String>
-where
-    T: Default + for<'de> Deserialize<'de>,
-{
-    decode_first::<Vec<Nullable<T>>>(body)
-        .map(|items| items.into_iter().map(|item| item.0).collect())
-}
-
-/// A list element Go would decode from `null` into the zero value.
-#[derive(Debug, Default)]
-struct Nullable<T>(T);
-
-impl<'de, T: Default + Deserialize<'de>> Deserialize<'de> for Nullable<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        null_default(deserializer).map(Self)
-    }
 }
 
 #[cfg(test)]
