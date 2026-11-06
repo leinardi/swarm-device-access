@@ -14,107 +14,104 @@
  * limitations under the License.
  */
 
-// Adapted from swarm-scheduler-exporter/src/server/tests/shutdown.rs at d57dcc220d29,
-// originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
-
-//! The start and the stop on real loopback sockets: Go's start and stop tests (`http_test.go`),
-//! and a listen error worded as Go's `net.Listen` words it, with the daemon's (empty) prefix.
-//! How `net.Listen` binds, `SO_REUSEADDR` and the drain are go-http's tests.
-
-use tokio::net::{TcpListener, TcpStream};
-use tokio::time::Instant;
+//! The start and the stop on real loopback sockets: the listen errors, the stop that runs once,
+//! the context that stops the server, and the drain within its budget or cut at its end.
 
 use super::*;
 use crate::test_support::capture_logs;
 use tracing::level_filters::LevelFilter;
 
-/// How long a test waits for something that should happen at once.
-const BOUND: Duration = Duration::from_secs(5);
-
-async fn get(stream: &mut TcpStream, path: &str) -> String {
-    stream
-        .write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
-        .await
-        .unwrap();
-    let mut buf = vec![0_u8; 4096];
-    let read = stream.read(&mut buf).await.unwrap();
-    String::from_utf8_lossy(&buf[..read]).into_owned()
-}
-
-/// The daemon's bind: Go's `net.Listen`, its error with [`LISTEN_ERROR_PREFIX`].
-async fn bind(address: &str) -> Result<TcpListener, ListenError> {
-    go_http::bind(address, LISTEN_ERROR_PREFIX).await
-}
-
-/// A busy port, a missing port and a bad port fail as Go's `net.Listen` does; tokio's own bind
-/// cannot even read Go's `:port` (it resolves it, and fails in the resolver's words).
+/// A busy address and an invalid one are startup errors, worded as the start error words
+/// them: the prefix, the address and the cause.
 #[tokio::test]
-async fn a_bind_failure_is_go_s_error() {
-    let busy = bind("127.0.0.1:0").await.unwrap();
-    let busy_address = busy.local_addr().unwrap();
-    assert_eq!(
-        bind(&busy_address.to_string())
-            .await
-            .unwrap_err()
-            .to_string(),
-        format!("listen tcp {busy_address}: bind: address already in use")
-    );
-    assert_eq!(
-        bind("127.0.0.1").await.unwrap_err().to_string(),
-        "listen tcp: address 127.0.0.1: missing port in address"
-    );
-    assert_eq!(
-        bind("127.0.0.1:70000").await.unwrap_err().to_string(),
-        "listen tcp: address 70000: invalid port"
-    );
-    assert_eq!(
-        bind("127.0.0.1:nosuchsvc").await.unwrap_err().to_string(),
-        "listen tcp: lookup tcp/nosuchsvc: unknown port"
-    );
-    assert!(TcpListener::bind(":8888").await.is_err());
-}
-
-/// A server started on a free loopback port, with `drain`.
-async fn started(drain: Duration) -> (MetricsServer, SocketAddr) {
-    let app = App::with_mux(
-        slow_mux(sleeping(Duration::from_secs(30))),
-        Arc::new(FakeClock::new(capture_time())),
-    );
-    let server = start_draining_for(&CancellationToken::new(), "127.0.0.1:0", app, drain)
-        .await
-        .unwrap();
-    let address = server.local_addr().unwrap();
-    (server, address)
-}
-
-/// Go: `TestStartServers_BusyAddressIsAnError`. A busy address is an error when the server
-/// starts, worded as Go's; the debug server it also covered is Q2's refusal.
-#[tokio::test]
-async fn start_on_a_busy_address_is_an_error() {
-    let busy = bind("127.0.0.1:0").await.unwrap();
+async fn a_bind_failure_is_a_start_error() {
+    let busy = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = busy.local_addr().unwrap().to_string();
-    let error = start_metrics_server(&CancellationToken::new(), &address, healthy_app())
+    let error = start_metrics_server(
+        &CancellationToken::new(),
+        &address,
+        App::new(readiness(true), Recorder::noop()),
+    )
+    .await
+    .unwrap_err();
+    let text = error.to_string();
+    assert!(
+        text.starts_with(&format!("metrics server: listen on {address}: ")),
+        "{text}"
+    );
+    assert!(text.to_lowercase().contains("in use"), "{text}");
+    assert!(refuse_debug_addr(&address).is_err());
+
+    for invalid in ["127.0.0.1", "127.0.0.1:70000", "nonsense"] {
+        let error = start_metrics_server(
+            &CancellationToken::new(),
+            invalid,
+            App::new(readiness(true), Recorder::noop()),
+        )
         .await
         .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        format!(
-            "metrics server: listen on {address}: listen tcp {address}: bind: address already in \
-             use"
-        )
-    );
-    assert!(refuse_debug_addr(&address).is_err());
+        assert!(
+            error
+                .to_string()
+                .starts_with(&format!("metrics server: listen on {invalid}: ")),
+            "{error}"
+        );
+    }
 }
 
-/// Go: `TestServe_StopReturnsAndClosesTheListener`. The stop returns, twice, and the server no
-/// longer answers; the start and the stop are logged as Go logs them.
+/// Go's `:port` binds every interface, dual-stack: it takes an IPv4 connection to 127.0.0.1 and,
+/// where the host has IPv6, one to `::1`, whatever `net.ipv6.bindv6only` says.
+#[tokio::test]
+async fn a_port_alone_binds_every_interface() {
+    let server = start_metrics_server(
+        &CancellationToken::new(),
+        ":0",
+        App::new(readiness(true), Recorder::noop()),
+    )
+    .await
+    .unwrap();
+    let port = server.local_addr().unwrap().port();
+    let v4: SocketAddr = ([127, 0, 0, 1], port).into();
+    assert_eq!(status(&get(v4, "/healthz").await), "HTTP/1.1 200 OK");
+    if std::net::TcpListener::bind("[::1]:0").is_ok() {
+        let v6: SocketAddr = (std::net::Ipv6Addr::LOCALHOST, port).into();
+        assert_eq!(status(&get(v6, "/healthz").await), "HTTP/1.1 200 OK");
+    }
+    server.stop().await;
+}
+
+/// A busy port stays the first error, not a fallback's: a second `:port` on it is "in use".
+#[tokio::test]
+async fn a_busy_wildcard_port_reports_the_first_error() {
+    let first = start_metrics_server(
+        &CancellationToken::new(),
+        ":0",
+        App::new(readiness(true), Recorder::noop()),
+    )
+    .await
+    .unwrap();
+    let port = first.local_addr().unwrap().port();
+    let error = start_metrics_server(
+        &CancellationToken::new(),
+        &format!(":{port}"),
+        App::new(readiness(true), Recorder::noop()),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.to_string().to_lowercase().contains("in use"),
+        "{error}"
+    );
+    first.stop().await;
+}
+
+/// The stop returns, twice, and the server no longer answers; the start is logged.
 #[tokio::test]
 async fn stop_returns_and_closes_the_listener() {
     let logs = capture_logs(LevelFilter::INFO);
-    let (server, address) = started(SHUTDOWN_TIMEOUT).await;
-    let mut stream = TcpStream::connect(address).await.unwrap();
-    assert!(get(&mut stream, "/healthz").await.ends_with("\r\n\r\nok"));
-    drop(stream);
+    let (server, address) = serving(slow_app(Duration::ZERO), short(SHUTDOWN_TIMEOUT)).await;
+    let healthz = get(address, "/healthz").await;
+    assert!(healthz.ends_with("\r\n\r\nok"), "{healthz}");
 
     tokio::time::timeout(SHUTDOWN_TIMEOUT * 2, async {
         server.stop().await;
@@ -132,14 +129,17 @@ async fn stop_returns_and_closes_the_listener() {
     );
 }
 
-/// Go: `TestServe_ContextCancelStops`. The context's cancellation stops the server, and a stop
-/// after it returns.
+/// The context's cancellation stops the server, and a stop after it returns.
 #[tokio::test]
 async fn context_cancel_stops() {
     let context = CancellationToken::new();
-    let server = start_metrics_server(&context, "127.0.0.1:0", healthy_app())
-        .await
-        .unwrap();
+    let server = start_metrics_server(
+        &context,
+        "127.0.0.1:0",
+        App::new(readiness(true), Recorder::noop()),
+    )
+    .await
+    .unwrap();
     let address = server.local_addr().unwrap();
     context.cancel();
     tokio::time::timeout(SHUTDOWN_TIMEOUT * 2, server.stop())
@@ -148,11 +148,42 @@ async fn context_cancel_stops() {
     assert!(TcpStream::connect(address).await.is_err());
 }
 
-/// A stop whose caller gave up waiting still leaves the next stop waiting for the drain, as Go's
-/// `sync.OnceFunc` makes every call wait for the server.
+/// A request in flight at the stop is answered in full when it ends within the drain, and the
+/// stop returns once it has, with nothing to warn about.
+#[tokio::test]
+async fn the_drain_lets_a_request_in_flight_finish() {
+    let logs = capture_logs(LevelFilter::INFO);
+    let (server, address) = serving(
+        slow_app(Duration::from_millis(300)),
+        short(Duration::from_secs(3)),
+    )
+    .await;
+    let request = tokio::spawn(async move { get(address, SLOW_PATH).await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let start = Instant::now();
+    tokio::time::timeout(BOUND, server.stop()).await.unwrap();
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "the drain waited past the request: {:?}",
+        start.elapsed()
+    );
+    let response = request.await.unwrap();
+    assert_eq!(status(&response), "HTTP/1.1 200 OK", "{response}");
+    assert!(response.contains("slow done"), "{response}");
+    assert_eq!(
+        logs.contents(),
+        format!("level=INFO metrics server listening addr={address}\n")
+    );
+}
+
+/// A stop whose caller gave up waiting still leaves the next stop waiting for the drain.
 #[tokio::test]
 async fn a_stop_given_up_on_leaves_the_next_one_waiting() {
-    let (server, address) = started(Duration::from_millis(500)).await;
+    let (server, address) = serving(
+        slow_app(Duration::from_secs(30)),
+        short(Duration::from_millis(500)),
+    )
+    .await;
     let mut stream = TcpStream::connect(address).await.unwrap();
     stream
         .write_all(b"GET /slow HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -173,18 +204,28 @@ async fn a_stop_given_up_on_leaves_the_next_one_waiting() {
     );
 }
 
-/// A drain cut short by its deadline is warned about as Go's failed `Shutdown` is.
+/// A drain cut short by its deadline is warned about, and the stop returns by then.
 #[tokio::test]
 async fn a_drain_past_the_deadline_is_warned_about() {
     let logs = capture_logs(LevelFilter::INFO);
-    let (server, address) = started(Duration::from_millis(200)).await;
+    let (server, address) = serving(
+        slow_app(Duration::from_secs(30)),
+        short(Duration::from_millis(200)),
+    )
+    .await;
     let mut stream = TcpStream::connect(address).await.unwrap();
     stream
         .write_all(b"GET /slow HTTP/1.1\r\nHost: x\r\n\r\n")
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
+    let start = Instant::now();
     tokio::time::timeout(BOUND, server.stop()).await.unwrap();
+    assert!(
+        start.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        start.elapsed()
+    );
     assert_eq!(
         logs.contents(),
         format!(

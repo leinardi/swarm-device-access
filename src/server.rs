@@ -14,49 +14,39 @@
  * limitations under the License.
  */
 
-// Adapted from swarm-scheduler-exporter/src/server.rs at d57dcc220d29,
-// originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
-
-//! The daemon's metrics and health server, Go's `StartMetricsServer` on rust-common's `go-http`,
-//! which answers `/metrics`, `/healthz` and `/readyz` as Go's `http.ServeMux` behind an
-//! `http.Server` answers them, byte for byte where hyper can (Q11): Go's routing, header case,
-//! order and framing, the four server timeouts, `net.Listen`'s bind, the accept loop and the
-//! drain.
-//!
-//! What is the daemon's stays here:
+//! The daemon's metrics and health server: service-kit's `http` server (hyper on tokio, with a
+//! header-read timeout, a write-stall timeout and a bounded drain) in front of an axum router.
 //!
 //! - the routes: `/healthz` always `ok`; `/readyz` `ok` once the daemon is subscribed to the
-//!   Docker events, `not ready` with a 503 before (the injected [`Readiness`]), each with Go's
-//!   sniffed type; `/metrics` the [`Recorder`]'s registry as OpenMetrics text (Q4), uncompressed;
-//! - the server's timeouts, [`TIMEOUTS`]: 5 s for the request head, 10 s to read the request,
-//!   30 s to write the answer and 60 s idle;
-//! - a listen error's text, Go's `net.OpError` with no prefix; `net/http`'s own messages, logged
-//!   as warnings;
-//! - [`start_metrics_server`]: the listener is bound before it returns, as Go's `net.Listen`
-//!   binds it, so a busy or invalid address is a startup error; a server error is logged; the
-//!   stop runs once, from the caller or the context, and drains the open connections for five
-//!   seconds.
+//!   Docker events, `not ready` with a 503 before (the injected [`Readiness`]); `/metrics` the
+//!   [`Recorder`]'s registry as OpenMetrics text (Q4), uncompressed; anything else is a 404. Any
+//!   method is answered;
+//! - the server's deadlines: 5 s for a request's head ([`HEADER_READ_TIMEOUT`]), 30 s without a
+//!   byte leaving a write ([`WRITE_STALL_TIMEOUT`]), and [`SHUTDOWN_TIMEOUT`] for the drain;
+//! - [`start_metrics_server`]: the listener is bound before it returns, so a busy or invalid
+//!   address is a startup error (`metrics server: listen on <address>: <cause>`); a server error
+//!   is logged; the stop runs once, from the caller or the context, and drains the open
+//!   connections for five seconds.
 //!
 //! There is no debug server: a non-empty `debug-addr` is refused ([`refuse_debug_addr`], Q2).
 
 use std::fmt;
+use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
-use clock::Clock;
+use axum::Router;
+use axum::http::StatusCode;
+use axum::http::header::CONTENT_TYPE;
+use axum::routing::any;
 use go_compat::quote::quote;
-use go_http::{Drained, ListenError, Mux, Reply, Server, Timeouts};
-use hyper::StatusCode;
-use tokio::time::Instant;
+use service_kit::http::{Lifecycle, Outcome, ServerConfig};
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
-
-use crate::daemon::Readiness;
-use crate::metrics::Exposition;
-use crate::metrics::Recorder;
 use tracing::{error, info, warn};
 
-pub use go_http::MetricsRequest;
+use crate::daemon::Readiness;
+use crate::metrics::Recorder;
 
 /// The metrics endpoint.
 pub const METRICS_PATH: &str = "/metrics";
@@ -68,86 +58,62 @@ pub const READYZ_PATH: &str = "/readyz";
 /// How long a stop waits for the open connections: Go's `shutdownTimeout`.
 pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The Go daemon's `http.Server` timeouts: `ReadHeaderTimeout` 5 s, `ReadTimeout` 10 s,
-/// `WriteTimeout` 30 s and `IdleTimeout` 60 s.
-pub const TIMEOUTS: Timeouts = Timeouts {
-    read_header: Duration::from_secs(5),
-    read: Duration::from_secs(10),
-    write: Duration::from_secs(30),
-    idle: Duration::from_mins(1),
-};
+/// How long a client may take to send a request's head, an idle keep-alive wait included.
+pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// What a listen error's text starts with: nothing, the Go daemon printed `net.OpError` bare.
-const LISTEN_ERROR_PREFIX: &str = "";
+/// How long a write may wait without a byte leaving before the connection is closed.
+pub const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The endpoints.
 #[derive(Debug)]
 pub struct App {
-    server: Arc<Server>,
+    router: Router,
 }
 
 impl App {
-    /// The endpoints answering from `readiness` and the registry of `metrics`, with `Date` read
-    /// from `clock`, and the server's own messages logged as warnings.
+    /// The endpoints answering from `readiness` and the registry of `metrics`.
     #[must_use]
-    pub fn new(readiness: Readiness, metrics: Recorder, clock: Arc<dyn Clock>) -> Self {
-        let mux = mux(readiness, move |scrape| scrape_metrics(&metrics, scrape));
-        Self::with_mux(mux, clock)
+    pub fn new(readiness: Readiness, metrics: Recorder) -> Self {
+        Self::with_router(router(readiness, metrics))
     }
 
-    /// `mux` served with `Date` from `clock`, and `net/http`'s messages logged as warnings.
-    fn with_mux(mux: Mux, clock: Arc<dyn Clock>) -> Self {
-        Self {
-            server: Arc::new(server(mux, clock)),
-        }
+    /// `router` served as it is.
+    fn with_router(router: Router) -> Self {
+        Self { router }
     }
 }
 
-/// The Go daemon's mux: `/metrics` from `metrics`, `/healthz`, and `/readyz` from `readiness`.
-fn mux(
-    readiness: Readiness,
-    metrics: impl Fn(&MetricsRequest) -> Exposition + Send + Sync + 'static,
-) -> Mux {
-    Mux::new()
-        .route(METRICS_PATH, move |request| {
-            let exposition = metrics(&MetricsRequest::of(request));
-            Reply::metrics(exposition.content_type, None, exposition.body)
-        })
-        .route(HEALTHZ_PATH, |_| healthz())
-        .route(READYZ_PATH, move |_| readyz(&readiness))
+/// The daemon's routes: `/metrics` from `metrics`, `/healthz`, and `/readyz` from `readiness`.
+fn router(readiness: Readiness, metrics: Recorder) -> Router {
+    Router::new()
+        .route(
+            METRICS_PATH,
+            any(move || {
+                let exposition = metrics.exposition();
+                async move { ([(CONTENT_TYPE, exposition.content_type)], exposition.body) }
+            }),
+        )
+        .route(HEALTHZ_PATH, any(|| async { "ok" }))
+        .route(
+            READYZ_PATH,
+            any(move || {
+                let ready = readiness.is_ready();
+                async move {
+                    if ready {
+                        (StatusCode::OK, "ok")
+                    } else {
+                        (StatusCode::SERVICE_UNAVAILABLE, "not ready")
+                    }
+                }
+            }),
+        )
 }
 
-/// `mux` behind a server whose own messages (Go's `log.Printf` lines) are logged as warnings.
-fn server(mux: Mux, clock: Arc<dyn Clock>) -> Server {
-    Server::new(mux, clock, |message| warn!("{message}"))
-}
-
-/// Go's `/healthz` handler: always `ok`, its type sniffed.
-fn healthz() -> Reply {
-    Reply::sniffed(StatusCode::OK, "ok")
-}
-
-/// Go's `/readyz` handler: `ok` once ready, `not ready` with a 503 before, its type sniffed.
-fn readyz(readiness: &Readiness) -> Reply {
-    if readiness.is_ready() {
-        Reply::sniffed(StatusCode::OK, "ok")
-    } else {
-        Reply::sniffed(StatusCode::SERVICE_UNAVAILABLE, "not ready")
-    }
-}
-
-/// The scrape's answer: the recorder's registry as OpenMetrics text. promhttp's `Accept`,
-/// `Accept-Encoding` and `name[]` handling is gone with it: the exposition is always that text,
-/// uncompressed and unfiltered.
-fn scrape_metrics(recorder: &Recorder, _scrape: &MetricsRequest) -> Exposition {
-    recorder.exposition()
-}
-
-/// Go's `StartMetricsServer` failing: `metrics server: listen on <address>: <cause>`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Why the metrics server did not start: `metrics server: listen on <address>: <cause>`.
+#[derive(Debug)]
 pub struct StartError {
     address: String,
-    cause: ListenError,
+    cause: io::Error,
 }
 
 impl fmt::Display for StartError {
@@ -160,7 +126,11 @@ impl fmt::Display for StartError {
     }
 }
 
-impl std::error::Error for StartError {}
+impl std::error::Error for StartError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
 
 /// A running metrics server: Go's `stop` func.
 #[derive(Debug)]
@@ -204,41 +174,43 @@ pub async fn start_metrics_server(
     address: &str,
     app: App,
 ) -> Result<MetricsServer, StartError> {
-    start_draining_for(context, address, app, SHUTDOWN_TIMEOUT).await
+    let config = ServerConfig::new(HEADER_READ_TIMEOUT, WRITE_STALL_TIMEOUT, SHUTDOWN_TIMEOUT);
+    start_with(context, address, app, config).await
 }
 
-/// [`start_metrics_server`] with a stop that drains for `drain`.
-async fn start_draining_for(
+/// [`start_metrics_server`] with `config`'s deadlines.
+async fn start_with(
     context: &CancellationToken,
     address: &str,
     app: App,
-    drain: Duration,
+    config: ServerConfig,
 ) -> Result<MetricsServer, StartError> {
-    let listener = go_http::bind(address, LISTEN_ERROR_PREFIX)
-        .await
-        .map_err(|cause| StartError {
-            address: address.to_owned(),
-            cause,
-        })?;
-    let App { server } = app;
+    let listener = bind(address).await.map_err(|cause| StartError {
+        address: address.to_owned(),
+        cause,
+    })?;
     let local = listener.local_addr().ok();
     info!(addr = %local.map_or_else(String::new, |local| local.to_string()), "metrics server listening");
     let stop = context.child_token();
-    let shutdown = stop.clone();
+    let lifecycle = Lifecycle::new();
+    let stopper = {
+        let (stop, lifecycle) = (stop.clone(), lifecycle.clone());
+        tokio::spawn(async move {
+            stop.cancelled().await;
+            lifecycle.stop();
+        })
+    };
     let task = tokio::spawn(async move {
-        // An accept error Go's Serve does not retry closes the listener and is logged at once;
-        // the open connections are served until the stop, as Go's are until Shutdown.
-        let served = go_http::serve(
-            listener,
-            server,
-            TIMEOUTS,
-            shutdown.cancelled_owned(),
-            move || Instant::now() + drain,
-            |error| error!(error = %error, "metrics server error"),
-        )
-        .await;
-        if served.drained == Drained::DeadlineExceeded {
-            warn!(error = %"context deadline exceeded", "metrics server shutdown error");
+        let outcome = service_kit::http::serve(listener, app.router, config, &lifecycle).await;
+        stopper.abort();
+        match outcome {
+            Outcome::Drained => {}
+            Outcome::DeadlineExceeded => {
+                warn!(error = %"context deadline exceeded", "metrics server shutdown error");
+            }
+            Outcome::ListenerFailed(failure) => {
+                error!(error = %failure, "metrics server error");
+            }
         }
     });
     Ok(MetricsServer {
@@ -246,6 +218,69 @@ async fn start_draining_for(
         stop,
         served: tokio::sync::Mutex::new(Some(task)),
     })
+}
+
+/// The listen backlog; the kernel caps it at `net.core.somaxconn`.
+const BACKLOG: i32 = 1024;
+
+/// Binds `address`, a `host:port` or Go's `:port` for every interface: dual-stack on `[::]`
+/// whatever `net.ipv6.bindv6only` says, as Go sets it, and on `0.0.0.0` where the host has no
+/// IPv6.
+async fn bind(address: &str) -> io::Result<TcpListener> {
+    match address.strip_prefix(':') {
+        Some(port) => {
+            let port: u16 = port.parse().map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid port {port:?}"),
+                )
+            })?;
+            wildcard(port)
+        }
+        None => TcpListener::bind(address).await,
+    }
+}
+
+/// Every interface on `port`: `[::]` with `IPV6_V6ONLY` off, else `0.0.0.0` when the host has no
+/// IPv6 (and only then: any other failure, a busy port included, is the first one).
+fn wildcard(port: u16) -> io::Result<TcpListener> {
+    match dual_stack(port) {
+        Ok(listener) => Ok(listener),
+        Err(first) if ipv6_unavailable(&first) => {
+            let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)
+                .map_err(|_| io::Error::new(first.kind(), first.to_string()))?;
+            listen_on(&socket, SocketAddr::from(([0, 0, 0, 0], port))).map_err(|_| first)
+        }
+        Err(first) => Err(first),
+    }
+}
+
+/// A listener on `[::]:port` that also takes IPv4 connections.
+fn dual_stack(port: u16) -> io::Result<TcpListener> {
+    let socket = socket2::Socket::new(socket2::Domain::IPV6, socket2::Type::STREAM, None)?;
+    socket.set_only_v6(false)?;
+    listen_on(
+        &socket,
+        SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port)),
+    )
+}
+
+/// Binds and listens `socket` on `address`, address reuse on as Go's listeners have it, and
+/// hands it to tokio.
+fn listen_on(socket: &socket2::Socket, address: SocketAddr) -> io::Result<TcpListener> {
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&address.into())?;
+    socket.listen(BACKLOG)?;
+    TcpListener::from_std(socket.try_clone()?.into())
+}
+
+/// Whether `error` says this host has no IPv6 to listen on.
+fn ipv6_unavailable(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::AddrNotAvailable | io::ErrorKind::Unsupported
+    ) || error.raw_os_error() == Some(rustix::io::Errno::AFNOSUPPORT.raw_os_error())
 }
 
 /// Why a debug server address is refused (Q2).

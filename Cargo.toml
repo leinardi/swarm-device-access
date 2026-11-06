@@ -42,7 +42,6 @@ repository = "https://github.com/leinardi/swarm-device-access"
 docker-engine = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 clock = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 go-compat = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
-go-http = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 go-slog = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 repo-meta = { git = "https://github.com/leinardi/rust-common", rev = "16ea3044310039235b50846d4ddc58e355f8120c" }
 prometheus-client = { version = "0.25.2", default-features = false }
@@ -102,9 +101,10 @@ tracing.workspace = true
 tracing-setup.workspace = true
 # The metrics: the registry, the counters, gauges and histogram, and the OpenMetrics text encoder.
 prometheus-client.workspace = true
-# Go's net/http server on hyper (rust-common): the mux's answers, header order and framing, the
-# four server deadlines, net.Listen's bind and the drain, for the metrics and health endpoints.
-go-http.workspace = true
+# The routes of the metrics and health endpoints; the router only, no axum server.
+axum = { version = "0.8.9", default-features = false }
+# The wildcard listener: dual-stack with IPV6_V6ONLY off, which tokio's TcpSocket cannot set.
+socket2 = { version = "0.6.5", default-features = false }
 # The flags (Q1). No color: help and errors are plain text, as Go's were.
 clap = { version = "4.6.7", default-features = false, features = [
     "std",
@@ -127,7 +127,7 @@ saphyr-parser = { version = "0.3.2", default-features = false }
 # only (meta/tests/docker_boundary.rs, meta/tests/launcher_boundary.rs).
 docker-engine = { workspace = true, features = ["write", "attach"] }
 # The launcher's write requests and the hijacked attach on docker-engine's transport; the metrics
-# and health endpoints' status type (their server is go-http's).
+# and health endpoints' client.
 hyper = { version = "1.12.0", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "http1"] }
 http-body-util = "0.1.5"
@@ -169,7 +169,7 @@ tokio = { version = "1.54.1", default-features = false, features = [
 ] }
 # The runtime main builds (two workers, its shutdown bounded by the budget's deadline) and the
 # SIGINT, SIGTERM and SIGHUP watches it hands run_with, all installed at once (rust-common).
-service-kit = { workspace = true, features = ["runtime", "process-metrics"] }
+service-kit = { workspace = true, features = ["runtime", "process-metrics", "http"] }
 
 [dev-dependencies]
 # TempDir, eventually and OrPanic, which the unit and wire tests share.
@@ -178,8 +178,6 @@ docker-engine = { workspace = true, features = ["write", "attach", "test-util"] 
 serde_json = "1.0.154"
 # The log capture of the unit tests (Capture, set_default).
 tracing-setup = { workspace = true, features = ["testing"] }
-# The Go wire captures' replay (Capture, replay).
-go-http = { workspace = true, features = ["testing"] }
 # The fake Engine of tests/parity.rs: hyper's HTTP/1 server.
 hyper = { version = "1.12.0", default-features = false, features = ["http1", "server"] }
 # The paused clock (start_paused) needs the test runtime; tests/parity.rs builds a multi-threaded

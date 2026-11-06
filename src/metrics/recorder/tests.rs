@@ -541,3 +541,30 @@ fn last_event_rounds_down_as_go() {
         );
     }
 }
+
+/// A label value carries Docker's text (an event action can hold a command line): the encoder
+/// escapes `"`, `\` and a newline, so a value cannot break out of its label or its line.
+#[test]
+fn label_values_are_escaped() {
+    let recorder = Recorder::new();
+    recorder.record_event("exec_start: sh -c \"a\\b\nc\"");
+    recorder.record_container_skipped("x\"y");
+    let body = String::from_utf8(recorder.exposition().body).expect("text");
+    assert!(
+        body.contains("sda_events_total{event=\"exec_start: sh -c \\\"a\\\\b\\nc\\\"\"} 1\n"),
+        "{body}"
+    );
+    assert!(
+        body.contains("sda_containers_skipped_total{reason=\"x\\\"y\"} 1\n"),
+        "{body}"
+    );
+    let scrape = Scrape::parse(&body);
+    near(
+        scrape.value(
+            "sda_events_total",
+            &[("event", "exec_start: sh -c \"a\\b\nc\"")],
+        ),
+        1.0,
+        "the value reads back",
+    );
+}

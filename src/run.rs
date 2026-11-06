@@ -170,7 +170,7 @@ where
     let readiness = Readiness::default();
 
     // Started before the main loop, so the endpoints are reachable during the startup pass.
-    let app = App::new(readiness.clone(), recorder.clone(), Arc::clone(&clock));
+    let app = App::new(readiness.clone(), recorder.clone());
     let Ok(server) = start_server(&root, &effective.metrics_addr, app).await else {
         return Exit::early(1);
     };

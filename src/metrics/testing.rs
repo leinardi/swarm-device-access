@@ -129,7 +129,10 @@ fn parse_sample(line: &str) -> Sample {
         let mut chars = after.char_indices();
         let end = loop {
             match chars.next().expect("a closing quote") {
-                (_, '\\') => text.push(chars.next().expect("an escape").1),
+                (_, '\\') => match chars.next().expect("an escape").1 {
+                    'n' => text.push('\n'),
+                    other => text.push(other),
+                },
                 (index, '"') => break index,
                 (_, other) => text.push(other),
             }
