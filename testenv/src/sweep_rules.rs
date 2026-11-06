@@ -25,8 +25,8 @@
 use std::fs;
 use std::time::Duration;
 
+use go_compat::{duration, quote};
 use jiff::Timestamp;
-use swarm_device_access::go_compat::{duration, quote};
 
 use crate::Error;
 

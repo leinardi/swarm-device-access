@@ -50,6 +50,8 @@ integration = [
 # checks. The dependency only goes this way: the daemon package names testenv in no table (the
 # docker_boundary meta-test checks its sources), so nothing here reaches the shipped binary.
 swarm-device-access = { path = ".." }
+# Go's strconv.Quote, errors.Join and Duration formatting, as the daemon writes them.
+go-compat.workspace = true
 # The sweep's started label, read as RFC 3339.
 jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 # The run filter: Go's -run patterns are regular expressions.

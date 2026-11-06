@@ -55,7 +55,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 use super::spec::{DAEMON_NAME, DaemonSpec};
 use crate::docker::types::{Labels, decode_first, decode_list, null_default};
 use crate::docker::{Body, Client, Error, Filters, encode_query, trim_id};
-use crate::go_compat::errno::io_error_text;
+use go_compat::errno::io_error_text;
 
 /// moby's `containerWaitErrorMsgLimit`: how much more of a wait answer that is not JSON is read
 /// for the error.

@@ -27,7 +27,7 @@
 //! Also here, since it needs no daemon either: whether an ELF binary is static, as the binary the
 //! suite copies out of the image under test is.
 
-use swarm_device_access::go_compat::quote;
+use go_compat::quote;
 
 use crate::Error;
 

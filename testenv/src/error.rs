@@ -21,7 +21,7 @@
 
 use std::fmt;
 
-use swarm_device_access::go_compat::errors;
+use go_compat::errors;
 
 /// A harness failure, with the chain of what was being done.
 #[derive(Debug, Clone, PartialEq, Eq)]

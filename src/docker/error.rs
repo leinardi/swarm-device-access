@@ -25,7 +25,7 @@ use std::fmt;
 use hyper::StatusCode;
 
 use super::context::ContextError;
-use crate::go_compat::quote::quote;
+use go_compat::quote::quote;
 
 /// Why the client could not be built: moby's `New(WithHost("unix://" + socket))` error, which the
 /// Go daemon logs as `docker client init failed`.

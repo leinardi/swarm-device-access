@@ -27,7 +27,7 @@ use super::self_id::SelfIdError;
 use super::short_id;
 use super::spec::DAEMON_NAME;
 use crate::docker::{ContextError, Error};
-use crate::go_compat::{duration, errors, quote::quote};
+use go_compat::{duration, errors, quote::quote};
 
 /// The launcher failed; it then exits with status 1.
 #[derive(Debug)]

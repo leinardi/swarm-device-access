@@ -40,7 +40,7 @@ use super::error::Error;
 use super::events::{EVENTS_ACCEPT, JsonStream, StreamError};
 use super::host::push_percent;
 use super::types::{ContainerInspect, ContainerSummary, Event, decode_first, decode_list};
-use crate::go_compat::quote::push_hex_escape;
+use go_compat::quote::push_hex_escape;
 
 /// The Docker calls the daemon makes. Every one but [`DockerApi::events`] is a single request
 /// and response, which the caller bounds with [`with_timeout`]; the event stream is long-lived

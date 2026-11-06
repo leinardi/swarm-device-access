@@ -23,7 +23,7 @@ use super::pin::{PinError, ProcCgroupError};
 use super::rules::DeviceError;
 use crate::cgroup::{self, HandleError};
 use crate::docker::{self, ErrorKind};
-use crate::go_compat::quote::quote;
+use go_compat::quote::quote;
 
 /// A failed reconcile, termination or revocation.
 #[derive(Debug)]

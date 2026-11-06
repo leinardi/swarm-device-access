@@ -43,9 +43,9 @@ use super::error::{ConfigError, Error};
 use super::host::{escape_host, escape_path, join_path, unix_socket};
 use super::pool::{Pool, PooledBody, RequestBody, SendError};
 use super::version::{self, MAX_API_VERSION};
-use crate::go_compat::errno::io_error_text;
-use crate::go_compat::http_status::status_text;
-use crate::go_compat::quote::quote;
+use go_compat::errno::io_error_text;
+use go_compat::http_status::status_text;
+use go_compat::quote::quote;
 
 /// moby's `checkResponseErr` reads at most this much of an error body.
 const ERROR_BODY_LIMIT: usize = 1024 * 1024;

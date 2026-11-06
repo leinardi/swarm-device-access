@@ -29,11 +29,11 @@ use rustix::io::Errno;
 use super::devfs::{DEV_ROOT, DevFs, DevNode, DeviceId, NodeKind, SysError, WalkControl};
 use crate::cgroup::DeviceRule;
 use crate::docker::types::MountPoint;
-use crate::go_compat::filepath;
-use crate::go_compat::quote::quote;
 use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global};
+use go_compat::filepath;
+use go_compat::quote::quote;
 
 /// Bounds the names enumerated under one directory mount. A walk that cannot see every name
 /// cannot know that no alias denies a device it did see, so overflow is an error, not a cutoff.
@@ -495,7 +495,7 @@ fn escape_hop(dev: &dyn DevFs, rel: &str) -> Result<Hop, SysError> {
 /// is a clean relative path without `..`.
 fn canonical_name(dev: &dyn DevFs, id: DeviceId) -> Result<String, Cause> {
     let data = dev.read_uevent(id).map_err(Cause::Sys)?;
-    let names: Vec<String> = crate::go_compat::scanner::lines(&data)
+    let names: Vec<String> = go_compat::scanner::lines(&data)
         .map_while(Result::ok)
         .filter_map(|line| {
             String::from_utf8_lossy(line)

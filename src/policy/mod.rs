@@ -33,10 +33,10 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::BuildHasher;
 
-use crate::go_compat::filepath::{self, BadPattern};
-use crate::go_compat::parse_bool::parse_bool;
-use crate::go_compat::quote::quote;
-use crate::go_compat::strings::trim_space;
+use go_compat::filepath::{self, BadPattern};
+use go_compat::parse_bool::parse_bool;
+use go_compat::quote::quote;
+use go_compat::strings::trim_space;
 
 /// The prefix of every policy label.
 pub const LABEL_PREFIX: &str = "swarm-device-access.";

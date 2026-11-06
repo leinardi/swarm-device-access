@@ -39,9 +39,9 @@ use clap::parser::ValueSource;
 use clap::{ArgAction, CommandFactory as _, FromArgMatches as _, Parser};
 
 use crate::config;
-use crate::go_compat::parse_bool::parse_bool;
-use crate::go_compat::{filepath, quote};
 use crate::launcher::spec::DEFAULT_HOST_DOCKER_SOCKET;
+use go_compat::parse_bool::parse_bool;
+use go_compat::{filepath, quote};
 
 /// The first argument that selects the launcher, Go's `launchCommand`.
 pub const LAUNCH_COMMAND: &str = "launch";

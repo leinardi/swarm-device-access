@@ -26,7 +26,7 @@ use super::error::Error;
 use super::handle::CgroupHandle;
 use super::ledger::Ledger;
 use super::v1set::{self, OpenatFiles, V1Files};
-use crate::go_compat::filepath;
+use go_compat::filepath;
 
 /// The cgroup v1 device controller: `devices.allow` and `devices.deny` written through the
 /// cgroup's directory descriptor, with the [`Ledger`] of the exceptions the daemon added.

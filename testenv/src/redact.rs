@@ -29,8 +29,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use go_compat::local_zone::local_zone;
 use swarm_device_access::clock::SystemClock;
-use swarm_device_access::go_compat::local_zone::local_zone;
 use swarm_device_access::logger::{Attr, Config, Format, Level, Logger, Sink, Value};
 
 /// What a redacted value is written as.

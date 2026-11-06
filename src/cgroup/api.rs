@@ -31,9 +31,9 @@ use super::v1::CgroupV1;
 use super::v2::CgroupV2;
 use super::v2plan::FilterCache;
 use super::{v1, v2};
-use crate::go_compat::quote::quote;
-use crate::go_compat::scanner::{self, TokenTooLong};
 use crate::logger::LogHandle;
+use go_compat::quote::quote;
+use go_compat::scanner::{self, TokenTooLong};
 
 /// One device rule, the shape of runtime-spec's `LinuxDeviceCgroup`, which the Go daemon inlined:
 /// the JSON keys and the omission of an empty type or access and of an absent number are that

@@ -29,7 +29,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::{self, Read as _};
 
-use crate::go_compat::errno::io_error_text;
+use go_compat::errno::io_error_text;
 
 /// The launcher's own mount table.
 pub const SELF_MOUNTINFO: &str = "/proc/self/mountinfo";

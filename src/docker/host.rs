@@ -22,7 +22,7 @@
 //! messages. The daemon dials only its unix socket (`--docker-socket`), so swarm-scheduler-
 //! exporter's TCP host parsing is not taken.
 
-use crate::go_compat::quote::quote;
+use go_compat::quote::quote;
 
 /// The longest unix socket path: `len(syscall.RawSockaddrUnix{}.Path)` on Linux.
 const MAX_UNIX_SOCKET_PATH: usize = 108;

@@ -37,7 +37,7 @@
 //!   included; an attribute whose key is empty after qualification is dropped, a group included;
 //!   and a group with no attributes is written `key={}`.
 
-use crate::go_compat::{duration, float, time_layout};
+use go_compat::{duration, float, time_layout};
 
 use super::Level;
 use super::value::{Attr, Time, Value};

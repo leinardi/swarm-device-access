@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 
-use crate::go_compat::float;
+use go_compat::float;
 
 use super::process::ProcessCollector;
 use super::promhttp::HandlerMetrics;

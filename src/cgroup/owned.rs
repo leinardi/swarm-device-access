@@ -626,7 +626,7 @@ impl fmt::Display for NonceError {
         write!(
             out,
             "generate nonce: {}",
-            crate::go_compat::errno::io_error_text(&self.0)
+            go_compat::errno::io_error_text(&self.0)
         )
     }
 }

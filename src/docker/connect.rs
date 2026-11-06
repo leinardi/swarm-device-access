@@ -27,7 +27,7 @@ use std::io;
 use tokio::net::UnixStream;
 
 use super::DIAL_TIMEOUT;
-use crate::go_compat::errno::io_error_text;
+use go_compat::errno::io_error_text;
 
 /// Why a connection could not be made, worded as Go's `net.OpError` and net/http word it.
 #[derive(Debug)]

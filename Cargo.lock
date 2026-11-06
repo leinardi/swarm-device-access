@@ -374,6 +374,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "go-compat"
+version = "0.1.0"
+source = "git+https://github.com/leinardi/rust-common?rev=afba1366f69b523a3143a0bc8cb312aac302c4d9#afba1366f69b523a3143a0bc8cb312aac302c4d9"
+dependencies = [
+ "jiff",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1050,6 +1058,7 @@ dependencies = [
  "clap",
  "flate2",
  "futures-core",
+ "go-compat",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -1118,6 +1127,7 @@ version = "0.0.0"
 dependencies = [
  "bollard",
  "futures-util",
+ "go-compat",
  "jiff",
  "regex",
  "rustix",
