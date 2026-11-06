@@ -56,7 +56,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bollard::query_parameters::ListContainersOptions;
-use go_clock::{Clock as _, SystemClock};
+use clock::{Clock as _, SystemClock};
 use go_compat::duration;
 use go_compat::local_zone::local_zone;
 use go_slog::Attr;

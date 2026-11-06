@@ -38,7 +38,7 @@ use crate::processor::{self, Processor};
 use crate::systemd::OnReload;
 use crate::test_support::fake_docker::{Call, FakeDocker};
 use crate::test_support::{capture_logs, eventually};
-use go_clock::{Clock, TokioClock};
+use clock::{Clock, TokioClock};
 use go_slog::{Level, MemorySink};
 
 /// A running daemon over the fake Docker.

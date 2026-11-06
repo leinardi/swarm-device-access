@@ -56,7 +56,7 @@ use crate::docker::{self, CallContext, ContextError, DockerApi, with_context};
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global, unknown_labels};
 use crate::task::finish;
-use go_clock::Clock;
+use clock::Clock;
 use go_compat::quote::quote;
 use go_slog::{Attr, LogHandle};
 

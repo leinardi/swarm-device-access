@@ -172,11 +172,11 @@ the rust-common crates)**
   (`ExpfmtVersion::V0_70_1`), and the `/metrics`, `/healthz` and `/readyz` routes on go-http's
   server with the daemon's `TIMEOUTS` (5 s, 10 s, 30 s, 60 s). There is no pprof server (Q2).
 - go-compat — the Go standard library's formatting and parsing the 1.x log, error and flag text
-  depends on; go-clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`.
+  depends on; clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`.
 
 ## Shared crates (rust-common)
 
-`go-compat`, `go-clock`, `go-slog`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
+`go-compat`, `clock`, `go-slog`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
 `service-kit`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
 release tag (`tag = "v0.3.0"`, with `version = "0.3"`, the tag's `<major>.<minor>`) in the root

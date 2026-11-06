@@ -26,7 +26,7 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 
-use go_clock::SystemClock;
+use clock::SystemClock;
 use go_slog::LogHandle;
 use swarm_device_access::cgroup::{
     DeviceRule, KernelOps, OWNED_PROGRAM_NAME, V2Ops as _, canonical_bytes, emit_owned,

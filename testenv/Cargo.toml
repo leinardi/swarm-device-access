@@ -41,6 +41,7 @@ integration = [
     "testenv-core/async",
     "testenv-core/bollard",
     "testenv-core/redact",
+    "testenv-core/redact-go-slog",
     "dep:bollard",
     "dep:futures-util",
 ]
@@ -54,7 +55,7 @@ swarm-device-access = { path = ".." }
 # Go's strconv.Quote and Duration formatting, as the daemon writes them.
 go-compat.workspace = true
 # The wall clock the harness and its logs read.
-go-clock.workspace = true
+clock.workspace = true
 # The daemon's logger, for the harness's own records.
 go-slog.workspace = true
 # The generic half of the harness (rust-common): Go's -run filter, the envid, the sweep rules and

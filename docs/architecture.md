@@ -317,7 +317,7 @@ counts per-device failures.
 | `src/metrics`, `src/server.rs`, `src/server` | Prometheus metrics (`Recorder`, with a no-op form) on `go-prom`'s registry and text exposition (`ExpfmtVersion::V0_70_1`); the `/metrics`, `/healthz` and `/readyz` routes on `go-http`'s server with Go's `http.Server` deadlines (`TIMEOUTS`: 5 s, 10 s, 30 s, 60 s) |
 | `src/systemd.rs` | D-Bus watcher for systemd's `Reloading` signal (zbus) |
 | `src/task.rs`, `src/version.rs` | Awaiting spawned work to completion; the build's version stamps (`BUILD`, service-kit's `buildinfo!`) |
-| rust-common crates | `go-slog`: slog-compatible logger with `text`, `json` and `plain` (`PlainStyle::Raw`) handlers and Go's fallback level and format parsing, shared through a `LogHandle`; `go-compat`: ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts); `go-clock`: the one wall-clock read behind the injected `Clock` |
+| rust-common crates | `go-slog`: slog-compatible logger with `text`, `json` and `plain` (`PlainStyle::Raw`) handlers and Go's fallback level and format parsing, shared through a `LogHandle`; `go-compat`: ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts); `clock`: the one wall-clock read behind the injected `Clock` |
 
 ## Policy model
 

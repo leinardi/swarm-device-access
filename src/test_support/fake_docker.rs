@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use crate::docker::context::{self, ContextError};
 use crate::docker::types::{ContainerInspect, ContainerSummary, Event};
 use crate::docker::{DockerApi, Error, EventStream, Filters, StreamError, StreamErrorKind};
-use go_clock::Clock;
+use clock::Clock;
 
 /// What one fake event stream yields: an event, or the error that ends the stream.
 pub(crate) type FakeEvent = Result<Event, StreamError>;

@@ -35,7 +35,7 @@ use crate::docker::{CallContext, DockerApi};
 use crate::metrics::Recorder;
 use crate::processor::{Inspector, Processor};
 use crate::systemd::{self, OnReload};
-use go_clock::Clock;
+use clock::Clock;
 use go_slog::{Attr, LogHandle};
 
 /// The first delay of a retry: a failed container, a failed list, a lost event stream.

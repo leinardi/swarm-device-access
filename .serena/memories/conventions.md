@@ -49,5 +49,5 @@ Container labels use prefix `swarm-device-access.`:
 
 ## Time
 
-Inject `Arc<dyn Clock>`; only go-clock's `SystemClock` (rust-common) reads the wall clock. Tests
+Inject `Arc<dyn Clock>`; only clock's `SystemClock` (rust-common) reads the wall clock. Tests
 use `TokioClock` on a paused runtime or `FakeClock`.

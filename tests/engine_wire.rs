@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use go_clock::FakeClock;
+use clock::FakeClock;
 use go_slog::{Config, Format, Level, LogHandle, Logger, MemorySink};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;

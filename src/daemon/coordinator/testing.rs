@@ -39,7 +39,7 @@ use crate::policy::Global;
 use crate::processor::{self, Inspector, Processor};
 use crate::test_support::capture_logs;
 use crate::test_support::fake_docker::FakeDocker;
-use go_clock::{Clock, TokioClock};
+use clock::{Clock, TokioClock};
 use go_slog::{Level, LogHandle, MemorySink};
 
 /// How long a wait for something the coordinator will do may take, in paused tokio time.

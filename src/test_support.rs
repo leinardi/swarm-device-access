@@ -29,7 +29,7 @@ use std::sync::Arc;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-use go_clock::FakeClock;
+use clock::FakeClock;
 use go_slog::{Config, Format, Level, LogHandle, Logger, MemorySink};
 
 /// A temporary directory, removed on drop (`TempDir::new("sda-test")`), and a bounded wait:

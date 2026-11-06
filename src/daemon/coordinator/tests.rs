@@ -43,7 +43,7 @@ use crate::policy::Global;
 use crate::task::finish;
 use crate::test_support::fake_docker::FakeDocker;
 use crate::test_support::{capture_logs, eventually};
-use go_clock::{Clock, FakeClock, TokioClock};
+use clock::{Clock, FakeClock, TokioClock};
 use go_slog::Level;
 
 /// Go: `TestCoordinator_ListFailsThenSucceeds`

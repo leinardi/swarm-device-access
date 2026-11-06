@@ -43,7 +43,7 @@ use crate::processor::devfs::NodeKind;
 use crate::processor::fake_devfs::{DEV_CARD, DEV_NULL, DEV_SDA, FakeDevFs, FakeNode};
 use crate::processor::pin::PinError;
 use crate::test_support::{TempDir, capture_logs};
-use go_clock::FakeClock;
+use clock::FakeClock;
 use go_slog::{Level, MemorySink};
 
 const RECONCILE_PID: i64 = 80;

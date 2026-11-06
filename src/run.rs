@@ -48,7 +48,7 @@ use crate::metrics::Recorder;
 use crate::processor::{self, Processor, devfs};
 use crate::server::{self, App, MetricsServer};
 use crate::version::BUILD;
-use go_clock::{Clock, SystemClock};
+use clock::{Clock, SystemClock};
 use go_slog::{Attr, LogHandle, PlainStyle};
 use service_kit::runtime::Exit;
 

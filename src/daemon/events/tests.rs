@@ -468,7 +468,7 @@ async fn reconcile_hung_inspect_is_bounded_per_call() {
         host_root: "/host".to_owned(),
         proc_root: "/".to_owned(),
         call_timeout: Some(Duration::from_millis(50)),
-        clock: Arc::new(go_clock::TokioClock::new(base())),
+        clock: Arc::new(clock::TokioClock::new(base())),
         log: crate::test_support::capture_logs(go_slog::Level::DEBUG).0,
     });
 

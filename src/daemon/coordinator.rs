@@ -54,7 +54,7 @@ use crate::docker::{self, CallContext, DockerApi, with_context};
 use crate::metrics::Recorder;
 use crate::processor::{self, Inspector, PassRequester, Processor};
 use crate::task::finish;
-use go_clock::Clock;
+use clock::Clock;
 use go_slog::{Attr, LogHandle};
 
 /// How long an enumerated container's entry suppresses a start event that is not newer than its

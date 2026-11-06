@@ -46,7 +46,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use go_clock::Clock;
+use clock::Clock;
 use go_compat::quote::quote;
 use go_http::{Drained, ListenError, Mux, Reply, Server, Timeouts};
 use go_slog::{Attr, LogHandle};

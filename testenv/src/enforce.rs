@@ -32,7 +32,7 @@ use std::os::fd::AsFd as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::sync::Arc;
 
-use go_clock::SystemClock;
+use clock::SystemClock;
 use go_compat::local_zone::local_zone;
 use go_slog::{Config, Format, Level, LogHandle, Logger};
 use swarm_device_access::cgroup::{
