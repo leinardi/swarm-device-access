@@ -178,9 +178,10 @@ the rust-common crates)**
 
 `go-compat`, `go-clock`, `go-slog`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
 `service-kit`, `testenv-core` and `repo-meta` come from
-[leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by `rev`
-in the root `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with
-`<name>.workspace = true` and its own features.
+[leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
+release tag (`tag = "v0.2.1"`, with `version = "0.2"`, the tag's `<major>.<minor>`) in the root
+`Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
+its own features.
 
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
@@ -190,8 +191,10 @@ in the root `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with
   labels and resources (`testenv/src/config.rs`) and runner settings
   (`testenv/tests/integration/main.rs`) to testenv-core, and
   `buildinfo!("SWARM_DEVICE_ACCESS", …)` (service-kit).
-- **A fix to shared code lands in rust-common first**, then reaches this repository by moving the
-  `rev`, with the ledger in [`docs/rust-port.md`](docs/rust-port.md) updated in the same commit.
+- **A fix to shared code lands in rust-common first**, then reaches this repository in a release,
+  by moving the `tag` (and `version` with it) on every rust-common line, with the ledger in
+  [`docs/rust-port.md`](docs/rust-port.md) updated in the same commit. Refresh the lock with
+  `cargo fetch`, never `cargo update -p`; `git diff Cargo.lock` must touch only rust-common lines.
 - **Local iteration on a shared crate** uses an uncommitted
   `[patch."https://github.com/leinardi/rust-common"]` table in the root `Cargo.toml`, one
   `path = "../rust-common/crates/<name>"` line for every rust-common crate the workspace uses,
@@ -305,7 +308,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify`, then `make check-stage` |
 | `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
 | `tests/testdata/**` (the Go golden captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, Go golden captures): never regenerate one by hand |
-| a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `rev` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
+| a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `tag` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
 | `scripts/check-suppressions.sh`, `.suppressions-baseline` | `cargo test --locked -p meta --test suppressions` |
