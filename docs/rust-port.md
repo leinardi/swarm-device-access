@@ -62,7 +62,7 @@ and `Cargo.lock` and checked by `cargo deny`.
 
 | Crate | Where | Reason |
 | --- | --- | --- |
-| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by `rev` (the upstream-stack work) in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies. |
+| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by the release tag `v0.4.0` in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies. |
 | `clap` 4 (derive, no colour) | daemon | The CLI, as in SSE (Q1). |
 | `tokio` (`net`, `time`, `sync`, `rt`, `io-util`, `io-std`, `macros`) | daemon; testenv (dev-dependency) | The sockets, the timers that follow the paused clock, `spawn_blocking` for the cgroup transaction, the launcher's output pump; in testenv the suite's daemon child processes. The runtime and the signal watches are service-kit's. |
 | `tokio-util` | daemon | `CancellationToken`, Go's context cancellation, and the `TaskTracker` of the blocking transactions. |
@@ -171,7 +171,7 @@ These rows extend the component rows above; their pinned source revisions are un
 After the port, the components the services share moved to
 [leinardi/rust-common](https://github.com/leinardi/rust-common); the rows above say what this
 daemon passes each crate. They are one git dependency in the root `Cargo.toml`'s
-`[workspace.dependencies]`, pinned by `rev`: `clock`, `tracing-setup`, `docker-client`,
+`[workspace.dependencies]`, pinned by the release tag `v0.4.0`: `clock`, `tracing-setup`, `docker-client`,
 `service-kit`, `testenv-core` and `repo-meta`. The earlier `go-compat`, `go-slog`, `go-prom`,
 `go-http` and `docker-engine` crates are no longer used by this repository (README Q6, Q11, Q13,
 Q14, Q16, Q17). The moved code is the same code, and its tests and corpora moved with it.
