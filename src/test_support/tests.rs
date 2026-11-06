@@ -19,6 +19,8 @@
 
 //! The shared helpers' own tests.
 
+use std::time::Duration;
+
 use super::*;
 use go_slog::Attr;
 

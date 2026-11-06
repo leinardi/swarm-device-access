@@ -645,7 +645,7 @@ fn unix_path_addresses_are_parsed() {
 /// were printed by the Go watcher's `Open`.
 #[tokio::test]
 async fn dial_failures_read_as_go() {
-    let dir = TempDir::new();
+    let dir = TempDir::new("sda-test");
     let missing = dir.path().join("missing");
     let refusing = dir.path().join("plainfile");
     std::fs::write(&refusing, b"").unwrap();

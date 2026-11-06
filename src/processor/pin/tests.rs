@@ -58,7 +58,7 @@ fn read_proc_cgroup_of_this_process() {
 
 /// A fake `<root>/proc/<pid>` holding `files`; a name ending in `/` is a directory.
 fn fake_proc(pid: u32, files: &[(&str, &str)]) -> TempDir {
-    let root = TempDir::new();
+    let root = TempDir::new("sda-test");
     let dir = root.path().join(format!("proc/{pid}"));
     std::fs::create_dir_all(&dir).unwrap();
     for (name, content) in files {
@@ -73,7 +73,7 @@ fn fake_proc(pid: u32, files: &[(&str, &str)]) -> TempDir {
 
 #[test]
 fn read_proc_cgroup_error_texts() {
-    let missing = TempDir::new();
+    let missing = TempDir::new("sda-test");
     let missing_root = missing.path().to_str().unwrap().to_owned();
     assert_eq!(
         read_proc_cgroup(&missing_root, 1).unwrap_err().to_string(),

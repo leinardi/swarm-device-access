@@ -191,7 +191,7 @@ impl Drop for FakePinned {
 
 /// Go's `buildProcRoot`: a `/proc/<pid>/{cgroup,mountinfo}` under a temporary directory.
 fn build_proc_root(pid: i64) -> TempDir {
-    let root = TempDir::new();
+    let root = TempDir::new("sda-test");
     let dir = root.path().join(format!("proc/{pid}"));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("cgroup"), TEST_CGROUP_CONTENT).unwrap();
@@ -217,7 +217,7 @@ fn write_procs(host_root: &Path, pids: &[i64]) {
 /// Go's `hostRootWithCgroup`: a host root holding the cgroup directory `build_proc_root`'s
 /// `/proc` resolves to, with `pid` listed in its `cgroup.procs`.
 fn host_root_with_cgroup(pid: i64) -> TempDir {
-    let root = TempDir::new();
+    let root = TempDir::new("sda-test");
     std::fs::create_dir_all(test_cgroup_dir(root.path())).unwrap();
     write_procs(root.path(), &[pid]);
     root
@@ -975,7 +975,7 @@ async fn reconcile_incomplete_device_set_sets_empty_set() {
 /// nothing, reads no `/proc` and builds no cgroup API.
 #[tokio::test]
 async fn reconcile_dry_run_issues_no_cgroup_calls() {
-    let absent = TempDir::new();
+    let absent = TempDir::new("sda-test");
     let mut options = Options::new("all", true);
     options.proc_root = Some(absent.path().join("absent").display().to_string());
     let env = Env::with(options);

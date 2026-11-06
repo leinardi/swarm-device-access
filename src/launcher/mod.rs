@@ -45,7 +45,6 @@ mod error;
 pub mod self_id;
 pub mod spec;
 mod stale;
-mod stdcopy;
 
 #[cfg(test)]
 mod fake;
@@ -68,7 +67,7 @@ use tokio::io::AsyncWrite;
 use tokio::task::JoinHandle;
 
 use crate::daemon::DOCKER_CALL_TIMEOUT;
-use crate::docker::{CallContext, Client, Error, with_context};
+use crate::docker::{self, CallContext, Client, Error, with_context};
 use go_slog::{Attr, LogHandle};
 
 /// The `component` attribute of every launcher log line.
@@ -551,7 +550,7 @@ impl Pump {
         } = console;
         Self {
             task: tokio::spawn(async move {
-                stdcopy::std_copy(&mut stdout, &mut stderr, &mut attached).await
+                docker::std_copy(&mut stdout, &mut stderr, &mut attached).await
             }),
             outcome: None,
         }

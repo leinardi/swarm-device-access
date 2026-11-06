@@ -21,8 +21,9 @@
 //! writes in the project, sent as moby client v0.6.0 sends the Go launcher's calls.
 //!
 //! [`Engine`] shares the daemon client's transport (its socket, pool, negotiation and error
-//! wording) through two crate-private hooks of [`Client`], and only this module calls them; only
-//! `src/launcher/**` may name this module (`meta/tests/launcher_boundary.rs`). The requests, as
+//! wording): docker-engine's `exchange` and `exchange_upgrade` on [`Client::transport`], which
+//! only this module calls; only `src/launcher/**` may name this module
+//! (`meta/tests/launcher_boundary.rs`). The requests, as
 //! `tests/testdata/engine_wire/api-1.56/launcher.jsonl` recorded the Go launcher's:
 //!
 //! - `GET /containers/{id}/json`, and `GET /containers/json?all=1&filters=...` with the name
@@ -45,7 +46,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use http_body_util::{BodyExt as _, Full, Limited};
+use http_body_util::{BodyExt as _, Full};
 use hyper::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HeaderValue, UPGRADE};
 use hyper::{Method, Request, Response};
 use hyper_util::rt::TokioIo;
@@ -54,16 +55,10 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 use super::spec::{DAEMON_NAME, DaemonSpec};
 use crate::docker::types::{Labels, decode_first, decode_list, null_default};
-use crate::docker::{Body, Client, Error, Filters, encode_query, trim_id};
+use crate::docker::{
+    Body, Client, Error, Filters, encode_query, ensure_reader_closed, trim_id, wait_answer,
+};
 use go_compat::errno::io_error_text;
-
-/// moby's `containerWaitErrorMsgLimit`: how much more of a wait answer that is not JSON is read
-/// for the error.
-const WAIT_ERROR_LIMIT: usize = 2 * 1024;
-
-/// moby's `ensureReaderClosed`: how much of a body that is not read is drained, so the
-/// connection is reused.
-const DRAIN_LIMIT: usize = 512;
 
 /// The daemon's output stream: what the attach upgraded to, read until the daemon's output ends.
 pub type Attached = Box<dyn AsyncRead + Send + Unpin>;
@@ -193,14 +188,14 @@ impl Engine {
         query: &str,
         shape: impl Fn(&mut Request<Full<Bytes>>),
     ) -> Result<Response<Body>, Error> {
-        self.client.exchange(path, query, shape).await
+        self.client.transport().exchange(path, query, shape).await
     }
 
     /// A `POST` with no body and the `Content-Length: 0` net/http sends with it, its answer
     /// drained.
     async fn post_empty(&self, path: &str, query: &str) -> Result<(), Error> {
         let response = self.call(path, query, empty_post).await?;
-        drain(response).await;
+        ensure_reader_closed(response).await;
         Ok(())
     }
 }
@@ -211,14 +206,14 @@ impl EngineApi for Engine {
         let response = self
             .call(&format!("/containers/{id}/json"), "", |_| {})
             .await?;
-        decode_first(&read_body(response).await?).map_err(Error::decode)
+        decode_first(&read_body(response).await?)
     }
 
     async fn list_daemons(&self) -> Result<Vec<Summary>, Error> {
         let filters = Filters::new().add("name", &[&format!("^/{DAEMON_NAME}$")]);
         let query = encode_query(&mut [("all", "1".to_owned()), ("filters", filters.to_json())]);
         let response = self.call("/containers/json", &query, |_| {}).await?;
-        decode_list(&read_body(response).await?).map_err(Error::decode)
+        decode_list(&read_body(response).await?)
     }
 
     async fn remove(&self, id: &str) -> Result<(), Error> {
@@ -228,7 +223,7 @@ impl EngineApi for Engine {
                 *request.method_mut() = Method::DELETE;
             })
             .await?;
-        drain(response).await;
+        ensure_reader_closed(response).await;
         Ok(())
     }
 
@@ -244,13 +239,14 @@ impl EngineApi for Engine {
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
             })
             .await?;
-        decode_first(&read_body(response).await?).map_err(Error::decode)
+        decode_first(&read_body(response).await?)
     }
 
     async fn attach(&self, id: &str) -> Result<Attached, Error> {
         let id = trim_id("container", id)?;
         let upgraded = self
             .client
+            .transport()
             .exchange_upgrade(
                 &format!("/containers/{id}/attach"),
                 "stderr=1&stdout=1&stream=1",
@@ -265,7 +261,12 @@ impl EngineApi for Engine {
             .await?;
         Ok(Box::new(Hijacked {
             inner: TokioIo::new(upgraded),
-            socket: self.client.settings().socket().to_owned(),
+            socket: self
+                .client
+                .settings()
+                .socket()
+                .unwrap_or_default()
+                .to_owned(),
         }))
     }
 
@@ -278,7 +279,7 @@ impl EngineApi for Engine {
                 empty_post,
             )
             .await?;
-        Ok(Box::pin(wait_answer(response.into_body())))
+        Ok(Box::pin(wait_answer::<WaitResponse>(response.into_body())))
     }
 
     async fn start(&self, id: &str) -> Result<(), Error> {
@@ -305,96 +306,6 @@ fn empty_post(request: &mut Request<Full<Bytes>>) {
 
 async fn read_body(response: Response<Body>) -> Result<Vec<u8>, Error> {
     Ok(response.into_body().collect().await?.to_bytes().to_vec())
-}
-
-/// moby's `ensureReaderClosed`.
-async fn drain(response: Response<Body>) {
-    let _ = Limited::new(response.into_body(), DRAIN_LIMIT)
-        .collect()
-        .await;
-}
-
-/// moby's wait goroutine: the first JSON value of the answer, or the error its channel carries.
-/// A syntax error is reported as the text of the answer (up to [`WAIT_ERROR_LIMIT`] more of it),
-/// since a proxy that cuts the stream can only write plain text after the status; any other
-/// failure as it reads.
-async fn wait_answer(mut body: Body) -> Result<WaitResponse, String> {
-    let mut received = Vec::new();
-    loop {
-        let read = body.frame().await;
-        let ended = match read {
-            None => true,
-            Some(Ok(frame)) => {
-                if let Ok(data) = frame.into_data() {
-                    received.extend_from_slice(&data);
-                }
-                false
-            }
-            Some(Err(error)) => {
-                return Err(match decode_wait(&received) {
-                    // What was read so far is incomplete: the read error is what stopped it.
-                    Decoded::Value(_) | Decoded::Incomplete => error.to_string(),
-                    Decoded::Syntax => String::from_utf8_lossy(&received).into_owned(),
-                    Decoded::Other(text) => text,
-                });
-            }
-        };
-        match decode_wait(&received) {
-            Decoded::Value(response) => return Ok(response),
-            Decoded::Incomplete if !ended => {}
-            Decoded::Incomplete if received.iter().all(u8::is_ascii_whitespace) => {
-                return Err("EOF".to_owned());
-            }
-            Decoded::Incomplete => return Err("unexpected EOF".to_owned()),
-            Decoded::Syntax => {
-                return Err(syntax_error_text(&mut body, received, ended).await);
-            }
-            Decoded::Other(text) => return Err(text),
-        }
-    }
-}
-
-/// The answer's text for a syntax error: what was read, and up to [`WAIT_ERROR_LIMIT`] more.
-async fn syntax_error_text(body: &mut Body, mut received: Vec<u8>, ended: bool) -> String {
-    if !ended {
-        let limit = received.len() + WAIT_ERROR_LIMIT;
-        while received.len() < limit {
-            match body.frame().await {
-                Some(Ok(frame)) => {
-                    if let Ok(data) = frame.into_data() {
-                        received.extend_from_slice(&data);
-                    }
-                }
-                None | Some(Err(_)) => break,
-            }
-        }
-        received.truncate(limit);
-    }
-    String::from_utf8_lossy(&received).into_owned()
-}
-
-enum Decoded {
-    Value(WaitResponse),
-    Incomplete,
-    Syntax,
-    Other(String),
-}
-
-fn decode_wait(received: &[u8]) -> Decoded {
-    match serde_json::Deserializer::from_slice(received)
-        .into_iter::<Option<WaitResponse>>()
-        .next()
-    {
-        None => Decoded::Incomplete,
-        Some(Ok(value)) => Decoded::Value(value.unwrap_or_default()),
-        Some(Err(error)) => match error.classify() {
-            serde_json::error::Category::Eof => Decoded::Incomplete,
-            serde_json::error::Category::Syntax => Decoded::Syntax,
-            serde_json::error::Category::Io | serde_json::error::Category::Data => {
-                Decoded::Other(error.to_string())
-            }
-        },
-    }
 }
 
 /// The hijacked attach connection, whose read errors read as Go's `net.OpError` on the unbound
@@ -425,6 +336,3 @@ impl AsyncRead for Hijacked {
             })
     }
 }
-
-#[cfg(test)]
-mod tests;
