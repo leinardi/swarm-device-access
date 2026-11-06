@@ -244,12 +244,59 @@ async fn wait_answers_the_exit_status_or_that_the_container_is_gone() {
     assert_eq!(answer.status_code, 1);
     assert!(answer.error.unwrap().message.contains("already removed"));
 
+    // An engine that refuses the wait fails the call itself: the waiter was never registered.
     let (_broken, engine) = self::engine(&[(
         &format!("/containers/{ID}/wait"),
         Reply::error(500, "engine broke"),
     )]);
+    let refusal = engine.wait_removed(ID).await.err().unwrap();
+    assert!(refusal.to_string().contains("engine broke"), "{refusal}");
+
+    // A body that is not an answer is the answer's failure, after the waiter was registered.
+    let (_garbled, engine) =
+        self::engine(&[(&format!("/containers/{ID}/wait"), Reply::ok("not json"))]);
     let failure = engine.wait_removed(ID).await.unwrap().await.unwrap_err();
-    assert!(failure.contains("engine broke"), "{failure}");
+    assert!(!failure.is_empty());
+}
+
+/// The wait for the removal is registered with the engine, its headers answered, before
+/// `wait_removed` returns, so the start that follows cannot overtake it: a daemon that exits the
+/// moment it starts (and is auto-removed) still answers its exit code. The engine here answers
+/// the wait's headers late and its body at once, as one whose container has already exited does.
+#[tokio::test]
+async fn a_daemon_that_exits_at_once_still_answers_its_exit_code() {
+    let (fake, engine) = engine(&[
+        (
+            &format!("/containers/{ID}/wait"),
+            Reply::Delayed {
+                delay: Duration::from_millis(100),
+                reply: Box::new(Reply::HeadersThenBody {
+                    body_delay: Duration::ZERO,
+                    body: r#"{"StatusCode":7}"#.to_owned(),
+                }),
+            },
+        ),
+        (&format!("/containers/{ID}/start"), Reply::status(204)),
+    ]);
+
+    let answer = engine.wait_removed(ID).await.unwrap();
+    engine.start(ID).await.unwrap();
+
+    let order: Vec<_> = calls(&fake)
+        .iter()
+        .map(|request| request.path().to_owned())
+        .collect();
+    assert_eq!(
+        order,
+        [
+            format!("/containers/{ID}/wait"),
+            format!("/containers/{ID}/start")
+        ],
+        "the start was sent before the wait was registered"
+    );
+    let answer = answer.await.unwrap();
+    assert_eq!(answer.status_code, 7);
+    assert_eq!(answer.error, None);
 }
 
 fn engine_without_routes() -> (FakeEngine, Engine) {

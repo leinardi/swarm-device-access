@@ -83,7 +83,8 @@ pub(super) async fn sleep_ctx(context: &CallContext, duration: Duration) {
 #[derive(Debug)]
 pub(super) enum Subscription<S> {
     Open(S),
-    /// The connect failed; the stream's first and only item is the error.
+    /// The engine refused the subscription; the stream's first and only item is the error. The
+    /// daemon is not ready on it.
     Refused(docker::Error),
 }
 
@@ -152,11 +153,11 @@ impl std::error::Error for SubscribeError {}
 
 /// Opens the Docker event stream with a bounded establishment.
 ///
-/// The `events` call does not resolve until dockerd has sent the response headers, so a hung
-/// dockerd would block the caller with nothing able to act as a watchdog, and a deadline on the
-/// stream itself would also cut it once established. The call is therefore raced against a timer
-/// here and dropped, which ends the attempt, when the timer or `context` wins; the stream it
-/// returns has no deadline.
+/// The `events` call does not resolve until dockerd has sent the response headers (the stream is
+/// established, not lazy), so a hung dockerd would block the caller with nothing able to act as a
+/// watchdog, and a deadline on the stream itself would also cut it once established. The call is
+/// therefore raced against a timer here and dropped, which ends the attempt, when the timer or
+/// `context` wins; the stream it returns has no deadline.
 pub(super) async fn subscribe<D: DockerApi>(
     context: &CallContext,
     docker: &D,
@@ -240,8 +241,11 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                 }
             };
 
-            self.readiness.set(true);
-            debug!("subscribed to docker events");
+            // Ready only once the engine answered the subscription: a refused one is no stream.
+            if matches!(current, Subscription::Open(_)) {
+                self.readiness.set(true);
+                debug!("subscribed to docker events");
+            }
 
             let disconnected = self
                 .consume_events(context, &mut current, &mut backoff, &mut last_event_nano)

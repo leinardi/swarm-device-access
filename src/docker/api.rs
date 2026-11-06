@@ -26,37 +26,39 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
-use std::future::Future;
+use std::future::{Future, poll_fn};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use docker_client::bollard::Docker;
-use docker_client::bollard::query_parameters::{EventsOptionsBuilder, InspectContainerOptions};
-use docker_client::{
-    CancellationToken, Config, ConnectError, ErrorKind, connect, negotiate, pump_stream,
-};
-use jiff::Timestamp;
-use tokio::sync::mpsc;
-
 use super::types::{ContainerInspect, ContainerSummary, Event};
 use super::{Error, StreamError};
 use crate::version::BUILD;
-
-/// The event records buffered between bollard's stream and the loop that handles them.
-const EVENT_BUFFER: usize = 16;
+use docker_client::bollard::Docker;
+use docker_client::bollard::query_parameters::{EventsOptionsBuilder, InspectContainerOptions};
+use docker_client::{
+    CancellationToken, Config, ConnectError, ErrorKind, connect, events_established, negotiate,
+};
+use jiff::Timestamp;
 
 /// The daemon's Docker client: docker-client's connection to the unix socket. It shows none of
 /// bollard's calls, so `ping`, `events` and the rest are the trait's, and the launcher's writes go
 /// through `Client::transport` alone.
 pub struct Client {
-    connection: Mutex<Docker>,
-    config: Config,
+    connection: Mutex<Connection>,
     /// Whether the API version was settled: bollard starts at its newest and [`negotiate`] lowers
     /// it to the engine's, on the first call that reaches one.
     negotiated: AtomicBool,
     call: Duration,
+}
+
+/// bollard's client and the config it was connected from, kept together: [`negotiate`] returns
+/// both, and the streaming calls take the config, so they send the `/vX.Y/` prefix bollard sends.
+#[derive(Clone)]
+struct Connection {
+    docker: Docker,
+    config: Config,
 }
 
 impl fmt::Debug for Client {
@@ -83,8 +85,10 @@ impl Client {
             .user_agent(format!("swarm-device-access/{}", BUILD.version))
             .response_header_timeout(headers);
         Ok(Self {
-            connection: Mutex::new(connect(config.clone())?),
-            config,
+            connection: Mutex::new(Connection {
+                docker: connect(config.clone())?,
+                config,
+            }),
             negotiated: AtomicBool::new(false),
             call,
         })
@@ -95,35 +99,39 @@ impl Client {
         self.call
     }
 
-    fn snapshot(&self) -> Docker {
+    fn snapshot(&self) -> Connection {
         self.connection
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
 
-    /// bollard's client at the API version the engine speaks: negotiated on the first call that
-    /// reaches an engine, as moby does lazily, and again while the engine could not be reached. An
-    /// engine that answers but does not negotiate (no `/version`) is spoken to at bollard's
-    /// version, as moby does after a failed negotiation. Only `src/launcher/engine.rs` takes it
-    /// for the launcher's write calls (`meta/tests/launcher_boundary.rs`).
-    pub(crate) async fn transport(&self) -> Docker {
+    /// The connection at the API version the engine speaks: negotiated on the first call that
+    /// reaches an engine, as moby does lazily, and again while the engine could not be reached.
+    /// An engine that answers but does not negotiate (no `/version`) is spoken to at bollard's
+    /// version, as moby does after a failed negotiation. Both halves come from one snapshot, so a
+    /// caller never pairs a client with another negotiation's config.
+    async fn settled(&self) -> Connection {
         if !self.negotiated.load(Ordering::Acquire) {
+            let current = self.snapshot();
             let attempt = tokio::time::timeout(
                 self.call,
-                Box::pin(negotiate(self.snapshot(), &self.config)),
+                Box::pin(negotiate(current.docker, &current.config)),
             )
             .await;
             match attempt {
-                Ok(Ok(settled)) => {
+                Ok(Ok((docker, config))) => {
                     *self
                         .connection
                         .lock()
-                        .unwrap_or_else(PoisonError::into_inner) = settled;
+                        .unwrap_or_else(PoisonError::into_inner) = Connection { docker, config };
                     self.negotiated.store(true, Ordering::Release);
                 }
                 Ok(Err(error))
-                    if !matches!(error.kind(), ErrorKind::Unavailable | ErrorKind::Timeout) =>
+                    if !matches!(
+                        error.kind(),
+                        ErrorKind::Unavailable | ErrorKind::Timeout | ErrorKind::Cancelled
+                    ) =>
                 {
                     self.negotiated.store(true, Ordering::Release);
                 }
@@ -131,6 +139,19 @@ impl Client {
             }
         }
         self.snapshot()
+    }
+
+    /// bollard's client at the API version the engine speaks (see [`Client::settled`]). Only
+    /// `src/launcher/engine.rs` takes it for the launcher's write calls
+    /// (`meta/tests/launcher_boundary.rs`).
+    pub(crate) async fn transport(&self) -> Docker {
+        self.settled().await.docker
+    }
+
+    /// The config the streaming calls (`events_established`, `attach::wait`) are made with: the
+    /// one [`negotiate`] returned, so they send the version bollard sends.
+    pub(crate) async fn streaming(&self) -> Config {
+        self.settled().await.config
     }
 }
 
@@ -196,8 +217,9 @@ pub trait DockerApi: Send + Sync {
         id: &str,
     ) -> impl Future<Output = Result<ContainerInspect, Error>> + Send;
 
-    /// moby's `Events` from `since` with `filters`: resolves with the stream, which bollard opens
-    /// lazily, so a refused connect is its first item.
+    /// moby's `Events` from `since` with `filters`: resolves once the engine answered the
+    /// request's headers, so the stream is established. A connect or a request the engine refused
+    /// is the `Err`; a stalled engine is a timeout.
     fn events(
         &self,
         since: Timestamp,
@@ -239,14 +261,20 @@ pub trait EventStream: Send {
     fn next(&mut self) -> impl Future<Output = Result<Event, StreamError>> + Send;
 }
 
-/// The event stream of the Docker client: bollard's stream pumped into a channel by a task that
-/// ends with the stream, which closes its connection.
-#[derive(Debug)]
+/// The event stream of the Docker client: docker-client's established stream, which owns its
+/// connection and closes it when dropped.
 pub struct ClientEventStream {
-    events:
-        mpsc::Receiver<Result<docker_client::bollard::models::EventMessage, docker_client::Error>>,
+    events: docker_client::EventStream,
     over: bool,
-    cancel: CancellationToken,
+}
+
+impl fmt::Debug for ClientEventStream {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClientEventStream")
+            .field("over", &self.over)
+            .finish_non_exhaustive()
+    }
 }
 
 impl EventStream for ClientEventStream {
@@ -254,9 +282,11 @@ impl EventStream for ClientEventStream {
         if self.over {
             return Err(StreamError::eof());
         }
-        match self.events.recv().await {
+        match poll_fn(|cx| self.events.as_mut().poll_next(cx)).await {
             Some(Ok(event)) => Ok(event.into()),
             Some(Err(error)) => {
+                // A record that does not decode leaves the stream open in docker-client, but this
+                // daemon treats any item error as the end of the stream, as it always has.
                 self.over = true;
                 Err(StreamError::failed(&error))
             }
@@ -265,13 +295,6 @@ impl EventStream for ClientEventStream {
                 Err(StreamError::eof())
             }
         }
-    }
-}
-
-impl Drop for ClientEventStream {
-    fn drop(&mut self) {
-        // The pump ends with its receiver; the token ends it at once, also while it is idle.
-        self.cancel.cancel();
     }
 }
 
@@ -306,18 +329,18 @@ impl DockerApi for Client {
         since: Timestamp,
         filters: &Filters,
     ) -> Result<ClientEventStream, Error> {
-        let docker = self.transport().await;
+        let config = self.streaming().await;
         let mut options = EventsOptionsBuilder::new().since(&since_parameter(since));
         if !filters.is_empty() {
             options = options.filters(&filters.to_map());
         }
-        let options = options.build();
+        // Nothing here cancels the token: the event loop drops this future when its context is
+        // done or the establishment times out, which ends the attempt and closes the connection.
         let cancel = CancellationToken::new();
-        let events = pump_stream(docker.events(Some(options)), EVENT_BUFFER, cancel.clone());
+        let events = events_established(&config, Some(options.build()), self.call, &cancel).await?;
         Ok(ClientEventStream {
             events,
             over: false,
-            cancel,
         })
     }
 }

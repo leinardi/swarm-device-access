@@ -339,3 +339,55 @@ async fn an_unknown_event_type_is_a_decode_error() {
     let end = stream.next().await.unwrap_err();
     assert_eq!(end.kind(), StreamErrorKind::Decode, "{end}");
 }
+
+/// The subscription is established when `events` resolves: an engine that answers the events
+/// headers late leaves the call pending, so the daemon is not ready before it is subscribed, and
+/// the stream it then returns yields the events.
+#[tokio::test]
+async fn the_events_call_resolves_only_once_the_engine_answered_the_headers() {
+    let first = event("start", "c1", 1_767_323_046_000_000_001);
+    let engine = FakeEngine::start(&[(
+        "/events",
+        Reply::Delayed {
+            delay: Duration::from_millis(400),
+            reply: Box::new(Reply::events(&[&first])),
+        },
+    )])
+    .unwrap();
+    let docker = client(&engine, Duration::from_secs(5));
+    let filters = Filters::new();
+
+    let early = tokio::time::timeout(
+        Duration::from_millis(100),
+        docker.events(Timestamp::UNIX_EPOCH, &filters),
+    )
+    .await;
+    assert!(early.is_err(), "resolved before the engine answered");
+
+    let mut stream = docker
+        .events(Timestamp::UNIX_EPOCH, &filters)
+        .await
+        .unwrap();
+    assert_eq!(stream.next().await.unwrap().action, "start");
+}
+
+/// An engine that never answers the events headers is a timeout, not an open stream, and one that
+/// refuses them is the call's error, not the stream's first item.
+#[tokio::test]
+async fn a_silent_or_refusing_engine_is_not_a_subscription() {
+    let engine = FakeEngine::start(&[("/events", Reply::Silent)]).unwrap();
+    let docker = client(&engine, Duration::from_millis(150));
+    let error = docker
+        .events(Timestamp::UNIX_EPOCH, &Filters::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Timeout, "{error}");
+
+    let engine = FakeEngine::start(&[("/events", Reply::error(500, "engine broke"))]).unwrap();
+    let docker = client(&engine, CALL);
+    let error = docker
+        .events(Timestamp::UNIX_EPOCH, &Filters::new())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("engine broke"), "{error}");
+}

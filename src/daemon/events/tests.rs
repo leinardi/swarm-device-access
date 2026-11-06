@@ -560,8 +560,8 @@ async fn subscribe_failures_are_worded_as_go() {
     );
 }
 
-/// moby reports a refused connect on the stream: the subscription succeeds, and its first item
-/// is the error, which reconnects as a stream error.
+/// A subscription the engine refused is a stream whose first item is the error, which reconnects
+/// as a stream error.
 #[tokio::test(start_paused = true)]
 async fn refused_connect_is_a_stream_error() {
     let fixture = Loop::new(

@@ -28,9 +28,9 @@
 //!   configured unix socket only and reads no `DOCKER_*` variable;
 //! - only `src/docker` names the crate, and there no bollard write is called (`create_container`,
 //!   `start_container`, `attach_container`, `wait_container` and the rest of the verbs) nor
-//!   docker-client's `attach::attach` and `attach::wait`: `DockerApi` is built on four calls of
-//!   the client, `ping`, `list_containers`, `inspect_container` and `events`, and no other call
-//!   is made on it;
+//!   docker-client's `attach::attach` and `attach::wait`: `DockerApi` is built on three calls of
+//!   the client, `ping`, `list_containers` and `inspect_container`, plus docker-client's
+//!   `events_established`, and no other call is made on it;
 //! - `DockerApi` declares exactly `ping`, `container_list`, `container_inspect` and `events`;
 //! - nothing under `src/docker` reads an environment variable or dials TCP, and nothing under
 //!   `src/` builds the client from the environment (`Config::from_env`);
@@ -55,8 +55,11 @@ const API: &str = "src/docker/api.rs";
 /// The trait's calls, in declaration order.
 const CALLS: &[&str] = &["ping", "container_list", "container_inspect", "events"];
 /// The only calls `src/docker` makes on the client (`docker.<call>(`), which are the engine's
-/// `GET /_ping`, `GET /containers/json`, `GET /containers/{id}/json` and `GET /events`.
-const READS: &[&str] = &["ping", "list_containers", "inspect_container", "events"];
+/// `GET /_ping`, `GET /containers/json` and `GET /containers/{id}/json`.
+const READS: &[&str] = &["ping", "list_containers", "inspect_container"];
+/// The fourth read, `GET /events`, which docker-client makes as a function of its own (it returns
+/// once the engine answered the headers) and not as a call on bollard's client.
+const EVENTS_READ: &str = "events_established";
 /// The sanctioned Docker client.
 const CLIENT: &str = "docker-client";
 /// What the root package may enable: in its `[dependencies]` (the launcher's output and wait
@@ -311,6 +314,8 @@ static ENV_OR_TCP: LazyLock<Regex> =
 static FROM_ENV: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bfrom_env\b"));
 /// A call on the client the daemon holds, which is always called `docker` in `src/docker`.
 static CLIENT_CALL: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bdocker\s*\.\s*(\w+)\s*\("));
+/// A call of [`EVENTS_READ`].
+static EVENTS_CALL: LazyLock<Regex> = LazyLock::new(|| pattern(&format!(r"\b{EVENTS_READ}\s*\(")));
 /// The `DockerApi` trait's block, up to its closing brace.
 static DOCKER_API_TRAIT: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"(?s)pub trait DockerApi\b.*?\n\}"));
@@ -334,6 +339,14 @@ fn read_problems(files: &[(String, String)]) -> Vec<String> {
             }
             seen.push(call.as_str().to_owned());
         }
+    }
+    if !files
+        .iter()
+        .any(|(path, text)| in_docker(path) && EVENTS_CALL.is_match(text))
+    {
+        problems.push(format!(
+            "{EVENTS_READ}( not found: the call pattern no longer matches"
+        ));
     }
     for wanted in READS {
         if !seen.iter().any(|found| found == wanted) {

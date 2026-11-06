@@ -31,7 +31,8 @@
 //!   model and sent as bollard encodes it;
 //! - `POST /containers/{id}/attach?stderr=1&stdout=1&stream=1`, its output demultiplexed by
 //!   docker-client into stdout and stderr pieces;
-//! - `POST /containers/{id}/wait?condition=removed`, whose answer is read in the background;
+//! - `POST /containers/{id}/wait?condition=removed`, sent and answered as to its headers before the
+//!   call returns (the waiter is registered then), its body read in the background;
 //! - `POST /containers/{id}/start` and `POST /containers/{id}/stop?t=<seconds>`.
 //!
 //! Each unary call is bounded as a whole by the client's call timeout (the stop by that and the
@@ -71,6 +72,17 @@ const OUTPUT_BUFFER: usize = 64;
 /// What a wait that finds the container already removed answers: the exit code the engine no
 /// longer has, read as a failure.
 const REMOVED_STATUS: i64 = 1;
+
+/// The answer of a wait that finds the container already removed: the exit status the engine no
+/// longer has, read as a failure.
+fn already_removed(error: &ClientError) -> WaitResponse {
+    WaitResponse {
+        status_code: REMOVED_STATUS,
+        error: Some(WaitExitError {
+            message: format!("container already removed, exit status unknown: {error}"),
+        }),
+    }
+}
 
 /// container `InspectResponse`: what the launcher reads of it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -248,26 +260,36 @@ impl EngineApi for Engine {
 
     async fn wait_removed(&self, id: &str) -> Result<WaitAnswer, Error> {
         let id = trim_id(id)?;
-        let docker = self.client.transport().await;
-        let answer = attach::wait(
-            &docker,
+        let config = self.client.streaming().await;
+        // Returns once the engine answered the wait's headers, so the waiter is registered and the
+        // start that follows cannot overtake it: a container that exits at once and is
+        // auto-removed still answers its status. The token is never cancelled; the wait ends with
+        // its receiver, which the launcher drops.
+        let registered = attach::wait(
+            &config,
             id,
             WaitCondition::Removed,
+            self.call(),
             CancellationToken::new(),
-        );
+        )
+        .await;
+        let answer = match registered {
+            Ok(answer) => answer,
+            // An auto-removed daemon the wait came too late for: removed, its status gone.
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(Box::pin(std::future::ready(Ok(already_removed(&error)))));
+            }
+            Err(error) => return Err(error.into()),
+        };
         Ok(Box::pin(async move {
             match answer.await {
                 Ok(Ok(status_code)) => Ok(WaitResponse {
                     status_code,
                     error: None,
                 }),
-                // An auto-removed daemon the wait came too late for: removed, its status gone.
-                Ok(Err(error)) if error.kind() == ErrorKind::NotFound => Ok(WaitResponse {
-                    status_code: REMOVED_STATUS,
-                    error: Some(WaitExitError {
-                        message: format!("container already removed, exit status unknown: {error}"),
-                    }),
-                }),
+                Ok(Err(error)) if error.kind() == ErrorKind::NotFound => {
+                    Ok(already_removed(&error))
+                }
                 Ok(Err(error)) => Err(error.to_string()),
                 Err(_closed) => Err("the wait ended without an answer".to_owned()),
             }

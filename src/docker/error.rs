@@ -202,6 +202,8 @@ impl StreamError {
     pub(super) fn failed(error: &docker_client::Error) -> Self {
         let kind = match error.kind() {
             ErrorKind::Unavailable | ErrorKind::Timeout => StreamErrorKind::UnexpectedEof,
+            // The caller's own token ended the stream: the source went away, nothing failed.
+            ErrorKind::Cancelled => StreamErrorKind::Closed,
             ErrorKind::NotFound | ErrorKind::Conflict | ErrorKind::Other => StreamErrorKind::Decode,
         };
         Self::new(kind, error.to_string())
