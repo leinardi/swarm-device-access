@@ -52,6 +52,8 @@ integration = [
 swarm-device-access = { path = ".." }
 # Go's strconv.Quote, errors.Join and Duration formatting, as the daemon writes them.
 go-compat.workspace = true
+# The wall clock the harness and its logs read.
+go-clock.workspace = true
 # The sweep's started label, read as RFC 3339.
 jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 # The run filter: Go's -run patterns are regular expressions.

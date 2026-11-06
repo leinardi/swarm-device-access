@@ -56,9 +56,9 @@ use std::time::Duration;
 
 use bollard::query_parameters::ListContainersOptions;
 use futures_util::future::LocalBoxFuture;
+use go_clock::{Clock as _, SystemClock};
 use go_compat::{duration, quote};
 use jiff::Timestamp;
-use swarm_device_access::clock::{Clock as _, SystemClock};
 use swarm_device_access::logger::Attr;
 use testenv::context::Context;
 use testenv::enforce::{DUMP_FLAG, dump_device_programs};

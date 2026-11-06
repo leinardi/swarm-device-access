@@ -32,12 +32,12 @@ use std::os::fd::AsFd as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::sync::Arc;
 
+use go_clock::SystemClock;
 use go_compat::local_zone::local_zone;
 use swarm_device_access::cgroup::{
     CgroupVersion, DeviceRule, KernelOps, V2Ops as _, canonical_bytes, parse_owned,
     parse_owned_innermost,
 };
-use swarm_device_access::clock::SystemClock;
 use swarm_device_access::logger::{Config, Format, Level, LogHandle, Logger};
 use swarm_device_access::processor::pin::{host_cgroup_path, read_proc_cgroup};
 

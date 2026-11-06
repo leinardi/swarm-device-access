@@ -31,8 +31,8 @@ use std::time::Duration;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-use crate::clock::FakeClock;
 use crate::logger::{Config, Format, Level, LogHandle, Logger, MemorySink};
+use go_clock::FakeClock;
 
 /// A temporary directory, removed on drop. Moved out of SSE's `src/docker/tests.rs` at the same
 /// commit.

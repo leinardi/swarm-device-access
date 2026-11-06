@@ -30,7 +30,6 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::{Coordinator, Reconciler, Settings};
-use crate::clock::{Clock, TokioClock};
 use crate::config::{Runtime, new_store};
 use crate::daemon::DOCKER_CALL_TIMEOUT;
 use crate::docker::types::{Actor, ContainerInspect, Event};
@@ -41,6 +40,7 @@ use crate::policy::Global;
 use crate::processor::{self, Inspector, Processor};
 use crate::test_support::capture_logs;
 use crate::test_support::fake_docker::FakeDocker;
+use go_clock::{Clock, TokioClock};
 
 /// How long a wait for something the coordinator will do may take, in paused tokio time.
 pub(crate) const WITHIN: Duration = Duration::from_secs(300);

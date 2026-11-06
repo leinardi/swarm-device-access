@@ -40,7 +40,6 @@ use tokio::time::Instant;
 use crate::cgroup::rlimit;
 use crate::cli::settings::{self, Reloader, Settings, list_attr};
 use crate::cli::{self, LAUNCH_COMMAND};
-use crate::clock::{Clock, SystemClock};
 use crate::config::{self, Runtime};
 use crate::daemon::{self, DOCKER_CALL_TIMEOUT, Readiness};
 use crate::docker::{self, CallContext, Client};
@@ -50,6 +49,7 @@ use crate::metrics::Recorder;
 use crate::processor::{self, Processor, devfs};
 use crate::server::{self, App, MetricsServer};
 use crate::version::{COMMIT, DATE, VERSION};
+use go_clock::{Clock, SystemClock};
 
 /// The time from the first shutdown signal to the exit: Docker's stop timeout, which the launcher
 /// gives the daemon ([`spec::STOP_TIMEOUT`]).

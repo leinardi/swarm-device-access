@@ -31,9 +31,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use go_clock::FakeClock;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use swarm_device_access::clock::FakeClock;
 use swarm_device_access::docker::{
     CallContext, Client, DockerApi as _, ErrorKind, EventStream as _, Filters, StreamErrorKind,
 };

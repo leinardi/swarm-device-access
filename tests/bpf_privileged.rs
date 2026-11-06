@@ -26,11 +26,11 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 
+use go_clock::SystemClock;
 use swarm_device_access::cgroup::{
     DeviceRule, KernelOps, OWNED_PROGRAM_NAME, V2Ops as _, canonical_bytes, emit_owned,
     from_canonical,
 };
-use swarm_device_access::clock::SystemClock;
 use swarm_device_access::logger::LogHandle;
 
 /// The nonce and rules the `.wrapped` fixtures were produced with.

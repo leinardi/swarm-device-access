@@ -38,8 +38,8 @@ use bollard::query_parameters::{
     WaitContainerOptions,
 };
 use futures_util::StreamExt as _;
+use go_clock::{Clock as _, SystemClock};
 use jiff::Timestamp;
-use swarm_device_access::clock::{Clock as _, SystemClock};
 use swarm_device_access::logger::Attr;
 
 use crate::Error;

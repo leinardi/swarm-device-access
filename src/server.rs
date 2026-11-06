@@ -72,12 +72,12 @@ use tokio::net::TcpListener;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::clock::Clock;
 use crate::daemon::Readiness;
 use crate::logger::{Attr, LogHandle};
 use crate::metrics::exposition::{self, Exposition};
 use crate::metrics::promhttp::HandlerMetrics;
 use crate::metrics::{Recorder, Registry};
+use go_clock::Clock;
 use go_compat::duration;
 use go_compat::errno::io_error_text;
 use go_compat::host_port::split_host_port;

@@ -6,9 +6,8 @@
 # changing this file, so raising a count is a visible act rather than a side effect.
 #
 # Regenerate with: scripts/check-suppressions.sh --update
-# reviewed 15, 2026-11-06
+# reviewed 16, 2026-11-06
 droast-ignore/DF002	1
 expect/clippy::cast_precision_loss	2
-expect/clippy::disallowed_methods	1
 expect/clippy::unwrap_used	3
 expect/unsafe_code	1
