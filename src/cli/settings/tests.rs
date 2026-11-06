@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use super::*;
 use crate::config::{Store, new_store};
 use crate::policy::Mode;
-use crate::test_support::capture_logs;
-use go_slog::{Level, MemorySink};
+use crate::test_support::{Logs, capture_logs};
+use tracing::level_filters::LevelFilter;
 
 /// The flag defaults, as [`Settings::from_flags`] returns them without any flag.
 fn default_settings() -> Settings {
@@ -107,7 +107,7 @@ fn validate_joins_every_failure() {
     settings.debug_addr = ":6060".to_owned();
     assert_eq!(
         settings.validate().unwrap_err().to_string(),
-        "setting \"log-format\": unknown value \"xml\", must be one of [text json plain]\n\
+        "setting \"log-format\": unknown value \"xml\", must be one of [text json]\n\
          unknown policy mode \"bogus\": must be \"opt-in\" or \"all\"\n\
          debug-addr \":6060\": the pprof debug server was removed in 2.0; leave debug-addr empty"
     );
@@ -123,7 +123,7 @@ struct ReloadEnv {
     store: Arc<Store>,
     path: PathBuf,
     logger_config: Arc<Mutex<Vec<String>>>,
-    logs: MemorySink,
+    logs: Logs,
 }
 
 impl ReloadEnv {
@@ -143,14 +143,14 @@ impl ReloadEnv {
         let (store, publisher) = new_store(current.validate().unwrap());
         let publisher = Arc::new(publisher);
         let logger_config = Arc::new(Mutex::new(Vec::new()));
-        let (log, logs) = capture_logs(Level::INFO);
+        let logs = capture_logs(LevelFilter::INFO);
         let recorded = Arc::clone(&logger_config);
         let reloader = Reloader {
             path: path.to_str().unwrap().to_owned(),
             flags: flags.clone(),
             cli_set,
             current,
-            configure_logger: Box::new(move |format, level, _| {
+            configure_logger: Box::new(move |format, level| {
                 recorded
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -160,7 +160,6 @@ impl ReloadEnv {
                 let generation = publisher.publish(runtime);
                 Box::pin(async move { generation })
             }),
-            log,
         };
         Self {
             reloader,
@@ -354,8 +353,8 @@ async fn reload_cold_field_change_ignored() {
     assert_eq!(
         env.logs.contents(),
         "level=INFO config reload: setting requires a restart; ignored key=metrics-addr\n\
-         level=INFO config reloaded generation=2 dry_run=false policy_mode=all device_allow=[] \
-         device_deny=[]\n"
+         level=INFO config reloaded device_allow=None device_deny=None dry_run=false generation=2 \
+         policy_mode=all\n"
     );
     assert_eq!(env.logger_config(), ["text/info"]);
 }
@@ -408,7 +407,7 @@ async fn watch_sighup_reloads_on_each_signal() {
         env.logs.contents(),
         format!(
             "level=INFO SIGHUP received; reloading config config_file={path}\n\
-             level=ERROR config reload rejected; keeping previous config err=config reload \
+             level=ERROR config reload rejected; keeping previous config error=config reload \
              failed: config file \"{path}\": key \"log-level\": unknown value \"loud\", must \
              be one of [debug info warn error]\n"
         )

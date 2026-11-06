@@ -67,7 +67,6 @@ impl Loop {
             coordinator: &self.harness.coordinator,
             metrics: &self.harness.metrics,
             readiness: &self.readiness,
-            log: &self.harness.log,
             timeout: DOCKER_CALL_TIMEOUT,
         }
     }
@@ -189,7 +188,7 @@ async fn consume_events_stream_error_returns_reconnect() {
     assert!((fixture.reconnects() - 1.0).abs() < f64::EPSILON);
     assert!(
         fixture.harness.logs().contains(
-            "level=ERROR docker events stream error, reconnecting err=transport EOF backoff=1s"
+            "level=ERROR docker events stream error, reconnecting backoff=1s error=transport EOF"
         ),
         "{}",
         fixture.harness.logs()
@@ -322,10 +321,9 @@ async fn consume_events_deduplicates_processed_ids() {
     let consumed = fixture.consume_once(&context, stream);
     let skipped = async {
         eventually("the skip", WITHIN, || {
-            fixture
-                .harness
-                .logs()
-                .contains("event already covered by a pass; skipped id=already-seen")
+            let logs = fixture.harness.logs();
+            logs.contains("event already covered by a pass; skipped")
+                && logs.contains(" id=already-seen")
         })
         .await;
         context.cancel();
@@ -469,7 +467,6 @@ async fn reconcile_hung_inspect_is_bounded_per_call() {
         proc_root: "/".to_owned(),
         call_timeout: Some(Duration::from_millis(50)),
         clock: Arc::new(clock::TokioClock::new(base())),
-        log: crate::test_support::capture_logs(go_slog::Level::DEBUG).0,
     });
 
     let reconciled = tokio::time::timeout(
@@ -589,7 +586,7 @@ async fn refused_connect_is_a_stream_error() {
         .await;
     assert!(reconnect);
     assert!(fixture.harness.logs().contains(
-        "level=ERROR docker events stream error, reconnecting err=connection refused backoff=1s"
+        "level=ERROR docker events stream error, reconnecting backoff=1s error=connection refused"
     ));
 }
 
@@ -638,7 +635,7 @@ async fn listen_events_reconnect_events_hang_retries() {
     assert!(
         fixture.harness.logs().contains(
             "level=ERROR could not subscribe to docker events, retrying \
-             err=docker event stream not established before timeout backoff=1s"
+             backoff=1s error=docker event stream not established before timeout"
         ),
         "{}",
         fixture.harness.logs()

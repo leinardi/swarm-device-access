@@ -53,11 +53,7 @@ fn server_for(capture: &Capture) -> Server {
         other => panic!("no Go server on port {other}"),
     };
     let clock = Arc::new(FakeClock::new(capture.date().unwrap_or_else(capture_time)));
-    server(
-        mux_with(ready, move |_| metrics.clone()),
-        clock,
-        &capture_logs(Level::INFO).0,
-    )
+    server(mux_with(ready, move |_| metrics.clone()), clock)
 }
 
 /// The `go-*.txt` captures, sorted by name; the directory's README is not one.

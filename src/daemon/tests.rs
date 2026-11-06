@@ -37,16 +37,16 @@ use crate::policy::Global;
 use crate::processor::{self, Processor};
 use crate::systemd::OnReload;
 use crate::test_support::fake_docker::{Call, FakeDocker};
-use crate::test_support::{capture_logs, eventually};
+use crate::test_support::{Logs, capture_logs, eventually};
 use clock::{Clock, TokioClock};
-use go_slog::{Level, MemorySink};
+use tracing::level_filters::LevelFilter;
 
 /// A running daemon over the fake Docker.
 struct Daemon {
     docker: Arc<FakeDocker>,
     metrics: Recorder,
     readiness: Readiness,
-    sink: MemorySink,
+    logs: Logs,
     context: CallContext,
     task: JoinHandle<()>,
 }
@@ -63,7 +63,7 @@ impl Daemon {
             clock: Some(Arc::clone(&clock)),
             ..docker
         });
-        let (log, sink) = capture_logs(Level::DEBUG);
+        let logs = capture_logs(LevelFilter::DEBUG);
         let (store, publisher) = new_store(Runtime {
             dry_run: false,
             policy: Global::new("all", None, None).unwrap(),
@@ -77,7 +77,6 @@ impl Daemon {
             proc_root: "/".to_owned(),
             call_timeout: Some(DOCKER_CALL_TIMEOUT),
             clock: Arc::clone(&clock),
-            log: log.clone(),
         });
         let metrics = Recorder::new();
         let readiness = Readiness::default();
@@ -88,7 +87,6 @@ impl Daemon {
             readiness: readiness.clone(),
             call_timeout: DOCKER_CALL_TIMEOUT,
             clock,
-            log,
         };
         let context = CallContext::new();
         let running = context.clone();
@@ -97,7 +95,7 @@ impl Daemon {
             docker,
             metrics,
             readiness,
-            sink,
+            logs,
             context,
             task,
         }
@@ -240,7 +238,7 @@ async fn run_initial_events_hang_still_enumerates_and_resubscribes() {
         docker.events_calls().0 >= 2 && docker.inspected().iter().any(|id| id == "listed")
     })
     .await;
-    let logs = daemon.sink.contents();
+    let logs = daemon.logs.contents();
     let docker = daemon.stop().await;
 
     let sinces = docker.sinces();
@@ -252,7 +250,7 @@ async fn run_initial_events_hang_still_enumerates_and_resubscribes() {
     assert_eq!(started, returned, "an attempt leaked after shutdown");
     assert!(logs.contains(
         "level=WARN could not subscribe to docker events; will retry \
-         err=docker event stream not established before timeout"
+         error=docker event stream not established before timeout"
     ));
 }
 

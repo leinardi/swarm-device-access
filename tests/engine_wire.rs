@@ -31,10 +31,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use clock::FakeClock;
-use go_slog::{Config, Format, Level, LogHandle, Logger, MemorySink};
 use jiff::Timestamp;
-use jiff::tz::TimeZone;
 use swarm_device_access::docker::{
     CallContext, Client, DockerApi as _, ErrorKind, EventStream as _, Filters, StreamErrorKind,
 };
@@ -274,18 +271,14 @@ async fn the_launcher_sends_the_go_launcher_s_requests() {
     let created: serde_json::Value = serde_json::from_str(&create.body).or_panic();
     let daemon_args: Vec<String> = serde_json::from_value(created["Cmd"].clone()).or_panic();
 
-    let sink = MemorySink::default();
-    let log = LogHandle::new(Logger::new(
-        Config {
-            format: Format::Plain,
-            level: Level::DEBUG,
-            include_time: false,
-            plain_style: go_slog::PlainStyle::Raw,
-        },
-        Box::new(sink.clone()),
-        TimeZone::UTC,
-        Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
-    ));
+    let sink = tracing_setup::testing::Capture::default();
+    let dispatch = tracing_setup::build(
+        sink.clone(),
+        tracing_setup::Format::Json,
+        tracing::level_filters::LevelFilter::DEBUG,
+        tracing_setup::Options::new().target(false).time(false),
+    );
+    let _scope = tracing_setup::testing::set_default(&dispatch);
     let stdout = Buffer::default();
     let stderr = Buffer::default();
     let mut launch = Launch::new(
@@ -299,7 +292,6 @@ async fn the_launcher_sends_the_go_launcher_s_requests() {
             stdout: Box::new(stdout.clone()),
             stderr: Box::new(stderr.clone()),
         },
-        &log,
     );
     launch.self_id = Box::new(move || Ok(launcher_id.clone()));
 
@@ -309,18 +301,18 @@ async fn the_launcher_sends_the_go_launcher_s_requests() {
         tokio::spawn(async move { launch.run(&context).await })
     };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    while !sink.contents().contains("daemon started") {
+    while !sink.text().contains("daemon started") {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the daemon never started: {}",
-            sink.contents()
+            sink.text()
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     context.cancel();
     let status = running.await.or_panic().or_panic();
 
-    assert_eq!(status, 0, "{}", sink.contents());
+    assert_eq!(status, 0, "{}", sink.text());
     assert_eq!(stdout.text(), "fake daemon ready\nfake daemon stopping\n");
     assert_eq!(stderr.text(), "fake daemon stderr\n");
     assert_same_wire(&engine, &capture);

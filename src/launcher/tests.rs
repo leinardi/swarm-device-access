@@ -58,13 +58,13 @@ async fn run_call_order() {
     let created = run.fake.created().unwrap();
     assert_eq!(created.image, TEST_IMAGE_ID);
     assert_eq!(created.labels[LABEL_LAUNCHER], TEST_LAUNCHER_ID);
-    assert!(run.sink.contents().contains(
+    assert!(run.logs.contents().contains(
         "level=INFO daemon started component=launcher id=333333333333 \
          image=sha256:2222222222222222222222222222222222222222222222222222222222222222 \
          launcher=111111111111"
     ));
     assert!(
-        run.sink
+        run.logs
             .contents()
             .contains("level=INFO daemon exited component=launcher id=333333333333 status=0")
     );
@@ -236,9 +236,9 @@ async fn run_log_stream_lost() {
         "daemon log stream lost while the daemon was running: injected failure"
     );
     require_stopped(&fake);
-    assert!(run.sink.contents().contains(
+    assert!(run.logs.contents().contains(
         "level=ERROR daemon log stream lost; stopping the daemon component=launcher \
-         err=\"injected failure\""
+         error=injected failure"
     ));
 }
 
@@ -317,9 +317,9 @@ async fn run_wait_stream_error() {
         "calls {calls:?}, want the removal confirmed by inspect after the stop"
     );
     assert!(run.stdout.text().contains("daemon last words"));
-    assert!(run.sink.contents().contains(
+    assert!(run.logs.contents().contains(
         "level=ERROR daemon wait stream failed; stopping the daemon component=launcher \
-         err=\"injected failure\""
+         error=injected failure"
     ));
 }
 
@@ -369,7 +369,7 @@ async fn run_cancel_stops_daemon() {
     require_stopped(&run.fake);
     assert!(run.stdout.text().contains("daemon stopping"));
     assert!(
-        run.sink
+        run.logs
             .contents()
             .contains("level=INFO stopping daemon component=launcher id=333333333333")
     );
@@ -410,7 +410,7 @@ async fn run_shutdown_budget_shared() {
         "shutdown took {:?}",
         began.elapsed()
     );
-    assert!(run.sink.contents().contains(
+    assert!(run.logs.contents().contains(
         "level=WARN daemon log stream not drained before timeout component=launcher \
          id=333333333333"
     ));
@@ -650,7 +650,7 @@ async fn a_blocked_stdout_does_not_stall_the_launcher() {
     assert_eq!(result(done).await.unwrap(), 0);
     assert!(began.elapsed() <= budget, "took {:?}", began.elapsed());
     require_stopped(&run.fake);
-    assert!(run.sink.contents().contains(
+    assert!(run.logs.contents().contains(
         "level=WARN daemon log stream not drained before timeout component=launcher \
          id=333333333333"
     ));

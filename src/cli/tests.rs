@@ -285,7 +285,7 @@ fn parse_launch_args_rejects() {
         (
             &["--log-format", "xml"][..],
             1,
-            "launch: flag \"log-format\": unknown value \"xml\", must be one of [text json plain]",
+            "launch: flag \"log-format\": unknown value \"xml\", must be one of [text json]",
         ),
         (
             &["--log-level", "trace"][..],

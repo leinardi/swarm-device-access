@@ -38,8 +38,8 @@ use super::testing::{canonical, rule, runtime_original};
 use super::v2::CgroupV2;
 use super::v2ops::{Attached, F_ALLOW_MULTI, LoadError, OpsError, ReplaceProbe, V2Ops};
 use super::v2plan::FilterCache;
-use crate::test_support::capture_logs;
-use go_slog::{Level, MemorySink};
+use crate::test_support::{Logs, capture_logs};
+use tracing::level_filters::LevelFilter;
 
 /// Go's `errInjected`.
 pub(super) const INJECTED: Errno = Errno::IO;
@@ -84,16 +84,14 @@ pub(super) fn controller<'fake>(
     ops: &'fake FakeOps,
     replace: &'static ReplaceProbe,
     cache: Arc<FilterCache>,
-) -> (CgroupV2<&'fake FakeOps>, MemorySink) {
-    let (log, sink) = capture_logs(Level::DEBUG);
+) -> (CgroupV2<&'fake FakeOps>, Logs) {
     (
         CgroupV2 {
             ops,
             replace,
             cache,
-            log,
         },
-        sink,
+        capture_logs(LevelFilter::DEBUG),
     )
 }
 

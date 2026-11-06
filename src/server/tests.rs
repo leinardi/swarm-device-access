@@ -34,9 +34,7 @@ use jiff::Timestamp;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream};
 
 use super::*;
-use crate::test_support::capture_logs;
 use clock::FakeClock;
-use go_slog::Level;
 
 mod shutdown;
 mod timeouts;
@@ -73,11 +71,7 @@ fn mux_with(
 
 /// `mux` served at the captures' time, its messages captured.
 fn app_of(mux: Mux) -> App {
-    App::with_mux(
-        mux,
-        Arc::new(FakeClock::new(capture_time())),
-        capture_logs(Level::INFO).0,
-    )
+    App::with_mux(mux, Arc::new(FakeClock::new(capture_time())))
 }
 
 /// A ready app answering every scrape with `metrics`.
@@ -125,7 +119,6 @@ async fn metrics_server_endpoints() {
             readiness.clone(),
             Recorder::new(),
             Arc::new(FakeClock::new(capture_time())),
-            capture_logs(Level::INFO).0,
         )
     };
     let send = |app: App, request: String| async move {
@@ -176,7 +169,6 @@ async fn scrapes_are_counted() {
             Readiness::default(),
             recorder.clone(),
             Arc::new(FakeClock::new(capture_time())),
-            capture_logs(Level::INFO).0,
         )
     };
     let request = "GET /metrics HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";

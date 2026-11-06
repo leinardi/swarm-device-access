@@ -161,10 +161,15 @@ the rust-common crates)**
 - `docker` — the daemon's read-only `DockerApi` (ping, list, inspect, events: `GET` plus one
   `HEAD /_ping`) and its types on docker-engine's client, over the configured unix socket only;
   `Client::transport` hands that client to the launcher's engine alone.
-- logging — go-slog: slog's `text` and `json` handlers and the plain format in its `Raw` style,
-  byte for byte, with Go's fallback level and format parsing; components log through a cloned
-  `LogHandle`, which a reconfigure swaps behind the shared cell. `--log-time` controls the
-  timestamp.
+- logging (`src/logging.rs`) — `tracing` events (`info!`, `warn!`, ... with `key = value` fields,
+  `error = %err` for an error) through rust-common's `tracing-setup`: tracing-subscriber's `text`
+  lines or flat `json`, to stdout, without the target. The daemon's subscriber is reloadable
+  (`build_reloadable`; `SIGHUP` calls `ReloadHandle::reconfigure` for the format and the level),
+  `--log-time` is `Options::time` and fixed at startup, and the launcher installs its own fixed
+  one without a timestamp and puts `component = launcher` on each of its events. The blocking
+  transactions run under `logging::inherit`, so they log where their caller does. Tests capture
+  with `test_support::capture_logs` (`tracing_setup::testing::Capture` under a scoped default),
+  never a global subscriber.
 - `systemd` — D-Bus `Reloading` signal watcher (zbus). Triggers re-apply on the **completion** edge
   only (signal body `active=false`). The start edge (`true`) is mid-reload and races the cgroup
   wipe. Degrades to retrying in the background when D-Bus is unreachable.
@@ -176,16 +181,17 @@ the rust-common crates)**
 
 ## Shared crates (rust-common)
 
-`go-compat`, `clock`, `go-slog`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
-`service-kit`, `testenv-core` and `repo-meta` come from
+`go-compat`, `clock`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
+`service-kit`, `tracing-setup`, `testenv-core` (with `redact-go-slog` until the testenv is ported)
+and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v0.3.0"`, with `version = "0.3"`, the tag's `<major>.<minor>`) in the root
+commit (`rev`) while the upstream-stack work is in flight, in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
 its own features.
 
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
-  this daemon passes `PlainStyle::Raw` and uses go-slog's fallback `parse_level`/`parse_format`,
+  this daemon passes `Options` with no target and no span fields (tracing-setup),
   `ExpfmtVersion::V0_70_1` (go-prom), its `TIMEOUTS` (go-http), moby's `User-Agent` and no
   response-header timeout with only the `write` and `attach` features (docker-engine), its envid,
   labels and resources (`testenv/src/config.rs`) and runner settings

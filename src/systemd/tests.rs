@@ -25,7 +25,8 @@ use tokio::sync::{Notify, mpsc};
 
 use super::*;
 use crate::test_support::{TempDir, capture_logs};
-use go_slog::Level;
+use tracing::level_filters::LevelFilter;
+use tracing_setup::{Format, Options};
 
 const TEST_OWNER: &str = ":1.1";
 
@@ -62,11 +63,8 @@ async fn deliver(sender: &mpsc::Sender<Signal>, signal: Signal) {
     }
 }
 
-/// A watcher on a channel of its own, owned by [`TEST_OWNER`], logging to `log`.
-fn start_watch(
-    on_reload: OnReload,
-    log: LogHandle,
-) -> (mpsc::Sender<Signal>, tokio::task::JoinHandle<()>) {
+/// A watcher on a channel of its own, owned by [`TEST_OWNER`].
+fn start_watch(on_reload: OnReload) -> (mpsc::Sender<Signal>, tokio::task::JoinHandle<()>) {
     let (sender, mut signals) = mpsc::channel(1);
     let task = tokio::spawn(async move {
         watch(
@@ -74,7 +72,6 @@ fn start_watch(
             &mut signals,
             TEST_OWNER.to_owned(),
             &on_reload,
-            &log,
         )
         .await;
     });
@@ -86,12 +83,9 @@ fn start_watch(
 async fn run_watch(signals: Vec<Signal>) -> usize {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&calls);
-    let (sender, task) = start_watch(
-        Arc::new(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
-        }),
-        capture_logs(Level::DEBUG).0,
-    );
+    let (sender, task) = start_watch(Arc::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    }));
     for signal in signals {
         deliver(&sender, signal).await;
     }
@@ -210,7 +204,7 @@ async fn reloads_during_a_run_coalesce() {
             }
         })
     };
-    let (sender, task) = start_watch(on_reload, capture_logs(Level::DEBUG).0);
+    let (sender, task) = start_watch(on_reload);
 
     deliver(&sender, completed(TEST_OWNER, SYSTEMD_OBJECT_PATH)).await;
     started.notified().await;
@@ -230,23 +224,33 @@ async fn reloads_during_a_run_coalesce() {
 }
 
 /// Go: `TestWatch_UsesTheCurrentLogger`. A reload of the log settings reaches a watcher that is
-/// already running: it logs through the shared handle at each site.
+/// already running: the reconfigured level applies to its next record.
 #[tokio::test(start_paused = true)]
 async fn the_watcher_logs_through_the_current_logger() {
-    let (log, before) = capture_logs(Level::INFO);
-    let (after_log, after) = capture_logs(Level::INFO);
-    let (sender, task) = start_watch(Arc::new(|| {}), log.clone());
+    let capture = tracing_setup::testing::Capture::default();
+    let (dispatch, handle) = tracing_setup::build_reloadable(
+        capture.clone(),
+        Format::Json,
+        LevelFilter::INFO,
+        Options::new().target(false).time(false),
+    );
+    let _scope = tracing_setup::testing::set_default(&dispatch);
+    let (sender, task) = start_watch(Arc::new(|| {}));
 
     deliver(&sender, completed(TEST_OWNER, SYSTEMD_OBJECT_PATH)).await;
     deliver(&sender, completed(":1.99", SYSTEMD_OBJECT_PATH)).await;
-    log.set(after_log.logger());
+    handle.reconfigure(Format::Json, LevelFilter::WARN).unwrap();
     deliver(&sender, completed(TEST_OWNER, SYSTEMD_OBJECT_PATH)).await;
     drop(sender);
     task.await.unwrap();
 
-    let line = "level=INFO systemd reload completed; re-applying device rules\n";
-    assert_eq!(before.contents(), line);
-    assert_eq!(after.contents(), line);
+    let records = capture.json_lines();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0]["level"], "INFO");
+    assert_eq!(
+        records[0]["message"],
+        "systemd reload completed; re-applying device rules"
+    );
 }
 
 /// One scripted result of an open.
@@ -362,7 +366,6 @@ fn supervisor(
         setup_timeout,
         min_retry,
         max_retry,
-        log: capture_logs(Level::DEBUG).0,
     }
 }
 
@@ -510,16 +513,13 @@ async fn a_cancel_while_an_attempt_hangs_returns() {
 async fn the_supervisor_logs_as_go_does() {
     let (sender, signals) = mpsc::channel(1);
     let opens = FakeOpens::new(vec![Step::Fail, Step::Fail, Step::OpenOn(signals)]);
-    let (log, sink) = capture_logs(Level::DEBUG);
-    let supervisor = Supervisor {
-        log,
-        ..supervisor(
-            &opens,
-            Duration::from_millis(50),
-            Duration::from_secs(1),
-            Duration::from_mins(5),
-        )
-    };
+    let logs = capture_logs(LevelFilter::DEBUG);
+    let supervisor = supervisor(
+        &opens,
+        Duration::from_millis(50),
+        Duration::from_secs(1),
+        Duration::from_mins(5),
+    );
     let cancel = CancellationToken::new();
     let token = cancel.clone();
     let (subscribed_sender, mut subscribed) = mpsc::unbounded_channel();
@@ -537,11 +537,11 @@ async fn the_supervisor_logs_as_go_does() {
     task.await.unwrap();
 
     assert_eq!(
-        sink.contents(),
+        logs.contents(),
         "level=WARN systemd reload handling unavailable; retrying in the background \
-         err=connecting to the system bus timed out retry_in=1s\n\
+         error=connecting to the system bus timed out retry_in=1s\n\
          level=DEBUG systemd reload watcher still unavailable \
-         err=connecting to the system bus timed out retry_in=2s\n\
+         error=connecting to the system bus timed out retry_in=2s\n\
          level=INFO systemd reload handling available again\n\
          level=DEBUG systemd reload watcher started systemd=:1.1\n\
          level=DEBUG systemd signal channel closed\n\
@@ -649,15 +649,12 @@ async fn dial_failures_read_as_go() {
     let missing = dir.path().join("missing");
     let refusing = dir.path().join("plainfile");
     std::fs::write(&refusing, b"").unwrap();
-    let (log, _) = capture_logs(Level::DEBUG);
     for (path, cause) in [
         (missing, "no such file or directory"),
         (refusing, "connection refused"),
     ] {
         let path = path.to_str().unwrap();
-        let error = open_at(&format!("unix:path={path}"), &log)
-            .await
-            .unwrap_err();
+        let error = open_at(&format!("unix:path={path}")).await.unwrap_err();
         assert_eq!(
             error.to_string(),
             format!("connect system bus: dial unix {path}: connect: {cause}")

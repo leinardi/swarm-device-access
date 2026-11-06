@@ -48,6 +48,8 @@ go-slog = { git = "https://github.com/leinardi/rust-common", rev = "2179ec425844
 repo-meta = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 service-kit = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 testenv-core = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-setup = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 
 # The lint set lives here once. Every member opts in with `[lints] workspace = true` (a member does
 # not inherit it otherwise, and the meta crate asserts that each one does), and every clippy run is
@@ -94,9 +96,10 @@ publish = false
 go-compat.workspace = true
 # The injected wall clock (rust-common): Clock, SystemClock, TokioClock, FakeClock.
 clock.workspace = true
-# Go's log/slog handlers and the plain format, byte for byte (rust-common), in the Raw plain
-# style with Go's fallback level and format parsing, through a LogHandle.
-go-slog.workspace = true
+# The log: tracing events, written as tracing-subscriber's text lines or flat JSON through
+# rust-common's tracing-setup (a reloadable subscriber for SIGHUP).
+tracing.workspace = true
+tracing-setup.workspace = true
 # The Prometheus Go client's registry and text exposition, byte for byte (rust-common), with
 # prometheus/common v0.70.1's content negotiation (ExpfmtVersion::V0_70_1).
 go-prom.workspace = true
@@ -174,6 +177,8 @@ service-kit = { workspace = true, features = ["runtime"] }
 docker-engine = { workspace = true, features = ["write", "attach", "test-util"] }
 # The golden fixtures, the wire captures and the decode errors of the tests.
 serde_json = "1.0.154"
+# The log capture of the unit tests (Capture, set_default).
+tracing-setup = { workspace = true, features = ["testing"] }
 # The Go tests' gatherSeries and seriesID, for the collectors' tests.
 go-prom = { workspace = true, features = ["testing"] }
 # The Go wire captures' replay (Capture, replay).

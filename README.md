@@ -256,7 +256,7 @@ daemon, and exits with the daemon's status.
 | `--host-network` | `false` | Run the daemon in the host network instead of none; only `--metrics-addr` needs it. |
 | `--host-docker-socket` | `/var/run/docker.sock` | Host path of the Docker socket bound into the daemon. Must be an absolute, clean path. The launcher itself always uses its own `/var/run/docker.sock` mount. |
 | `--log-level` | `info` | The launcher's own log level: `debug`, `info`, `warn`, `error`. |
-| `--log-format` | `text` | The launcher's own log format: `text`, `json`, `plain`. |
+| `--log-format` | `text` | The launcher's own log format: `text`, `json`. |
 | `-h`, `--help` |  | Print the launch flags and exit |
 
 Running the daemon from the launcher's own image ID, not a tag, means the
@@ -293,8 +293,8 @@ value is set in both places, the CLI flag wins.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
-| `--log-format` | `text` | `text`, `json`, `plain` |
-| `--log-time` | `false` | Include timestamps in log lines |
+| `--log-format` | `text` | `text`, `json` |
+| `--log-time` | `false` | Include timestamps in log lines (RFC 3339, UTC). Fixed at startup: a reload that changes it is logged and ignored |
 | `--docker-socket` | `/var/run/docker.sock` | Path to the Docker daemon's UNIX socket |
 | `--dry-run` | `false` | Log the device set each container would get, without reading its `/proc` entry or its cgroup and without writing anything. Not a cleanup path: grants left by a previous live run stay, and a reload can turn it off but not on (see [Config File](#config-file)) |
 | `--policy-mode` | `opt-in` | `opt-in`: only `enable=true` containers. `all`: unless `enable=false`. |
@@ -479,6 +479,7 @@ and referenced from the code and from
 | Q10 | Launcher: a wait answer whose JSON has a wrong type (unreachable: dockerd sends a number for `StatusCode`) | `encoding/json`'s wording, e.g. `daemon wait stream failed: json: cannot unmarshal string into Go struct field WaitResponse.StatusCode of type int64` | The same prefix, with serde_json's wording after it, e.g. `daemon wait stream failed: invalid type: string "x", expected i64 at line 1 column 17`. A wait answer that is not JSON at all reads as in 1.x: the answer's own text. |
 | Q11 | Metrics server: requests net/http refuses or frames otherwise | net/http's own answers to a malformed request (a bad request line or header, an unknown version, a missing `Host`), its header-count and size limits, its 400 to a partial pipelined request at the header deadline, and its 10 s drain of a slowly sent body before answering | hyper's: a 400 without a reason or a body to a malformed request or an unknown version, an HTTP/1.1 request without `Host` served, other header limits (for example a 431 above 100 headers), a close without a 400 at the header deadline, and the answer sent at once without reading the body. Paths, routes, status codes, bodies, header order, the 307 for unclean paths, HEAD, `Content-Length` or chunked framing and the four server deadlines are unchanged; chunk boundaries follow 2 KiB chunks rather than the encoder's writes. |
 | Q12 | Metrics address with a host name that does not resolve | Go's resolver: `metrics server: listen on <addr>: listen tcp: lookup <host> on <nameserver>: no such host` (or its timeout and server-failure wordings) | The same prefix up to `lookup <host>:`, with getaddrinfo's wording after it, e.g. `failed to lookup address information: Name does not resolve`. inet_aton's shorthands (`0`, `127.1`) read `lookup <host>: no such host`. A name that resolves binds the same address. |
+| Q13 | Log format | slog's `text` and `json` handlers and a `plain` format, Go's time layouts in the local zone (`TZ`), error values under `err`, a duration as `1s`, a list as `[a b]` | Logging goes through `tracing`: tracing-subscriber's `text` lines (`LEVEL message key=value`) and flat `json` objects (`timestamp`, `level`, `message`, then the fields). `plain` is refused, in the flag, the config key and the launcher's flag, which name `text` and `json`. With `--log-time` the timestamp is RFC 3339 in UTC whatever `TZ` says, and a reload cannot change it (a changed `log-time` is logged as needing a restart). A log line's error is the field `error` (was `err`), a duration is Rust's (`1s`, `500ms`), a list is its debug form (`["a", "b"]`, `None` for an unset allow or deny list), and the HTTP server's own messages are warnings. Messages, levels and the other field names are 1.x's. |
 
 ## 🧩 Tips and Limitations
 

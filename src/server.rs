@@ -41,7 +41,6 @@
 //! There is no debug server: a non-empty `debug-addr` is refused ([`refuse_debug_addr`], Q2).
 
 use std::fmt;
-use std::io::{self, Write as _};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,7 +48,6 @@ use std::time::Duration;
 use clock::Clock;
 use go_compat::quote::quote;
 use go_http::{Drained, ListenError, Mux, Reply, Server, Timeouts};
-use go_slog::{Attr, LogHandle};
 use hyper::StatusCode;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -58,6 +56,7 @@ use crate::daemon::Readiness;
 use crate::metrics::exposition::{self, Exposition};
 use crate::metrics::promhttp::HandlerMetrics;
 use crate::metrics::{Recorder, Registry};
+use tracing::{error, info, warn};
 
 pub use go_http::MetricsRequest;
 
@@ -83,33 +82,25 @@ pub const TIMEOUTS: Timeouts = Timeouts {
 /// What a listen error's text starts with: nothing, the Go daemon printed `net.OpError` bare.
 const LISTEN_ERROR_PREFIX: &str = "";
 
-/// The endpoints, and the log the server's errors go through.
+/// The endpoints.
 #[derive(Debug)]
 pub struct App {
     server: Arc<Server>,
-    log: LogHandle,
 }
 
 impl App {
     /// The endpoints answering from `readiness` and the registry of `metrics`, with `Date` read
-    /// from `clock`, and the server's own messages written through `log` and in its zone.
+    /// from `clock`, and the server's own messages logged as warnings.
     #[must_use]
-    pub fn new(
-        readiness: Readiness,
-        metrics: Recorder,
-        clock: Arc<dyn Clock>,
-        log: LogHandle,
-    ) -> Self {
+    pub fn new(readiness: Readiness, metrics: Recorder, clock: Arc<dyn Clock>) -> Self {
         let mux = mux(readiness, move |scrape| scrape_metrics(&metrics, scrape));
-        Self::with_mux(mux, clock, log)
+        Self::with_mux(mux, clock)
     }
 
-    /// `mux` served with `Date` from `clock`, and `net/http`'s messages and the server's errors
-    /// through `log`.
-    fn with_mux(mux: Mux, clock: Arc<dyn Clock>, log: LogHandle) -> Self {
+    /// `mux` served with `Date` from `clock`, and `net/http`'s messages logged as warnings.
+    fn with_mux(mux: Mux, clock: Arc<dyn Clock>) -> Self {
         Self {
-            server: Arc::new(server(mux, clock, &log)),
-            log,
+            server: Arc::new(server(mux, clock)),
         }
     }
 }
@@ -132,14 +123,9 @@ fn mux(
         .route(READYZ_PATH, move |_| readyz(&readiness))
 }
 
-/// `mux` behind a server whose own messages are Go's `log.Printf` lines on stderr, in the zone
-/// `log` has when the message is written.
-fn server(mux: Mux, clock: Arc<dyn Clock>, log: &LogHandle) -> Server {
-    let (log_clock, log) = (Arc::clone(&clock), log.clone());
-    Server::new(mux, clock, move |message| {
-        let line = go_http::log_printf_line(log_clock.now(), log.logger().zone(), message);
-        let _ = io::stderr().write_all(line.as_bytes());
-    })
+/// `mux` behind a server whose own messages (Go's `log.Printf` lines) are logged as warnings.
+fn server(mux: Mux, clock: Arc<dyn Clock>) -> Server {
+    Server::new(mux, clock, |message| warn!("{message}"))
 }
 
 /// Go's `/healthz` handler: always `ok`, its type sniffed.
@@ -255,15 +241,9 @@ async fn start_draining_for(
             address: address.to_owned(),
             cause,
         })?;
-    let App { server, log } = app;
+    let App { server } = app;
     let local = listener.local_addr().ok();
-    log.info(
-        "metrics server listening",
-        &[Attr::string(
-            "addr",
-            local.map_or_else(String::new, |local| local.to_string()),
-        )],
-    );
+    info!(addr = %local.map_or_else(String::new, |local| local.to_string()), "metrics server listening");
     let stop = context.child_token();
     let shutdown = stop.clone();
     let task = tokio::spawn(async move {
@@ -275,14 +255,11 @@ async fn start_draining_for(
             TIMEOUTS,
             shutdown.cancelled_owned(),
             move || Instant::now() + drain,
-            |error| log.error("metrics server error", &[Attr::error("err", &error)]),
+            |error| error!(error = %error, "metrics server error"),
         )
         .await;
         if served.drained == Drained::DeadlineExceeded {
-            log.warn(
-                "metrics server shutdown error",
-                &[Attr::string("err", "context deadline exceeded")],
-            );
+            warn!(error = %"context deadline exceeded", "metrics server shutdown error");
         }
     });
     Ok(MetricsServer {

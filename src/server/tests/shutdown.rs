@@ -25,6 +25,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Instant;
 
 use super::*;
+use crate::test_support::capture_logs;
+use tracing::level_filters::LevelFilter;
 
 /// How long a test waits for something that should happen at once.
 const BOUND: Duration = Duration::from_secs(5);
@@ -72,12 +74,11 @@ async fn a_bind_failure_is_go_s_error() {
     assert!(TcpListener::bind(":8888").await.is_err());
 }
 
-/// A server started on a free loopback port, with `log` and `drain`.
-async fn started(log: LogHandle, drain: Duration) -> (MetricsServer, SocketAddr) {
+/// A server started on a free loopback port, with `drain`.
+async fn started(drain: Duration) -> (MetricsServer, SocketAddr) {
     let app = App::with_mux(
         slow_mux(sleeping(Duration::from_secs(30))),
         Arc::new(FakeClock::new(capture_time())),
-        log,
     );
     let server = start_draining_for(&CancellationToken::new(), "127.0.0.1:0", app, drain)
         .await
@@ -109,8 +110,8 @@ async fn start_on_a_busy_address_is_an_error() {
 /// longer answers; the start and the stop are logged as Go logs them.
 #[tokio::test]
 async fn stop_returns_and_closes_the_listener() {
-    let (log, sink) = capture_logs(Level::INFO);
-    let (server, address) = started(log, SHUTDOWN_TIMEOUT).await;
+    let logs = capture_logs(LevelFilter::INFO);
+    let (server, address) = started(SHUTDOWN_TIMEOUT).await;
     let mut stream = TcpStream::connect(address).await.unwrap();
     assert!(get(&mut stream, "/healthz").await.ends_with("\r\n\r\nok"));
     drop(stream);
@@ -126,7 +127,7 @@ async fn stop_returns_and_closes_the_listener() {
         "still answers after stop"
     );
     assert_eq!(
-        sink.contents(),
+        logs.contents(),
         format!("level=INFO metrics server listening addr={address}\n")
     );
 }
@@ -151,8 +152,7 @@ async fn context_cancel_stops() {
 /// `sync.OnceFunc` makes every call wait for the server.
 #[tokio::test]
 async fn a_stop_given_up_on_leaves_the_next_one_waiting() {
-    let (log, _sink) = capture_logs(Level::INFO);
-    let (server, address) = started(log, Duration::from_millis(500)).await;
+    let (server, address) = started(Duration::from_millis(500)).await;
     let mut stream = TcpStream::connect(address).await.unwrap();
     stream
         .write_all(b"GET /slow HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -176,8 +176,8 @@ async fn a_stop_given_up_on_leaves_the_next_one_waiting() {
 /// A drain cut short by its deadline is warned about as Go's failed `Shutdown` is.
 #[tokio::test]
 async fn a_drain_past_the_deadline_is_warned_about() {
-    let (log, sink) = capture_logs(Level::INFO);
-    let (server, address) = started(log, Duration::from_millis(200)).await;
+    let logs = capture_logs(LevelFilter::INFO);
+    let (server, address) = started(Duration::from_millis(200)).await;
     let mut stream = TcpStream::connect(address).await.unwrap();
     stream
         .write_all(b"GET /slow HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -186,10 +186,10 @@ async fn a_drain_past_the_deadline_is_warned_about() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     tokio::time::timeout(BOUND, server.stop()).await.unwrap();
     assert_eq!(
-        sink.contents(),
+        logs.contents(),
         format!(
             "level=INFO metrics server listening addr={address}\n\
-             level=WARN metrics server shutdown error err=\"context deadline exceeded\"\n"
+             level=WARN metrics server shutdown error error=context deadline exceeded\n"
         )
     );
 }

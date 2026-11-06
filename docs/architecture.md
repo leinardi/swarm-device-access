@@ -305,7 +305,7 @@ counts per-device failures.
 
 | Module | Responsibility |
 | --- | --- |
-| `src/main.rs`, `src/run.rs` | Entrypoint: the runtime (service-kit's `build_runtime` and `run_until_exit`), startup checks (`openat2` probe, `RLIMIT_MEMLOCK`), logger, store, Docker client, metrics server, processor and `daemon::run`; the shutdown budget (service-kit's `shutdown_signal`); the `SIGHUP` reload task (`hangup_channel`); `launch` dispatch |
+| `src/main.rs`, `src/run.rs` | Entrypoint: the runtime (service-kit's `build_runtime` and `run_until_exit`), startup checks (`openat2` probe, `RLIMIT_MEMLOCK`), the `tracing` subscriber (`src/logging.rs`), store, Docker client, metrics server, processor and `daemon::run`; the shutdown budget (service-kit's `shutdown_signal`); the `SIGHUP` reload task (`hangup_channel`); `launch` dispatch |
 | `src/cli.rs`, `src/cli/settings.rs` | The daemon's and `launch`'s flags (double-dash only, Q1); settings merge (command line over file over default), validation, restart-only changes and the `SIGHUP` `Reloader` |
 | `src/launcher` | Launcher mode: self-identification (`self_id.rs`), the daemon container spec (`spec.rs`, `daemon_spec`, the privileged set), stale-daemon cleanup (`stale.rs`), the write-capable Engine client (`engine.rs`), attach/wait/start and supervision |
 | `src/config` | Strict YAML loader (`load_file`, shape checks), runtime config `Store` with generations and its single `Publisher` |
@@ -317,7 +317,7 @@ counts per-device failures.
 | `src/metrics`, `src/server.rs`, `src/server` | Prometheus metrics (`Recorder`, with a no-op form) on `go-prom`'s registry and text exposition (`ExpfmtVersion::V0_70_1`); the `/metrics`, `/healthz` and `/readyz` routes on `go-http`'s server with Go's `http.Server` deadlines (`TIMEOUTS`: 5 s, 10 s, 30 s, 60 s) |
 | `src/systemd.rs` | D-Bus watcher for systemd's `Reloading` signal (zbus) |
 | `src/task.rs`, `src/version.rs` | Awaiting spawned work to completion; the build's version stamps (`BUILD`, service-kit's `buildinfo!`) |
-| rust-common crates | `go-slog`: slog-compatible logger with `text`, `json` and `plain` (`PlainStyle::Raw`) handlers and Go's fallback level and format parsing, shared through a `LogHandle`; `go-compat`: ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts); `clock`: the one wall-clock read behind the injected `Clock` |
+| rust-common crates | `tracing-setup`: the `tracing` subscriber (`text` or `json`, reloadable on `SIGHUP`); `go-compat`: ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts); `clock`: the one wall-clock read behind the injected `Clock` |
 
 ## Policy model
 

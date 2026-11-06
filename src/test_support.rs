@@ -23,14 +23,14 @@
 
 pub(crate) mod fake_docker;
 
+use std::fmt::Write as _;
 use std::path::Path;
-use std::sync::Arc;
 
-use jiff::Timestamp;
-use jiff::tz::TimeZone;
-
-use clock::FakeClock;
-use go_slog::{Config, Format, Level, LogHandle, Logger, MemorySink};
+use serde_json::Value;
+use tracing::dispatcher::DefaultGuard;
+use tracing::level_filters::LevelFilter;
+use tracing_setup::testing::{Capture, set_default};
+use tracing_setup::{Format, Options};
 
 /// A temporary directory, removed on drop (`TempDir::new("sda-test")`), and a bounded wait:
 /// docker-engine's test helpers.
@@ -44,22 +44,72 @@ pub(crate) fn testdata(relative: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
-/// A plain-format logger at `level` behind a handle, writing to the returned sink without record
-/// times: the Go tests' handler swap, without a process-wide logger to race on.
-pub(crate) fn capture_logs(level: Level) -> (LogHandle, MemorySink) {
-    let sink = MemorySink::default();
-    let logger = Logger::new(
-        Config {
-            format: Format::Plain,
-            level,
-            include_time: false,
-            plain_style: go_slog::PlainStyle::Raw,
-        },
-        Box::new(sink.clone()),
-        TimeZone::UTC,
-        Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+/// What a test logged: the records of the subscriber [`capture_logs`] made this thread's default,
+/// kept as the JSON objects tracing-setup wrote. Dropping it restores the previous default.
+pub(crate) struct Logs {
+    capture: Capture,
+    _scope: DefaultGuard,
+}
+
+/// Makes a subscriber that keeps the events at `level` and above, without the timestamp, this
+/// thread's default for as long as the result lives: a test on a current-thread runtime sees what
+/// the tasks it spawns log, and a blocking transaction logs where its caller does
+/// ([`crate::logging::inherit`]).
+pub(crate) fn capture_logs(level: LevelFilter) -> Logs {
+    let capture = Capture::default();
+    let dispatch = tracing_setup::build(
+        capture.clone(),
+        Format::Json,
+        level,
+        Options::new().target(false).span_fields(false).time(false),
     );
-    (LogHandle::new(logger), sink)
+    Logs {
+        _scope: set_default(&dispatch),
+        capture,
+    }
+}
+
+impl Logs {
+    /// Every record so far, as the flat JSON object it was written as: `level`, `message` and
+    /// one key per field, in the order the event named them.
+    pub(crate) fn records(&self) -> Vec<Value> {
+        self.capture.json_lines()
+    }
+
+    /// The records so far, one per line, as `LEVEL message key=value key=value`: the fields in
+    /// the order the event named them, each value as text without quotes, for assertions on a
+    /// message and its fields.
+    pub(crate) fn contents(&self) -> String {
+        self.records()
+            .iter()
+            .fold(String::new(), |mut lines, record| {
+                let _ = writeln!(lines, "{}", render(record));
+                lines
+            })
+    }
+}
+
+/// One record as `LEVEL message key=value ...`.
+pub(crate) fn render(record: &Value) -> String {
+    let Some(fields) = record.as_object() else {
+        panic!("a log record is a JSON object: {record}");
+    };
+    let text = |value: &Value| {
+        value
+            .as_str()
+            .map_or_else(|| value.to_string(), str::to_owned)
+    };
+    let mut line = format!(
+        "level={} {}",
+        fields.get("level").map_or_else(String::new, text),
+        fields.get("message").map_or_else(String::new, text),
+    );
+    for (key, value) in fields {
+        if !matches!(key.as_str(), "level" | "message") {
+            let _ = write!(line, " {key}={}", text(value));
+        }
+    }
+    line
 }
 
 #[cfg(test)]

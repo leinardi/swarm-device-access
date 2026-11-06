@@ -43,12 +43,7 @@ fn main() -> ExitCode {
         }
     };
     let code = run_until_exit(runtime, || {
-        run_with(
-            std::env::args_os(),
-            |key| std::env::var(key).ok(),
-            shutdown_signal,
-            hangup_channel,
-        )
+        run_with(std::env::args_os(), shutdown_signal, hangup_channel)
     });
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }

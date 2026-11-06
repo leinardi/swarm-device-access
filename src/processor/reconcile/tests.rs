@@ -42,9 +42,9 @@ use crate::policy::{LABEL_ENABLE, LABEL_PREFIX, Mode};
 use crate::processor::devfs::NodeKind;
 use crate::processor::fake_devfs::{DEV_CARD, DEV_NULL, DEV_SDA, FakeDevFs, FakeNode};
 use crate::processor::pin::PinError;
-use crate::test_support::{TempDir, capture_logs};
+use crate::test_support::{Logs, TempDir, capture_logs};
 use clock::FakeClock;
-use go_slog::{Level, MemorySink};
+use tracing::level_filters::LevelFilter;
 
 const RECONCILE_PID: i64 = 80;
 const RECONCILE_STARTED: &str = "2026-09-27T10:00:00.000000000Z";
@@ -307,7 +307,7 @@ struct Env {
     host: TempDir,
     proc_root: TempDir,
     clock: Arc<FakeClock>,
-    sink: MemorySink,
+    sink: Logs,
 }
 
 /// How an [`Env`] is built.
@@ -353,7 +353,7 @@ impl Env {
         let clock = Arc::new(FakeClock::new(
             "2026-09-27T12:00:00Z".parse::<Timestamp>().unwrap(),
         ));
-        let (log, sink) = capture_logs(Level::DEBUG);
+        let sink = capture_logs(LevelFilter::DEBUG);
         let (store, publisher) = new_store(options.runtime);
         let settings = Settings {
             inspector: FakeInspector(Arc::clone(&inspector)),
@@ -368,12 +368,11 @@ impl Env {
                 .unwrap_or_else(|| proc_root.path().display().to_string()),
             call_timeout: None,
             clock: Arc::clone(&clock) as Arc<dyn Clock>,
-            log,
         };
         let new_cgroup = {
             let fake = Arc::clone(&fake);
             let apis = Arc::clone(&apis);
-            move |_: CgroupVersion, _: Arc<Ledger>, _: Arc<FilterCache>, _: LogHandle| {
+            move |_: CgroupVersion, _: Arc<Ledger>, _: Arc<FilterCache>| {
                 apis.fetch_add(1, Ordering::SeqCst);
                 Box::new(FakeApi(Arc::clone(&fake))) as Box<dyn Interface>
             }
@@ -821,8 +820,8 @@ async fn reconcile_moved_run_revokes_previous_cgroup() {
     );
     assert!(
         env.log().contains(
-            "level=INFO container moved to another cgroup; previous grants revoked id=abc"
-        ),
+            "level=INFO container moved to another cgroup; previous grants revoked from="
+        ) && env.log().contains(" id=abc "),
         "{}",
         env.log()
     );
@@ -944,8 +943,8 @@ async fn reconcile_invalid_labels_set_empty_set() {
         .unwrap_or_default();
     assert_eq!(
         line,
-        "level=WARN container skipped: invalid policy labels id=abc err=invalid value for label \
-         \"swarm-device-access.enable\": \"maybe\" is not a boolean"
+        "level=WARN container skipped: invalid policy labels error=invalid value for label \
+         \"swarm-device-access.enable\": \"maybe\" is not a boolean id=abc"
     );
 }
 
@@ -988,7 +987,7 @@ async fn reconcile_dry_run_issues_no_cgroup_calls() {
     assert!(env.pinner.pins.lock().unwrap().is_empty());
     assert!(
         env.log().contains(
-            "level=INFO dry-run: would add device rule id=abc type=c major=1 minor=3\n\
+            "level=INFO dry-run: would add device rule id=abc major=1 minor=3 type=c\n\
              level=INFO dry-run: would set device rules id=abc rules=1"
         ),
         "{}",
@@ -1699,7 +1698,7 @@ async fn error_texts() {
     assert!(
         env.log().contains(
             "level=WARN device set incomplete; no devices are granted until every device \
-             resolves id=abc errors=1 reason=incomplete_device_set"
+             resolves errors=1 id=abc reason=incomplete_device_set"
         ),
         "{}",
         env.log()
@@ -1732,7 +1731,6 @@ fn compute_with(devfs: Box<OpenDevFs>, mounts: Vec<MountPoint>) -> Desired {
             proc_root: "/".to_owned(),
             call_timeout: None,
             clock: Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
-            log: capture_logs(Level::DEBUG).0,
         },
         Seams {
             devfs: Some(devfs),

@@ -35,7 +35,7 @@ use crate::policy::Global;
 use crate::server;
 use crate::task::finish;
 use go_compat::errors;
-use go_slog::{Attr, LogHandle};
+use tracing::{error, info};
 
 /// Go's `errDryRunEnable`.
 const DRY_RUN_ENABLE: &str = "dry-run cannot be enabled on a running daemon; to stop enforcing, \
@@ -174,7 +174,8 @@ impl Settings {
         }
     }
 
-    /// Go's `coldChanges`: the restart-only settings that differ between `self` and `next`.
+    /// Go's `coldChanges`: the restart-only settings that differ between `self` and `next` (the
+    /// timestamp joins them: the subscriber fixes it at startup).
     #[must_use]
     pub fn cold_changes(&self, next: &Self) -> Vec<&'static str> {
         [
@@ -185,21 +186,13 @@ impl Settings {
         .into_iter()
         .filter(|(_, current, next)| current != next)
         .map(|(key, _, _)| key)
+        .chain((self.log_time != next.log_time).then_some("log-time"))
         .collect()
     }
 }
 
-/// A device list as Go's slog writes a `[]string`: `nil` stays nil.
-#[must_use]
-pub fn list_attr(key: &str, values: Option<&[String]>) -> Attr {
-    match values {
-        Some(values) => Attr::strings(key, values),
-        None => Attr::nil_strings(key),
-    }
-}
-
-/// Reconfigures the logger: Go's `logger.Configure`.
-pub type ConfigureLogger = Box<dyn Fn(&str, &str, bool) + Send + Sync>;
+/// Reconfigures the logger's format and level (the timestamp is fixed at startup).
+pub type ConfigureLogger = Box<dyn Fn(&str, &str) + Send + Sync>;
 
 /// Publishes a runtime and reconciles every container, returning its generation: Go's
 /// `Processor.PublishAndReconcile`.
@@ -252,7 +245,6 @@ pub struct Reloader {
     pub current: Settings,
     pub configure_logger: ConfigureLogger,
     pub publish_and_reconcile: Publish,
-    pub log: LogHandle,
 }
 
 impl fmt::Debug for Reloader {
@@ -290,26 +282,22 @@ impl Reloader {
             return Err(ReloadError::DryRunEnable);
         }
         for key in self.current.cold_changes(&next) {
-            self.log.info(
-                "config reload: setting requires a restart; ignored",
-                &[Attr::string("key", key)],
-            );
+            info!(key = %key, "config reload: setting requires a restart; ignored");
         }
         next.docker_socket.clone_from(&self.current.docker_socket);
         next.metrics_addr.clone_from(&self.current.metrics_addr);
         next.debug_addr.clone_from(&self.current.debug_addr);
+        next.log_time = self.current.log_time;
 
-        (self.configure_logger)(&next.log_format, &next.log_level, next.log_time);
+        (self.configure_logger)(&next.log_format, &next.log_level);
         let generation = (self.publish_and_reconcile)(runtime).await;
-        self.log.info(
+        info!(
+            generation,
+            dry_run = next.dry_run,
+            policy_mode = %next.policy_mode,
+            device_allow = ?next.device_allow,
+            device_deny = ?next.device_deny,
             "config reloaded",
-            &[
-                Attr::uint("generation", generation),
-                Attr::bool("dry_run", next.dry_run),
-                Attr::string("policy_mode", next.policy_mode.clone()),
-                list_attr("device_allow", next.device_allow.as_deref()),
-                list_attr("device_deny", next.device_deny.as_deref()),
-            ],
         );
         self.current = next;
         Ok(())
@@ -331,15 +319,9 @@ pub async fn watch_sighup(
                 if received.is_none() {
                     return;
                 }
-                reloader.log.info(
-                    "SIGHUP received; reloading config",
-                    &[Attr::string("config_file", reloader.path.clone())],
-                );
+                info!(config_file = %reloader.path.clone(), "SIGHUP received; reloading config");
                 if let Err(error) = reloader.reload().await {
-                    reloader.log.error(
-                        "config reload rejected; keeping previous config",
-                        &[Attr::error("err", &error)],
-                    );
+                    error!(error = %error, "config reload rejected; keeping previous config");
                 }
             }
         }

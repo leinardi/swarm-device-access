@@ -32,7 +32,7 @@ use super::owned::{
 };
 use super::v2::CgroupV2;
 use super::v2ops::{F_ALLOW_MULTI, V2Ops};
-use go_slog::{Attr, LogHandle};
+use tracing::info;
 
 /// Remembers, per cgroup identity, the runtime originals (and the wrapper nonce of each lineage)
 /// that were attached the last time this daemon looked. systemd's daemon-reload can detach every
@@ -284,7 +284,6 @@ pub(super) fn plan_grant(
     bares: &[AttachedProg],
     rules: &[DeviceRule],
     cgroup_path: &str,
-    log: &LogHandle,
 ) -> Result<PassPlan, Error> {
     let mut plan = PassPlan::default();
     for group in groups {
@@ -312,11 +311,8 @@ pub(super) fn plan_grant(
         gate(&bare.raw, bare.meta)?;
         let nonce = new_nonce().map_err(Error::Nonce)?;
         let wrapped = emit_owned(rules, nonce, &bare.raw).map_err(Error::Emit)?;
-        log.info(
-            "wrapping device filter with no prior owned block; pre-upgrade grants, if any, are \
-             not managed",
-            &[Attr::string("cgroup", cgroup_path)],
-        );
+        info!(cgroup = %cgroup_path, "wrapping device filter with no prior owned block; pre-upgrade grants, if any, are \
+             not managed");
         plan.pair(bare.index, wrapped, OWNED_PROGRAM_NAME);
         plan.lineages.push(CachedLineage {
             nonce,

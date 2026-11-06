@@ -31,7 +31,7 @@ use super::v2ops::{F_ALLOW_MULTI, KernelOps, PROCESS_REPLACE_PROBE, ReplaceProbe
 use super::v2plan::{
     CacheEntry, FilterCache, PassPlan, group_wrappers, missing_lineages, plan_grant, plan_restore,
 };
-use go_slog::{Attr, LogHandle};
+use tracing::info;
 
 /// The cgroup v2 device controller: the daemon's grants as a wrapper around each runtime device
 /// filter, changed through `ops`.
@@ -40,19 +40,17 @@ pub struct CgroupV2<O> {
     pub(super) ops: O,
     pub(super) replace: &'static ReplaceProbe,
     pub(super) cache: Arc<FilterCache>,
-    pub(super) log: LogHandle,
 }
 
 impl CgroupV2<KernelOps> {
     /// The controller on the kernel's `bpf(2)` calls, with the process's replace probe and `cache`,
     /// which must outlive it (one per processor), as Go's `New(2, ledger, cache)` makes it.
     #[must_use]
-    pub fn new(cache: Arc<FilterCache>, log: LogHandle) -> Self {
+    pub const fn new(cache: Arc<FilterCache>) -> Self {
         Self {
-            ops: KernelOps::new(log.clone()),
+            ops: KernelOps,
             replace: &PROCESS_REPLACE_PROBE,
             cache,
-            log,
         }
     }
 }
@@ -119,7 +117,7 @@ impl<O: V2Ops> CgroupV2<O> {
         let mut plan = if rules.is_empty() {
             plan_restore(&groups, &bares)
         } else {
-            plan_grant(&groups, &bares, rules, &id.path, &self.log)?
+            plan_grant(&groups, &bares, rules, &id.path)?
         };
 
         // A rebuild that stopped halfway left some lineages attached and others not; the missing
@@ -180,14 +178,7 @@ impl<O: V2Ops> CgroupV2<O> {
         let programs = entry.lineages.len();
         let mut plan = PassPlan::default();
         plan.add_rebuild(entry.lineages, rules)?;
-        self.log.info(
-            "device filter missing; reattaching the cached runtime originals",
-            &[
-                Attr::string("cgroup", id.path.as_str()),
-                Attr::int("programs", i64::try_from(programs).unwrap_or(i64::MAX)),
-                Attr::bool("with_grants", !rules.is_empty()),
-            ],
-        );
+        info!(cgroup = %id.path.as_str(), programs = i64::try_from(programs).unwrap_or(i64::MAX), with_grants = !rules.is_empty(), "device filter missing; reattaching the cached runtime originals");
         self.commit(dir, id, &[], &plan, true)
     }
 

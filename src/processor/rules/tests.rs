@@ -31,7 +31,7 @@ use crate::processor::fake_devfs::{
     DEV_CARD, DEV_NULL, DEV_REND, DEV_SDA, FakeDevFs, FakeNode, char_dev,
 };
 use crate::test_support::capture_logs;
-use go_slog::Level;
+use tracing::level_filters::LevelFilter;
 
 fn globs(list: &[&str]) -> Option<Vec<String>> {
     (!list.is_empty()).then(|| list.iter().map(|glob| (*glob).to_owned()).collect())
@@ -68,35 +68,25 @@ fn bind(source: &str) -> MountPoint {
     }
 }
 
-fn collect_mounts(
-    dev: &dyn DevFs,
-    global: &Global,
-    mounts: &[MountPoint],
-    log: &LogHandle,
-) -> ContainerRules {
+fn collect_mounts(dev: &dyn DevFs, global: &Global, mounts: &[MountPoint]) -> ContainerRules {
     let container = Container::default();
     let judge = Judge {
         global,
         container: &container,
-        log,
     };
     collect_container_rules(dev, "abc", 1, mounts, judge, &Recorder::noop())
 }
 
-/// Go's `collectFrom`, logging to `log`.
-fn collect_logged(
-    dev: &dyn DevFs,
-    global: &Global,
-    log: &LogHandle,
-    sources: &[&str],
-) -> ContainerRules {
+/// Go's `collectFrom`, logging to the current subscriber.
+fn collect_logged(dev: &dyn DevFs, global: &Global, sources: &[&str]) -> ContainerRules {
     let mounts: Vec<MountPoint> = sources.iter().map(|source| bind(source)).collect();
-    collect_mounts(dev, global, &mounts, log)
+    collect_mounts(dev, global, &mounts)
 }
 
 /// Go's `collectFrom`.
 fn collect_from(dev: &dyn DevFs, global: &Global, sources: &[&str]) -> ContainerRules {
-    collect_logged(dev, global, &capture_logs(Level::DEBUG).0, sources)
+    let _logs = capture_logs(LevelFilter::DEBUG);
+    collect_logged(dev, global, sources)
 }
 
 fn rule_key(kind: &str, major: i64, minor: i64) -> String {
@@ -163,6 +153,23 @@ fn warn_lines(output: &str) -> Vec<&str> {
     output
         .lines()
         .filter(|line| line.contains("level=WARN"))
+        .collect()
+}
+
+/// The fields of every "mount excluded" warning logged so far, in the order the event names
+/// them, each as text.
+fn warnings(logs: &crate::test_support::Logs) -> Vec<String> {
+    logs.records()
+        .iter()
+        .filter(|record| {
+            record["level"] == "WARN"
+                && record["message"] == "mount excluded: no children matched allow/deny policy"
+        })
+        .map(|record| {
+            ["path", "children_seen", "allow_globs", "deny_globs"]
+                .map(|key| format!("{key}={}", record[key].as_str().unwrap_or_default()))
+                .join(" ")
+        })
         .collect()
 }
 
@@ -363,9 +370,9 @@ fn collect_symlink_outside_dev_rejected() {
     dev.directory("dri");
     dev.abs_link("dri/x", "/tmp/x");
     dev.abs_link("dri/up", "/dev/../tmp/x");
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let sink = capture_logs(LevelFilter::DEBUG);
 
-    let got = collect_logged(&dev, &all(), &log, &["/dev/dri"]);
+    let got = collect_logged(&dev, &all(), &["/dev/dri"]);
     want_rules(&got, &[]);
     assert_eq!(got.skipped, 2);
     let output = sink.contents();
@@ -390,10 +397,10 @@ fn collect_symlink_outside_dev_warns_only_when_allowed() {
     dev.directory("dri");
     dev.abs_link("dri/stdin", "/proc/self/fd/0");
     dev.abs_link("dri/card9", "/tmp/card9");
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let sink = capture_logs(LevelFilter::DEBUG);
 
     want_rules(
-        &collect_logged(&dev, &global(&["/dev/dri/card*"], &[]), &log, &["/dev/dri"]),
+        &collect_logged(&dev, &global(&["/dev/dri/card*"], &[]), &["/dev/dri"]),
         &[],
     );
     let output = sink.contents();
@@ -451,13 +458,13 @@ fn collect_alias_deny_suppresses_device_across_mounts() {
     dev.directory("disk/by-id");
     dev.alias("disk/by-id/usb-x", "sda");
     let policy = global(&["/dev/sda"], &["/dev/disk/by-id/*"]);
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let sink = capture_logs(LevelFilter::DEBUG);
 
     for order in [
         ["/dev/sda", "/dev/disk/by-id"],
         ["/dev/disk/by-id", "/dev/sda"],
     ] {
-        let got = collect_logged(&dev, &policy, &log, &order);
+        let got = collect_logged(&dev, &policy, &order);
         want_rules(&got, &[]);
         assert_eq!(got.skipped, 2, "{order:?}: want both candidates");
     }
@@ -673,12 +680,11 @@ fn collect_directory_skips() {
     dev.other("d/regular", NodeKind::Other, "/dev/d/regular");
     dev.directory("d/sub");
     dev.other("d/linktodir", NodeKind::Dir, "/dev/d/sub");
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let sink = capture_logs(LevelFilter::DEBUG);
 
     let got = collect_logged(
         &dev,
         &global(&["/dev/null", "/dev/d/nullish"], &[]),
-        &log,
         &["/dev/d"],
     );
     want_rules(&got, &[DEV_NULL]);
@@ -800,15 +806,10 @@ fn collect_directory_no_children_match_warns() {
     dev.directory("dri");
     dev.device("dri/card0", DEV_CARD, "dri/card0");
     dev.device("dri/renderD128", DEV_REND, "dri/renderD128");
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let sink = capture_logs(LevelFilter::DEBUG);
 
     want_rules(
-        &collect_logged(
-            &dev,
-            &global(&["/dev/dri/nonexistent"], &[]),
-            &log,
-            &["/dev/dri"],
-        ),
+        &collect_logged(&dev, &global(&["/dev/dri/nonexistent"], &[]), &["/dev/dri"]),
         &[],
     );
     let output = sink.contents();
@@ -831,7 +832,7 @@ fn collect_exclusion_warn_does_not_alias_the_global_policy() {
     let global_policy = global(&["/dev/dri/nonexistent"], &["/dev/dri/card0"]);
     let before = global_policy.clone();
     let container_policy = container(&["/dev/dri/other"], &["/dev/dri/x"]);
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let sink = capture_logs(LevelFilter::DEBUG);
 
     let result = collect_mount_rules(
         &dev,
@@ -839,17 +840,16 @@ fn collect_exclusion_warn_does_not_alias_the_global_policy() {
         Judge {
             global: &global_policy,
             container: &container_policy,
-            log: &log,
         },
     );
     assert!(result.errs.is_empty(), "{:?}", result.errs);
     assert_eq!(
-        warn_lines(&sink.contents()),
-        [
-            "level=WARN mount excluded: no children matched allow/deny policy path=/dev/dri \
-             children_seen=[card0] allow_globs=[/dev/dri/nonexistent /dev/dri/other] \
-             deny_globs=[/dev/dri/card0 /dev/dri/x]"
-        ]
+        warnings(&sink),
+        [concat!(
+            r#"path=/dev/dri children_seen=["card0"] "#,
+            r#"allow_globs=Some(["/dev/dri/nonexistent", "/dev/dri/other"]) "#,
+            r#"deny_globs=Some(["/dev/dri/card0", "/dev/dri/x"])"#
+        )]
     );
     assert_eq!(global_policy, before);
 }
@@ -863,7 +863,7 @@ fn collect_exclusion_warn_lists_nil_globs() {
     dev.device("dri/card0", DEV_CARD, "dri/card0");
     dev.uevents
         .insert(DEV_CARD, "DEVNAME=dri/card0\n".to_owned());
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let sink = capture_logs(LevelFilter::DEBUG);
     let container_policy = container(&[], &["/dev/dri/*"]);
 
     let result = collect_mount_rules(
@@ -872,16 +872,15 @@ fn collect_exclusion_warn_lists_nil_globs() {
         Judge {
             global: &all(),
             container: &container_policy,
-            log: &log,
         },
     );
     assert!(result.errs.is_empty(), "{:?}", result.errs);
     assert_eq!(
-        warn_lines(&sink.contents()),
-        [
-            "level=WARN mount excluded: no children matched allow/deny policy path=/dev/dri \
-             children_seen=[card0] allow_globs=[] deny_globs=[/dev/dri/*]"
-        ]
+        warnings(&sink),
+        [concat!(
+            r#"path=/dev/dri children_seen=["card0"] allow_globs=None "#,
+            r#"deny_globs=Some(["/dev/dri/*"])"#
+        )]
     );
 }
 
@@ -903,16 +902,16 @@ fn collect_only_bind_mounts_are_walked() {
         mount("npipe", "/pipe"),
         mount("", "/untyped"),
     ];
-    let log = capture_logs(Level::DEBUG).0;
+    let _logs = capture_logs(LevelFilter::DEBUG);
 
-    let got = collect_mounts(&dev, &all(), &mounts, &log);
+    let got = collect_mounts(&dev, &all(), &mounts);
     assert!(
         got.dev_mounts == 0 && got.granted.is_empty() && got.device_errs.is_empty(),
         "collected {got:?} from non-bind mounts, want nothing"
     );
 
     mounts.push(bind("/dev/sda"));
-    want_rules(&collect_mounts(&dev, &all(), &mounts, &log), &[DEV_SDA]);
+    want_rules(&collect_mounts(&dev, &all(), &mounts), &[DEV_SDA]);
 }
 
 /// Go: `TestIsDeviceMountSource` covers `IsMountSource` in `processor_test.go`; the lexical

@@ -42,7 +42,7 @@ use crate::docker::{
     with_context,
 };
 use crate::metrics::Recorder;
-use go_slog::{Attr, LogHandle};
+use tracing::{debug, error, info, warn};
 
 /// The event actions subscribed to: `start` and `unpause` reconcile a container, `die` and
 /// `destroy` end a run and clean up after it.
@@ -177,7 +177,6 @@ pub(super) struct Listener<'run, D, L, R> {
     pub(super) coordinator: &'run Arc<Coordinator<L, R>>,
     pub(super) metrics: &'run Recorder,
     pub(super) readiness: &'run Readiness,
-    pub(super) log: &'run LogHandle,
     pub(super) timeout: Duration,
 }
 
@@ -217,10 +216,7 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                         // has nothing buffered, so events of the gap can be lost: re-list and
                         // reconcile every running container. The coordinator's processed map
                         // skips replayed start events the pass already covered.
-                        self.log.info(
-                            "docker event stream re-subscribed; reconciling running containers",
-                            &[],
-                        );
+                        info!("docker event stream re-subscribed; reconciling running containers");
                         self.coordinator.request_reenumeration();
                         current
                     }
@@ -228,10 +224,7 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                         if context.err().is_some() {
                             return;
                         }
-                        self.log.error(
-                            "could not subscribe to docker events, retrying",
-                            &[Attr::error("err", &error), backoff_attr(backoff)],
-                        );
+                        error!(error = %error, backoff = ?backoff, "could not subscribe to docker events, retrying");
                         self.retry_after(context, &mut backoff).await;
                         continue;
                     }
@@ -239,7 +232,7 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
             };
 
             self.readiness.set(true);
-            self.log.debug("subscribed to docker events", &[]);
+            debug!("subscribed to docker events");
 
             let disconnected = self
                 .consume_events(context, &mut current, &mut backoff, &mut last_event_nano)
@@ -277,18 +270,12 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                 // is a shutdown, not a stream failure.
                 Err(_) if context.err().is_some() => return false,
                 Err(end) if end.is_closed() => {
-                    self.log.warn(
-                        "docker events channel closed, reconnecting",
-                        &[backoff_attr(*backoff)],
-                    );
+                    warn!(backoff = ?*backoff, "docker events channel closed, reconnecting");
                     self.retry_after(context, backoff).await;
                     return context.err().is_none();
                 }
                 Err(end) => {
-                    self.log.error(
-                        "docker events stream error, reconnecting",
-                        &[Attr::error("err", &end), backoff_attr(*backoff)],
-                    );
+                    error!(error = %end, backoff = ?*backoff, "docker events stream error, reconnecting");
                     self.retry_after(context, backoff).await;
                     return context.err().is_none();
                 }
@@ -309,14 +296,6 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
         sleep_ctx(context, *backoff).await;
         *backoff = next_backoff(*backoff);
     }
-}
-
-/// The `backoff` attribute, as Go's `time.Duration` logs it.
-fn backoff_attr(backoff: Duration) -> Attr {
-    Attr::duration(
-        "backoff",
-        i64::try_from(backoff.as_nanos()).unwrap_or(i64::MAX),
-    )
 }
 
 #[cfg(test)]

@@ -27,7 +27,6 @@ async fn exit_of(args: &[&str]) -> (i32, bool) {
     let flag = Arc::clone(&registered);
     let exit = run_with(
         std::iter::once("swarm-device-access").chain(args.iter().copied()),
-        |_| None,
         std::future::pending,
         move || {
             flag.store(true, Ordering::SeqCst);

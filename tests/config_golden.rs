@@ -114,6 +114,13 @@ fn check(name: &str, case: &Json, path: &str, got: Result<FileSchema, LoadError>
                     "{name}: {got:?} against Go's {want_error:?}"
                 );
             } else {
+                // `plain` is no longer a log format (`feat(log)!`): a file Go accepted with it is
+                // refused, and every refusal lists the two formats left.
+                if want_error.is_empty() && got.contains("unknown value \"plain\"") {
+                    assert!(got.ends_with("must be one of [text json]"), "{name}: {got}");
+                    return;
+                }
+                let got = got.replace("[text json]", "[text json plain]");
                 assert_eq!(got, want_error, "{name}");
             }
         }
@@ -179,6 +186,20 @@ fn validate_enums_matches_go() {
             text(&case["source"]),
         );
         let got = got.err().map(|error| error.to_string()).unwrap_or_default();
+        if text(&case["logFormat"]) == "plain" && text(&case["error"]).is_empty() {
+            // `plain` is no longer a log format (`feat(log)!`), so what Go accepted is refused,
+            // naming the two formats left.
+            assert_eq!(
+                got,
+                format!(
+                    "{} \"log-format\": unknown value \"plain\", must be one of [text json]",
+                    text(&case["source"])
+                ),
+                "{case}"
+            );
+            continue;
+        }
+        let got = got.replace("[text json]", "[text json plain]");
         assert_eq!(got, text(&case["error"]), "{case}");
     }
 }

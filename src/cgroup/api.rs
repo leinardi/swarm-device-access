@@ -33,7 +33,6 @@ use super::v2plan::FilterCache;
 use super::{v1, v2};
 use go_compat::quote::quote;
 use go_compat::scanner::{self, TokenTooLong};
-use go_slog::LogHandle;
 
 /// One device rule, the shape of runtime-spec's `LinuxDeviceCgroup`, which the Go daemon inlined:
 /// the JSON keys and the omission of an empty type or access and of an absent number are that
@@ -89,11 +88,10 @@ pub fn new(
     version: CgroupVersion,
     ledger: Arc<Ledger>,
     cache: Arc<FilterCache>,
-    log: LogHandle,
 ) -> Box<dyn Interface> {
     match version {
         CgroupVersion::V1 => Box::new(CgroupV1::new(ledger)),
-        CgroupVersion::V2 => Box::new(CgroupV2::new(cache, log)),
+        CgroupVersion::V2 => Box::new(CgroupV2::new(cache)),
     }
 }
 

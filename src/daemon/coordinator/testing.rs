@@ -37,10 +37,10 @@ use crate::docker::{self, CallContext};
 use crate::metrics::{Recorder, Value};
 use crate::policy::Global;
 use crate::processor::{self, Inspector, Processor};
-use crate::test_support::capture_logs;
 use crate::test_support::fake_docker::FakeDocker;
+use crate::test_support::{Logs, capture_logs};
 use clock::{Clock, TokioClock};
-use go_slog::{Level, LogHandle, MemorySink};
+use tracing::level_filters::LevelFilter;
 
 /// How long a wait for something the coordinator will do may take, in paused tokio time.
 pub(crate) const WITHIN: Duration = Duration::from_secs(300);
@@ -191,8 +191,7 @@ pub(crate) struct Harness<R = Arc<FakeReconciler>> {
     pub(crate) docker: Arc<FakeDocker>,
     pub(crate) reconciler: R,
     pub(crate) metrics: Recorder,
-    pub(crate) sink: MemorySink,
-    pub(crate) log: LogHandle,
+    captured: Logs,
     pub(crate) clock: Arc<dyn Clock>,
 }
 
@@ -200,22 +199,20 @@ impl<R: Reconciler + Clone> Harness<R> {
     pub(crate) fn with_clock(docker: FakeDocker, reconciler: R, clock: Arc<dyn Clock>) -> Self {
         let docker = Arc::new(docker);
         let metrics = Recorder::new();
-        let (log, sink) = capture_logs(Level::DEBUG);
+        let captured = capture_logs(LevelFilter::DEBUG);
         let coordinator = Coordinator::new(Settings {
             docker: Arc::clone(&docker),
             reconciler: reconciler.clone(),
             metrics: metrics.clone(),
             timeout: DOCKER_CALL_TIMEOUT,
             clock: Arc::clone(&clock),
-            log: log.clone(),
         });
         Self {
             coordinator,
             docker,
             reconciler,
             metrics,
-            sink,
-            log,
+            captured,
             clock,
         }
     }
@@ -254,7 +251,7 @@ impl<R: Reconciler + Clone> Harness<R> {
     }
 
     pub(crate) fn logs(&self) -> String {
-        self.sink.contents()
+        self.captured.contents()
     }
 
     /// The generation of every "config reload complete" line.
@@ -381,7 +378,7 @@ pub(crate) fn assert_failure_reported(
         (after.last_event - before.last_event).abs() < f64::EPSILON,
         "last_event_timestamp changed on failure: {before:?} -> {after:?}"
     );
-    let line = format!("level=WARN {message} id=bad err=apply failed");
+    let line = format!("level=WARN {message} error=apply failed id=bad");
     assert!(
         logs.lines().any(|logged| logged == line),
         "want {line:?} in:\n{logs}"
@@ -441,6 +438,5 @@ pub(crate) fn hanging_processor() -> Arc<Processor<HangingInspector>> {
         proc_root: "/".to_owned(),
         call_timeout: None,
         clock: Arc::new(TokioClock::new(base())),
-        log: capture_logs(Level::DEBUG).0,
     })
 }

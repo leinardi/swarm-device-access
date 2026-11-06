@@ -22,6 +22,8 @@
 //! millisecond; and one, at the I/O level, a read waiting when the service sets an earlier
 //! deadline. Why hyper's own header timer is not used is go-http's test.
 
+use std::io;
+
 use go_http::{ConnState, TimedIo};
 use tokio::time::Instant;
 

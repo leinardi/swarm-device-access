@@ -58,6 +58,9 @@ go-compat.workspace = true
 clock.workspace = true
 # The daemon's logger, for the harness's own records.
 go-slog.workspace = true
+# What the daemon crate logs through (its events, in the helper that dumps the filters).
+tracing.workspace = true
+tracing-setup.workspace = true
 # The generic half of the harness (rust-common): Go's -run filter, the envid, the sweep rules and
 # the owner labels, the error type, the identity answer and the ELF check, and (with integration)
 # Go's context and testing packages, the redacting logger and the host daemon's sweep and

@@ -73,7 +73,7 @@ pub struct Args {
         default_value = "text",
         allow_hyphen_values = true,
         value_name = "string",
-        help = "Either json, text or plain"
+        help = "Either json or text"
     )]
     pub log_format: String,
 
@@ -224,7 +224,7 @@ pub struct LaunchArgs {
         default_value = "text",
         allow_hyphen_values = true,
         value_name = "string",
-        help = "Launcher log format: json, text or plain"
+        help = "Launcher log format: json or text"
     )]
     pub log_format: String,
 

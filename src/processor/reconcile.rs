@@ -53,12 +53,13 @@ use crate::cgroup::{
 use crate::config::{Publisher, Runtime, Store};
 use crate::docker::types::{ContainerInspect, ContainerState, MountPoint};
 use crate::docker::{self, CallContext, ContextError, DockerApi, with_context};
+use crate::logging;
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global, unknown_labels};
 use crate::task::finish;
 use clock::Clock;
 use go_compat::quote::quote;
-use go_slog::{Attr, LogHandle};
+use tracing::{debug, error, info, warn};
 
 /// How long a provisional record without a cgroup is kept before the sweep drops it: it names no
 /// cgroup, so nothing can be revoked through it.
@@ -102,13 +103,11 @@ pub struct Settings<I> {
     /// leaves the calls bounded by the caller's context only.
     pub call_timeout: Option<Duration>,
     pub clock: Arc<dyn Clock>,
-    pub log: LogHandle,
 }
 
 /// Builds the cgroup controller of a version.
-type NewCgroup = dyn Fn(CgroupVersion, Arc<Ledger>, Arc<FilterCache>, LogHandle) -> Box<dyn Interface>
-    + Send
-    + Sync;
+type NewCgroup =
+    dyn Fn(CgroupVersion, Arc<Ledger>, Arc<FilterCache>) -> Box<dyn Interface> + Send + Sync;
 
 /// Opens the view of `/dev` and sysfs for one pass.
 type OpenDevFs = dyn Fn() -> Result<Box<dyn DevFs>, SysError> + Send + Sync;
@@ -148,7 +147,6 @@ pub struct Processor<I> {
     host_root: String,
     proc_root: String,
     call_timeout: Option<Duration>,
-    log: LogHandle,
     /// Serializes policy evaluation and cgroup mutation across every caller (event loop,
     /// startup enumeration, systemd re-apply, reload). It is held from the config load through
     /// the mutation, not around the mutation alone: otherwise a worker that computed rules under
@@ -217,7 +215,6 @@ impl<I: Inspector> Processor<I> {
             host_root: settings.host_root,
             proc_root: settings.proc_root,
             call_timeout: settings.call_timeout,
-            log: settings.log,
             lock: Mutex::new(Locked::default()),
             ledger: Arc::new(Ledger::default()),
             filter_cache: Arc::new(FilterCache::new()),
@@ -267,9 +264,9 @@ impl<I: Inspector> Processor<I> {
         let context = context.clone();
         let container_id = container_id.to_owned();
         let runtime = Handle::current();
-        finish(self.transactions.spawn_blocking(move || {
+        finish(self.transactions.spawn_blocking(logging::inherit(move || {
             this.reconcile_locked(&runtime, &context, &container_id, inspected)
-        }))
+        })))
         .await
         .unwrap_or(Err(Error::Canceled))
     }
@@ -290,10 +287,9 @@ impl<I: Inspector> Processor<I> {
     ) -> Result<(), Error> {
         let this = Arc::clone(self);
         let container_id = container_id.to_owned();
-        finish(
-            self.transactions
-                .spawn_blocking(move || this.terminate_locked(&container_id, event_time)),
-        )
+        finish(self.transactions.spawn_blocking(logging::inherit(move || {
+            this.terminate_locked(&container_id, event_time)
+        })))
         .await
         .unwrap_or(Err(Error::Canceled))
     }
@@ -306,7 +302,7 @@ impl<I: Inspector> Processor<I> {
         let this = Arc::clone(self);
         finish(
             self.transactions
-                .spawn_blocking(move || this.sweep_locked()),
+                .spawn_blocking(logging::inherit(move || this.sweep_locked())),
         )
         .await
         .unwrap_or(0)
@@ -414,10 +410,7 @@ impl<I: Inspector> Processor<I> {
             .as_ref()
             .filter(|state| state.running && state.pid != 0)
         else {
-            self.log.debug(
-                "container has no live pid; skipping",
-                &[Attr::string("id", container_id)],
-            );
+            debug!(id = %container_id, "container has no live pid; skipping");
             self.metrics.record_container_skipped("no_pid");
             if config.dry_run {
                 return Ok(());
@@ -459,17 +452,7 @@ impl<I: Inspector> Processor<I> {
             }
         }
         if desired.enabled && desired.collected.dev_mounts > 0 {
-            self.log.info(
-                "container processed",
-                &[
-                    Attr::string("id", container_id),
-                    Attr::int("pid", state.pid),
-                    Attr::int("devices_granted", count(desired.rules.len())),
-                    Attr::int("skipped", count(desired.collected.skipped)),
-                    Attr::int("errors", count(desired.collected.device_errs.len())),
-                    Attr::bool("dry_run", config.dry_run),
-                ],
-            );
+            info!(id = %container_id, pid = state.pid, devices_granted = count(desired.rules.len()), skipped = count(desired.collected.skipped), errors = count(desired.collected.device_errs.len()), dry_run = config.dry_run, "container processed");
         }
         desired.incomplete.map_or(Ok(()), Err)
     }
@@ -491,36 +474,18 @@ impl<I: Inspector> Processor<I> {
         // The container's labels are the only label input, so this is the one place a
         // misspelled key can be reported instead of silently ignored.
         for unknown in unknown_labels(&labels) {
-            self.log.warn(
-                "unrecognized swarm-device-access label on container",
-                &[
-                    Attr::string("id", container_id),
-                    Attr::string("label", unknown),
-                ],
-            );
+            warn!(id = %container_id, label = %unknown, "unrecognized swarm-device-access label on container");
         }
         let container = match Container::parse(&labels) {
             Ok(container) => container,
             Err(parse_error) => {
-                self.log.warn(
-                    "container skipped: invalid policy labels",
-                    &[
-                        Attr::string("id", container_id),
-                        Attr::error("err", &parse_error),
-                    ],
-                );
+                warn!(id = %container_id, error = %parse_error, "container skipped: invalid policy labels");
                 self.metrics.record_container_skipped("invalid_labels");
                 return Desired::default();
             }
         };
         if !config.policy.enabled(&container) {
-            self.log.debug(
-                "container skipped by policy",
-                &[
-                    Attr::string("id", container_id),
-                    Attr::string("mode", config.policy.mode().as_str()),
-                ],
-            );
+            debug!(id = %container_id, mode = %config.policy.mode().as_str(), "container skipped by policy");
             self.metrics.record_container_skipped("policy");
             return Desired::default();
         }
@@ -529,13 +494,7 @@ impl<I: Inspector> Processor<I> {
         let collected =
             self.collect_devices(container_id, pid, &info.mounts, &config.policy, &container);
         for device_error in &collected.device_errs {
-            self.log.warn(
-                "device rule failed",
-                &[
-                    Attr::string("id", container_id),
-                    Attr::error("err", device_error),
-                ],
-            );
+            warn!(id = %container_id, error = %device_error, "device rule failed");
         }
         self.metrics
             .add_device_files_discovered(collected.granted.len());
@@ -548,14 +507,7 @@ impl<I: Inspector> Processor<I> {
             };
         }
         self.metrics.add_rule_failures(collected.device_errs.len());
-        self.log.warn(
-            "device set incomplete; no devices are granted until every device resolves",
-            &[
-                Attr::string("id", container_id),
-                Attr::int("errors", count(collected.device_errs.len())),
-                Attr::string("reason", "incomplete_device_set"),
-            ],
-        );
+        warn!(id = %container_id, errors = count(collected.device_errs.len()), reason = %"incomplete_device_set", "device set incomplete; no devices are granted until every device resolves");
         Desired {
             rules: Vec::new(),
             enabled: true,
@@ -595,11 +547,7 @@ impl<I: Inspector> Processor<I> {
                 };
             }
         };
-        let judge = Judge {
-            global,
-            container,
-            log: &self.log,
-        };
+        let judge = Judge { global, container };
         collect_container_rules(&*dev, container_id, pid, mounts, judge, &self.metrics)
     }
 
@@ -607,23 +555,9 @@ impl<I: Inspector> Processor<I> {
     /// nor the cgroup.
     fn log_dry_run(&self, container_id: &str, rules: &[DeviceRule]) {
         for rule in rules {
-            self.log.info(
-                "dry-run: would add device rule",
-                &[
-                    Attr::string("id", container_id),
-                    Attr::string("type", rule.kind.as_str()),
-                    Attr::int("major", rule.major.unwrap_or_default()),
-                    Attr::int("minor", rule.minor.unwrap_or_default()),
-                ],
-            );
+            info!(id = %container_id, type = %rule.kind.as_str(), major = rule.major.unwrap_or_default(), minor = rule.minor.unwrap_or_default(), "dry-run: would add device rule");
         }
-        self.log.info(
-            "dry-run: would set device rules",
-            &[
-                Attr::string("id", container_id),
-                Attr::int("rules", count(rules.len())),
-            ],
-        );
+        info!(id = %container_id, rules = count(rules.len()), "dry-run: would set device rules");
         self.metrics.add_dry_run_skips(rules.len());
     }
 
@@ -636,8 +570,6 @@ impl<I: Inspector> Processor<I> {
         privileged: bool,
         apply_error: Error,
     ) -> Option<Error> {
-        let id = || Attr::string("id", container_id);
-        let path = || Attr::string("cgroup", cgroup_path);
         let retryable = |reason, apply_error| Error::Retryable {
             id: container_id.to_owned(),
             reason,
@@ -646,10 +578,7 @@ impl<I: Inspector> Processor<I> {
         if apply_error.is_cgroup(cgroup::Error::is_filter_missing) && privileged {
             // A privileged container runs without a device filter by design; there is nothing to
             // add grants to and nothing to restrict.
-            self.log.info(
-                "privileged container has no device filter; nothing to do",
-                &[id(), path()],
-            );
+            info!(id = %container_id, cgroup = %cgroup_path, "privileged container has no device filter; nothing to do");
             self.metrics
                 .record_container_skipped("privileged_no_filter");
             return None;
@@ -657,19 +586,18 @@ impl<I: Inspector> Processor<I> {
         if apply_error.is_cgroup(cgroup::Error::is_filter_missing) {
             // Most likely wiped by systemd's daemon-reload before this process saw the cgroup,
             // so the runtime's own filter cannot be rebuilt.
-            self.log.warn(
-                "device filter missing and no cached original; restart the container",
-                &[id(), path(), Attr::string("reason", "filter_missing")],
-            );
+            warn!(id = %container_id, cgroup = %cgroup_path, reason = "filter_missing", "device filter missing and no cached original; restart the container");
             return Some(retryable("filter_missing", apply_error));
         }
         if apply_error.is_cgroup(cgroup::Error::is_unsupported_attach_mode) {
             // Permanent for this container: the runtime chose the attach mode. Nothing was
             // attached or detached, so it keeps only the runtime's own device filter.
-            self.log.error(
+            error!(
+                id = %container_id,
+                cgroup = %cgroup_path,
+                error = %apply_error,
                 "container skipped: device filter attach mode not supported; the runtime must \
                  attach device filters with BPF_F_ALLOW_MULTI",
-                &[id(), path(), Attr::error("err", &apply_error)],
             );
             self.metrics
                 .record_container_skipped("unsupported_attach_mode");
@@ -678,15 +606,13 @@ impl<I: Inspector> Processor<I> {
         if apply_error.is_cgroup(cgroup::Error::is_owned_block_conflict) {
             // Nothing was changed. Only a fresh device filter (a container restart) clears it;
             // retrying keeps the container pending.
-            self.log.error(
+            error!(
+                id = %container_id,
+                cgroup = %cgroup_path,
+                reason = "owned_block_conflict",
+                error = %apply_error,
                 "device filter carries an invalid swarm-device-access block; nothing was \
                  changed, restart the container to replace its device filter",
-                &[
-                    id(),
-                    path(),
-                    Attr::string("reason", "owned_block_conflict"),
-                    Attr::error("err", &apply_error),
-                ],
             );
             return Some(retryable("owned_block_conflict", apply_error));
         }
@@ -740,14 +666,7 @@ impl<I: Inspector> Processor<I> {
             &resolved.mount_prefix,
             &resolved.root,
         );
-        self.log.debug(
-            "cgroup path resolved",
-            &[
-                Attr::int("pid", pid),
-                Attr::int("version", version_number(resolved.version)),
-                Attr::string("path", cgroup_path.as_str()),
-            ],
-        );
+        debug!(pid = pid, version = version_number(resolved.version), path = %cgroup_path.as_str(), "cgroup path resolved");
         let api = self.cgroup_api(resolved.version);
         let handle = match CgroupHandle::open(&cgroup_path) {
             Ok(handle) => handle,
@@ -801,16 +720,7 @@ impl<I: Inspector> Processor<I> {
             },
         );
         for rule in rules {
-            self.log.debug(
-                "setting device rule",
-                &[
-                    Attr::int("pid", pid),
-                    Attr::string("cgroup", cgroup_path.as_str()),
-                    Attr::string("type", rule.kind.as_str()),
-                    Attr::int("major", rule.major.unwrap_or_default()),
-                    Attr::int("minor", rule.minor.unwrap_or_default()),
-                ],
-            );
+            debug!(pid = pid, cgroup = %cgroup_path.as_str(), type = %rule.kind.as_str(), major = rule.major.unwrap_or_default(), minor = rule.minor.unwrap_or_default(), "setting device rule");
         }
         let applied = api
             .set_device_rules(&handle, rules)
@@ -949,13 +859,9 @@ impl<I: Inspector> Processor<I> {
                 continue;
             };
             match cgroup_gone(&cgroup.identity) {
-                Err(stat_error) => self.log.warn(
-                    "could not check container cgroup",
-                    &[
-                        Attr::string("id", record.container_id.as_str()),
-                        Attr::error("err", &stat_error),
-                    ],
-                ),
+                Err(stat_error) => {
+                    warn!(id = %record.container_id.as_str(), error = %stat_error, "could not check container cgroup");
+                }
                 Ok(true) => {
                     self.release(&record, "cgroup gone");
                     released += 1;
@@ -964,13 +870,7 @@ impl<I: Inspector> Processor<I> {
                     if record.state == LifecycleState::Terminal && !record.revoked && !dry_run =>
                 {
                     if let Err(revoke_error) = self.revoke_at(&record, false) {
-                        self.log.warn(
-                            "could not revoke ended container",
-                            &[
-                                Attr::string("id", record.container_id.as_str()),
-                                Attr::error("err", &revoke_error),
-                            ],
-                        );
+                        warn!(id = %record.container_id.as_str(), error = %revoke_error, "could not revoke ended container");
                     }
                 }
                 Ok(false) => {}
@@ -1000,14 +900,7 @@ impl<I: Inspector> Processor<I> {
             Err(set_error) if set_error.is_filter_missing() && may_run && !cgroup.privileged => {
                 // Nothing attached holds a grant, but a container that may still be running is
                 // unfiltered. The container stays pending either way.
-                self.log.warn(
-                    "device filter missing and no cached original; restart the container",
-                    &[
-                        Attr::string("id", record.container_id.as_str()),
-                        Attr::string("cgroup", cgroup.identity.path.as_str()),
-                        Attr::string("reason", "filter_missing"),
-                    ],
-                );
+                warn!(id = %record.container_id.as_str(), cgroup = %cgroup.identity.path.as_str(), reason = %"filter_missing", "device filter missing and no cached original; restart the container");
             }
             // An exited or privileged container has nothing attached, so nothing to revoke.
             Err(set_error) if set_error.is_filter_missing() => {}
@@ -1022,13 +915,7 @@ impl<I: Inspector> Processor<I> {
         }
         self.lifecycles
             .mark_revoked(&record.container_id, &record.started_at);
-        self.log.debug(
-            "device grants revoked",
-            &[
-                Attr::string("id", record.container_id.as_str()),
-                Attr::string("cgroup", cgroup.identity.path.as_str()),
-            ],
-        );
+        debug!(id = %record.container_id.as_str(), cgroup = %cgroup.identity.path.as_str(), "device grants revoked");
         Ok(())
     }
 
@@ -1054,14 +941,7 @@ impl<I: Inspector> Processor<I> {
                 Err(_) | Ok(()) => {}
             }
         }
-        self.log.info(
-            "container moved to another cgroup; previous grants revoked",
-            &[
-                Attr::string("id", record.container_id.as_str()),
-                Attr::string("from", previous.identity.path.as_str()),
-                Attr::string("to", current.path.as_str()),
-            ],
-        );
+        info!(id = %record.container_id.as_str(), from = %previous.identity.path.as_str(), to = %current.path.as_str(), "container moved to another cgroup; previous grants revoked");
         self.ledger.forget(&previous.identity);
         self.filter_cache.forget(&previous.identity);
         Ok(())
@@ -1094,14 +974,7 @@ impl<I: Inspector> Processor<I> {
     /// for that directory (the v1 ledger and the cached v2 filters).
     fn release(&self, record: &LifecycleRecord, why: &str) {
         let path = record.identity().map(|identity| identity.path.as_str());
-        self.log.debug(
-            "container cgroup gone; released",
-            &[
-                Attr::string("id", record.container_id.as_str()),
-                Attr::string("cgroup", path.unwrap_or_default()),
-                Attr::string("why", why),
-            ],
-        );
+        debug!(id = %record.container_id.as_str(), cgroup = %path.unwrap_or_default(), why = %why, "container cgroup gone; released");
         self.lifecycles.release(record);
         if let Some(identity) = record.identity() {
             self.ledger.forget(identity);
@@ -1114,7 +987,6 @@ impl<I: Inspector> Processor<I> {
             version,
             Arc::clone(&self.ledger),
             Arc::clone(&self.filter_cache),
-            self.log.clone(),
         )
     }
 }

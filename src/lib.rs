@@ -27,6 +27,7 @@ pub mod config;
 pub mod daemon;
 pub mod docker;
 pub mod launcher;
+pub mod logging;
 pub mod metrics;
 pub mod policy;
 pub mod processor;

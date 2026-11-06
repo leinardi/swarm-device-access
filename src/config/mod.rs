@@ -44,7 +44,7 @@ use go_compat::quote::quote;
 pub use yaml::{DecodeError, Shape, ShapeError, SyntaxError};
 
 /// The accepted `log-format` values.
-pub const LOG_FORMATS: [&str; 3] = ["text", "json", "plain"];
+pub const LOG_FORMATS: [&str; 2] = ["text", "json"];
 /// The accepted `log-level` values.
 pub const LOG_LEVELS: [&str; 4] = ["debug", "info", "warn", "error"];
 

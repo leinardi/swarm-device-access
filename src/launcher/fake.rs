@@ -46,8 +46,8 @@ use super::engine::{
 use super::spec::{DEFAULT_HOST_DOCKER_SOCKET, DaemonSpec, Options};
 use super::{Console, Launch, LaunchError, Timing};
 use crate::docker::{CallContext, Error};
-use crate::test_support::capture_logs;
-use go_slog::{Level, MemorySink};
+use crate::test_support::{Logs, capture_logs};
+use tracing::level_filters::LevelFilter;
 
 pub(super) const TEST_LAUNCHER_ID: &str =
     "1111111111111111111111111111111111111111111111111111111111111111";
@@ -481,14 +481,14 @@ pub(super) struct TestRun {
     pub(super) fake: FakeEngine,
     pub(super) stdout: Buffer,
     pub(super) stderr: Buffer,
-    pub(super) sink: MemorySink,
+    pub(super) logs: Logs,
     pub(super) launch: Launch<FakeEngine>,
 }
 
 /// Go's `newTestRun`: the default host socket, the test launcher's ID, a 2 s call timeout, a
 /// 5 s budget and a 10 ms poll.
 pub(super) fn test_run(fake: &FakeEngine) -> TestRun {
-    let (log, sink) = capture_logs(Level::DEBUG);
+    let logs = capture_logs(LevelFilter::DEBUG);
     let stdout = Buffer::default();
     let stderr = Buffer::default();
     let mut launch = Launch::new(
@@ -501,7 +501,6 @@ pub(super) fn test_run(fake: &FakeEngine) -> TestRun {
             stdout: Box::new(stdout.clone()),
             stderr: Box::new(stderr.clone()),
         },
-        &log,
     );
     launch.self_id = Box::new(|| Ok(TEST_LAUNCHER_ID.to_owned()));
     launch.timing = Timing {
@@ -513,7 +512,7 @@ pub(super) fn test_run(fake: &FakeEngine) -> TestRun {
         fake: fake.clone(),
         stdout,
         stderr,
-        sink,
+        logs,
         launch,
     }
 }

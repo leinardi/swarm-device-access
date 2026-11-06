@@ -41,10 +41,9 @@ use crate::docker::{CallContext, ErrorKind};
 use crate::metrics::Recorder;
 use crate::policy::Global;
 use crate::task::finish;
+use crate::test_support::eventually;
 use crate::test_support::fake_docker::FakeDocker;
-use crate::test_support::{capture_logs, eventually};
 use clock::{Clock, FakeClock, TokioClock};
-use go_slog::Level;
 
 /// Go: `TestCoordinator_ListFailsThenSucceeds`
 #[tokio::test(start_paused = true)]
@@ -73,14 +72,14 @@ async fn list_fails_then_succeeds() {
     assert!(
         harness.logs().contains(
             "level=WARN could not list containers; reconciliation incomplete, retrying \
-             err=list containers: list failed generation=1"
+             error=list containers: list failed generation=1"
         ),
         "{}",
         harness.logs()
     );
     assert!(harness.logs().contains(
-        "level=WARN reconciliation incomplete; retrying pending_containers=0 \
-         reload_incomplete=true generation=1"
+        "level=WARN reconciliation incomplete; retrying generation=1 pending_containers=0 \
+         reload_incomplete=true"
     ));
     assert!(harness.scalar("sda_reload_incomplete", &[]).abs() < f64::EPSILON);
 }
@@ -118,7 +117,7 @@ async fn pending_gauge_returns_to_zero() {
     assert!(
         harness
             .logs()
-            .contains("level=WARN could not reconcile pending container id=c2 err=apply failed")
+            .contains("level=WARN could not reconcile pending container error=apply failed id=c2")
     );
 }
 
@@ -178,7 +177,7 @@ async fn older_result_cannot_clear_gauges() {
     assert!(
         harness
             .logs()
-            .contains("level=INFO config reload complete generation=2 epoch=2")
+            .contains("level=INFO config reload complete epoch=2 generation=2")
     );
 }
 
@@ -716,7 +715,7 @@ async fn hung_container_list_is_bounded() {
     assert!(
         harness
             .logs()
-            .contains("err=list containers: context deadline exceeded")
+            .contains("error=list containers: context deadline exceeded")
     );
 }
 
@@ -724,14 +723,12 @@ async fn hung_container_list_is_bounded() {
 #[tokio::test(start_paused = true)]
 async fn hung_container_inspect_is_bounded() {
     let docker = Arc::new(FakeDocker::default());
-    let (log, _sink) = capture_logs(Level::DEBUG);
     let coordinator = Coordinator::new(Settings {
         docker,
         reconciler: hanging_processor(),
         metrics: Recorder::noop(),
         timeout: DOCKER_CALL_TIMEOUT,
         clock: Arc::new(TokioClock::new(base())),
-        log,
     });
 
     let result = tokio::time::timeout(
