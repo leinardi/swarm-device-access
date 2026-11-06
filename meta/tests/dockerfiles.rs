@@ -467,7 +467,8 @@ fn version_is_stamped() {
 
 /// The negative control of the stamp rules on samples: a stamp dropped from each place, a version
 /// module that reads none (another prefix, the call commented out, a `buildinfo!` that is not
-/// service-kit's), another prefix and a build recipe that does not stamp are each a problem.
+/// service-kit's), another prefix and a rust-dist or rust-run recipe that does not stamp are each a
+/// problem; an unstamped rust-build is not.
 #[test]
 fn stamp_rules() {
     let version_rs = "use service_kit::buildinfo;\n\
@@ -483,7 +484,13 @@ fn stamp_rules() {
                     \x20 $(RUST_STAMP_PREFIX)_DATE=\x22$(BUILD_DATE)\x22)\n\
                     \n\
                     rust-build: ## Build\n\
-                    \t$(RUST_VERSION_ENV) $(CARGO) build --workspace\n";
+                    \t$(RUST_BUILD_ENV) $(CARGO) build --workspace\n\
+                    \n\
+                    rust-dist: ## Build the binary\n\
+                    \t$(RUST_VERSION_ENV) $(CARGO) build --release\n\
+                    \n\
+                    rust-run: ## Run the binary\n\
+                    \t$(RUST_VERSION_ENV) $(CARGO) run\n";
     let release_mk = "rust_static_build = RUSTFLAGS=\x22x\x22 $(RUST_VERSION_ENV) \\\n\
                       \x20 $(CARGO) zigbuild --release\n";
     let problems = |version_rs: &str, build: &str, makefile: &str, fragment: &str| {
@@ -532,12 +539,23 @@ fn stamp_rules() {
             "{broken_makefile:?} was accepted"
         );
     }
-    let unstamped = fragment.replace("\t$(RUST_VERSION_ENV) $(CARGO)", "\t$(CARGO)");
-    assert_eq!(
-        problems(version_rs, build, makefile, &unstamped).len(),
-        1,
-        "a rust-build recipe without the stamps was accepted"
-    );
+    // rust-dist and rust-run must stamp, each on its own; rust-build may build unstamped, as the
+    // Makefile's `RUST_BUILD_ENV :=` has it.
+    for (target, command) in [
+        ("rust-dist", "$(CARGO) build --release"),
+        ("rust-run", "$(CARGO) run"),
+    ] {
+        let unstamped = fragment.replace(
+            &format!("\t$(RUST_VERSION_ENV) {command}"),
+            &format!("\t{command}"),
+        );
+        assert_ne!(unstamped, fragment, "the {target} sample did not change");
+        assert_eq!(
+            problems(version_rs, build, makefile, &unstamped).len(),
+            1,
+            "a {target} recipe without the stamps was accepted"
+        );
+    }
 }
 
 /// The negative control of the stamp rules on the real files: a stamp moved out of the building
