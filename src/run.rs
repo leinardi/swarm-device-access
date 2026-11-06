@@ -47,9 +47,10 @@ use crate::launcher::{self, spec};
 use crate::metrics::Recorder;
 use crate::processor::{self, Processor, devfs};
 use crate::server::{self, App, MetricsServer};
-use crate::version::{COMMIT, DATE, VERSION};
+use crate::version::BUILD;
 use go_clock::{Clock, SystemClock};
 use go_slog::{Attr, LogHandle, PlainStyle};
+use service_kit::runtime::Exit;
 
 /// The time from the first shutdown signal to the exit: Docker's stop timeout, which the launcher
 /// gives the daemon ([`spec::STOP_TIMEOUT`]).
@@ -61,25 +62,6 @@ const HOST_ROOT_PATH: &str = "/host";
 
 /// The `component` attribute of the launcher's own log lines, Go's `launcherComponent`.
 const LAUNCHER_COMPONENT: &str = "launcher";
-
-/// How [`run_with`] ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Exit {
-    /// The process exit code.
-    pub code: i32,
-    /// The shutdown deadline, once the daemon stopped: what is left of it bounds the runtime's
-    /// shutdown in `main`.
-    pub deadline: Option<Instant>,
-}
-
-impl Exit {
-    fn code(code: i32) -> Self {
-        Self {
-            code,
-            deadline: None,
-        }
-    }
-}
 
 /// Writes `text` to stdout or stderr, as Go's `fmt.Fprint` does, ignoring a write error.
 fn print(stdout: bool, text: &str) {
@@ -138,7 +120,7 @@ pub async fn run_with<I, T, F>(
     getenv: impl Fn(&str) -> Option<String>,
     shutdown: impl FnOnce() -> F,
     hangups: impl FnOnce() -> mpsc::Receiver<()>,
-) -> Exit
+) -> Exit<i32>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString>,
@@ -152,7 +134,7 @@ where
         Ok(parsed) => parsed,
         Err(exit) => {
             print(exit.stdout, &exit.message);
-            return Exit::code(exit.code);
+            return Exit::early(exit.code);
         }
     };
     let hangups = hangups();
@@ -161,7 +143,7 @@ where
         Ok(settings) => settings,
         Err(message) => {
             print(false, &format!("{message}\n"));
-            return Exit::code(1);
+            return Exit::early(1);
         }
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
@@ -181,7 +163,7 @@ where
         Ok(settings) => Arc::new(Client::new(settings)),
         Err(error) => {
             log.error("docker client init failed", &[Attr::error("err", &error)]);
-            return Exit::code(1);
+            return Exit::early(1);
         }
     };
     let recorder = Recorder::new();
@@ -195,7 +177,7 @@ where
         log.clone(),
     );
     let Ok(server) = start_server(&root, &effective.metrics_addr, app, &log).await else {
-        return Exit::code(1);
+        return Exit::early(1);
     };
 
     let processor = Processor::new(processor::Settings {
@@ -250,9 +232,9 @@ fn announce(log: &LogHandle, config_file: &str, current: &Runtime) {
     log.info(
         "swarm-device-access starting",
         &[
-            Attr::string("version", VERSION),
-            Attr::string("commit", COMMIT),
-            Attr::string("date", DATE),
+            Attr::string("version", BUILD.version),
+            Attr::string("commit", BUILD.commit),
+            Attr::string("date", BUILD.date),
             Attr::string("config_file", config_file),
             Attr::bool("dry_run", current.dry_run),
             Attr::string("policy_mode", current.policy.mode().as_str()),
@@ -351,7 +333,7 @@ async fn run_launch<F>(
     arguments: &[OsString],
     getenv: &impl Fn(&str) -> Option<String>,
     shutdown: impl FnOnce() -> F,
-) -> Exit
+) -> Exit<i32>
 where
     F: Future<Output = ()> + Send + 'static,
 {
@@ -359,7 +341,7 @@ where
         Ok(launch) => launch,
         Err(exit) => {
             print(exit.stdout, &exit.message);
-            return Exit::code(exit.code);
+            return Exit::early(exit.code);
         }
     };
     let log = LogHandle::stdout(Arc::new(SystemClock), getenv, PlainStyle::Raw);
@@ -368,9 +350,9 @@ where
         "swarm-device-access launcher starting",
         &[
             Attr::string("component", LAUNCHER_COMPONENT),
-            Attr::string("version", VERSION),
-            Attr::string("commit", COMMIT),
-            Attr::string("date", DATE),
+            Attr::string("version", BUILD.version),
+            Attr::string("commit", BUILD.commit),
+            Attr::string("date", BUILD.date),
             Attr::strings("daemon_args", &launch.daemon_args),
         ],
     );
@@ -385,7 +367,7 @@ where
                     Attr::error("err", &error),
                 ],
             );
-            return Exit::code(1);
+            return Exit::early(1);
         }
     };
     let options = launcher::Options {
@@ -397,7 +379,7 @@ where
     };
     match launcher::run(&context, client, options, &log).await {
         // Go's os.Exit(status): the kernel keeps the low byte.
-        Ok(status) => Exit::code(i32::try_from(status & 0xff).unwrap_or(1)),
+        Ok(status) => Exit::early(i32::try_from(status & 0xff).unwrap_or(1)),
         Err(error) => {
             log.error(
                 "launcher failed",
@@ -406,47 +388,9 @@ where
                     Attr::error("err", &error),
                 ],
             );
-            Exit::code(1)
+            Exit::early(1)
         }
     }
-}
-
-/// Registers `SIGINT` and `SIGTERM` now, and returns what resolves on the first of them. The
-/// handlers stay installed for the life of the process, so later signals are swallowed. Signals
-/// cannot be watched when the runtime has no signal driver; then it never resolves.
-pub fn shutdown_signal() -> impl Future<Output = ()> + Send + 'static {
-    use tokio::signal::unix::{SignalKind, signal};
-    let registered = (
-        signal(SignalKind::interrupt()),
-        signal(SignalKind::terminate()),
-    );
-    async move {
-        let (Ok(mut interrupt), Ok(mut terminate)) = registered else {
-            return std::future::pending().await;
-        };
-        tokio::select! {
-            _ = interrupt.recv() => {}
-            _ = terminate.recv() => {}
-        }
-    }
-}
-
-/// Registers `SIGHUP`, Go's `signal.Notify(sighup, syscall.SIGHUP)`, and forwards each one to a
-/// channel that holds one pending signal, as Go's buffered channel does. The handler stays for
-/// the life of the process, so a `SIGHUP` after the shutdown started is swallowed. Without a
-/// signal driver the channel is closed at once and nothing is reloaded.
-#[must_use]
-pub fn hangup_channel() -> mpsc::Receiver<()> {
-    use tokio::signal::unix::{SignalKind, signal};
-    let (sender, receiver) = mpsc::channel(1);
-    if let Ok(mut hangup) = signal(SignalKind::hangup()) {
-        tokio::spawn(async move {
-            while hangup.recv().await.is_some() {
-                let _ = sender.try_send(());
-            }
-        });
-    }
-    receiver
 }
 
 #[cfg(test)]

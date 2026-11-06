@@ -226,10 +226,19 @@ fn runtime_stage_problems(dockerfile: &str) -> Vec<Problem> {
 /// The stamps of `dockerfile` and `makefile`, against src/version.rs, make-common's rust.mk and
 /// the release fragment's static build recipe.
 fn stamp_problems(dockerfile: &str, makefile: &str) -> Vec<Problem> {
+    stamp_problems_with(
+        dockerfile,
+        makefile,
+        &meta::repo().read(STAMPS.version_file),
+    )
+}
+
+/// [`stamp_problems`], against the version module `version_rs`.
+fn stamp_problems_with(dockerfile: &str, makefile: &str, version_rs: &str) -> Vec<Problem> {
     let repo = meta::repo();
     let build = stage(dockerfile, "build");
     STAMPS.problems(&StampSources {
-        version_rs: &repo.read("src/version.rs"),
+        version_rs,
         build: &build,
         makefile,
         rust_mk: &repo.read(".mk/rust.mk"),
@@ -446,7 +455,8 @@ fn build_stage_rules() {
 
 /// Go: `TestVersionIsStamped`. The version, commit and date the binary reports come from the
 /// build: the image's build stage (in the RUN that runs cargo zigbuild) and the make targets set
-/// the three variables src/version.rs reads at compile time, from the same build arguments and
+/// the three variables src/version.rs reads at compile time (service-kit's `buildinfo!`), from the
+/// same build arguments and
 /// git values; the release binaries' recipe carries them too. A path that stamped nothing would
 /// ship a binary reporting "dev".
 #[test]
@@ -455,13 +465,13 @@ fn version_is_stamped() {
     assert!(problems.is_empty(), "{}", report(&problems));
 }
 
-/// The negative control of the stamp rules on samples: a stamp dropped from each place, another
-/// prefix and a build recipe that does not stamp are each a problem.
+/// The negative control of the stamp rules on samples: a stamp dropped from each place, a version
+/// module that reads none (another prefix, the call commented out, a `buildinfo!` that is not
+/// service-kit's), another prefix and a build recipe that does not stamp are each a problem.
 #[test]
 fn stamp_rules() {
-    let version_rs = "stamp(option_env!(\x22SWARM_DEVICE_ACCESS_VERSION\x22))\n\
-                      stamp(option_env!(\x22SWARM_DEVICE_ACCESS_COMMIT\x22))\n\
-                      stamp(option_env!(\x22SWARM_DEVICE_ACCESS_DATE\x22))\n";
+    let version_rs = "use service_kit::buildinfo;\n\
+                      const BUILD: BuildInfo = buildinfo!(\n    \x22SWARM_DEVICE_ACCESS\x22,\n    D,\n);\n";
     let build = "FROM a:1 AS build\nARG VERSION\nARG COMMIT\nARG DATE\n\
                  RUN SWARM_DEVICE_ACCESS_VERSION=\x22${VERSION}\x22 \
                  SWARM_DEVICE_ACCESS_COMMIT=\x22${COMMIT}\x22 \
@@ -491,12 +501,25 @@ fn stamp_rules() {
         Vec::<String>::new()
     );
     let broken = problems(
-        &version_rs.replace("ACCESS_DATE", "ACCESS_WHEN"),
+        version_rs,
         &build.replace("=\x22${COMMIT}\x22", "=none"),
         makefile,
         &fragment.replace("$(RUST_STAMP_PREFIX)_VERSION=", "VERSION="),
     );
-    assert_eq!(broken.len(), 3, "{broken:#?}");
+    assert_eq!(broken.len(), 2, "{broken:#?}");
+    // The version module: another prefix, the call commented out, and a buildinfo! that is not
+    // service-kit's each read none of the three.
+    for broken_version_rs in [
+        version_rs.replace("\x22SWARM_DEVICE_ACCESS\x22", "\x22SWARM_DEVICE\x22"),
+        version_rs.replace("const BUILD", "// const BUILD"),
+        version_rs.replace("use service_kit::buildinfo;\n", ""),
+    ] {
+        assert_eq!(
+            problems(&broken_version_rs, build, makefile, fragment).len(),
+            3,
+            "{broken_version_rs:?} was accepted"
+        );
+    }
     for broken_makefile in [
         makefile.replace(":= SWARM_DEVICE_ACCESS", ":= SDA"),
         makefile.replace("RUST_STAMP_PREFIX := SWARM_DEVICE_ACCESS\n", ""),
@@ -518,7 +541,8 @@ fn stamp_rules() {
 }
 
 /// The negative control of the stamp rules on the real files: a stamp moved out of the building
-/// RUN, an undeclared argument, and a Makefile whose winning prefix is another.
+/// RUN, an undeclared argument, a version module stamped under another prefix, and a Makefile
+/// whose winning prefix is another.
 #[test]
 fn stamp_rules_refuse_each_edit() {
     let content = shipped();
@@ -540,6 +564,15 @@ fn stamp_rules_refuse_each_edit() {
             "{name} was accepted"
         );
     }
+    let version_rs = meta::repo().read(STAMPS.version_file);
+    let call = "\x22SWARM_DEVICE_ACCESS\x22,";
+    assert!(version_rs.contains(call), "{call:?} is gone");
+    let broken = version_rs.replacen(call, "\x22SWARM_DEVICE\x22,", 1);
+    assert_eq!(
+        stamp_problems_with(&content, &makefile, &broken).len(),
+        3,
+        "another buildinfo! prefix was accepted"
+    );
     let prefix = "RUST_STAMP_PREFIX := SWARM_DEVICE_ACCESS";
     assert!(makefile.contains(prefix), "{prefix:?} is gone");
     for broken in [

@@ -22,9 +22,10 @@
 
 use std::io::Write as _;
 use std::process::ExitCode;
-use std::time::Duration;
 
-use swarm_device_access::run::{hangup_channel, run_with, shutdown_signal};
+use service_kit::runtime::{build_runtime, run_until_exit};
+use service_kit::signal::{hangup_channel, shutdown_signal};
+use swarm_device_access::run::run_with;
 
 /// The runtime's worker threads: the daemon's work is a few Docker calls and blocking cgroup
 /// transactions, which run on the blocking pool, so two workers keep the resident set small.
@@ -34,26 +35,20 @@ const WORKER_THREADS: usize = 2;
 /// what is left of the shutdown budget: dropping a runtime waits for its blocking tasks, with no
 /// bound at all.
 fn main() -> ExitCode {
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(WORKER_THREADS)
-        .enable_all()
-        .build()
-    {
+    let runtime = match build_runtime(Some(WORKER_THREADS)) {
         Ok(runtime) => runtime,
         Err(error) => {
             let _ = writeln!(std::io::stderr(), "tokio runtime: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let exit = runtime.block_on(run_with(
-        std::env::args_os(),
-        |key| std::env::var(key).ok(),
-        shutdown_signal,
-        hangup_channel,
-    ));
-    let remaining = exit.deadline.map_or(Duration::ZERO, |deadline| {
-        deadline.saturating_duration_since(tokio::time::Instant::now())
+    let code = run_until_exit(runtime, || {
+        run_with(
+            std::env::args_os(),
+            |key| std::env::var(key).ok(),
+            shutdown_signal,
+            hangup_channel,
+        )
     });
-    runtime.shutdown_timeout(remaining);
-    ExitCode::from(u8::try_from(exit.code).unwrap_or(1))
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
