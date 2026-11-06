@@ -32,11 +32,11 @@ use tokio_util::task::TaskTracker;
 
 use self::events::{Listener, subscribe};
 use crate::docker::{CallContext, DockerApi};
-use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
 use crate::processor::{Inspector, Processor};
 use crate::systemd::{self, OnReload};
 use go_clock::Clock;
+use go_slog::{Attr, LogHandle};
 
 /// The first delay of a retry: a failed container, a failed list, a lost event stream.
 pub const MIN_BACKOFF: Duration = Duration::from_secs(1);

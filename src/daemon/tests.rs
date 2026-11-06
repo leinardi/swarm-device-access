@@ -32,7 +32,6 @@ use super::{DOCKER_CALL_TIMEOUT, OnSubscribed, Options, Readiness, run_with};
 use crate::config::{Runtime, new_store};
 use crate::docker::CallContext;
 use crate::docker::types::{Actor, Event};
-use crate::logger::{Level, MemorySink};
 use crate::metrics::{Recorder, Value};
 use crate::policy::Global;
 use crate::processor::{self, Processor};
@@ -40,6 +39,7 @@ use crate::systemd::OnReload;
 use crate::test_support::fake_docker::{Call, FakeDocker};
 use crate::test_support::{capture_logs, eventually};
 use go_clock::{Clock, TokioClock};
+use go_slog::{Level, MemorySink};
 
 /// A running daemon over the fake Docker.
 struct Daemon {

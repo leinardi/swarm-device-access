@@ -32,13 +32,13 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use go_clock::FakeClock;
+use go_slog::{Config, Format, Level, LogHandle, Logger, MemorySink};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use swarm_device_access::docker::{
     CallContext, Client, DockerApi as _, ErrorKind, EventStream as _, Filters, StreamErrorKind,
 };
 use swarm_device_access::launcher::{Console, Engine, Launch, Options};
-use swarm_device_access::logger::{Config, Format, Level, LogHandle, Logger, MemorySink};
 use tokio::io::AsyncWrite;
 
 use support::OrPanic as _;
@@ -280,6 +280,7 @@ async fn the_launcher_sends_the_go_launcher_s_requests() {
             format: Format::Plain,
             level: Level::DEBUG,
             include_time: false,
+            plain_style: go_slog::PlainStyle::Raw,
         },
         Box::new(sink.clone()),
         TimeZone::UTC,

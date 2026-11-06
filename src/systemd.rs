@@ -39,8 +39,8 @@ use tokio_util::sync::CancellationToken;
 use zbus::message::Type;
 use zbus::{Connection, DBusError, MatchRule, Message, MessageStream, Structure, Variant};
 
-use crate::logger::{Attr, LogHandle};
 use go_compat::errno::io_error_text;
+use go_slog::{Attr, LogHandle};
 
 const SYSTEMD_BUS_NAME: &str = "org.freedesktop.systemd1";
 const SYSTEMD_OBJECT_PATH: &str = "/org/freedesktop/systemd1";

@@ -24,8 +24,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Notify, mpsc};
 
 use super::*;
-use crate::logger::Level;
 use crate::test_support::{TempDir, capture_logs};
+use go_slog::Level;
 
 const TEST_OWNER: &str = ":1.1";
 

@@ -29,11 +29,11 @@ use rustix::io::Errno;
 use super::devfs::{DEV_ROOT, DevFs, DevNode, DeviceId, NodeKind, SysError, WalkControl};
 use crate::cgroup::DeviceRule;
 use crate::docker::types::MountPoint;
-use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global};
 use go_compat::filepath;
 use go_compat::quote::quote;
+use go_slog::{Attr, LogHandle};
 
 /// Bounds the names enumerated under one directory mount. A walk that cannot see every name
 /// cannot know that no alias denies a device it did see, so overflow is an error, not a cutoff.

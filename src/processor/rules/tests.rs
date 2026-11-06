@@ -25,13 +25,13 @@ use std::collections::{HashMap, HashSet};
 use rustix::io::Errno;
 
 use super::*;
-use crate::logger::Level;
 use crate::policy::{LABEL_DEVICE_ALLOW, LABEL_DEVICE_DENY};
 use crate::processor::devfs::{RealDevFs, probe_openat2};
 use crate::processor::fake_devfs::{
     DEV_CARD, DEV_NULL, DEV_REND, DEV_SDA, FakeDevFs, FakeNode, char_dev,
 };
 use crate::test_support::capture_logs;
+use go_slog::Level;
 
 fn globs(list: &[&str]) -> Option<Vec<String>> {
     (!list.is_empty()).then(|| list.iter().map(|glob| (*glob).to_owned()).collect())

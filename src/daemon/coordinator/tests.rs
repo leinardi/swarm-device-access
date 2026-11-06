@@ -38,13 +38,13 @@ use super::{Coordinator, Inspected, PROCESSED_TTL, PassOutcome, Reconciler, Sett
 use crate::config::Runtime;
 use crate::daemon::{DOCKER_CALL_TIMEOUT, MIN_BACKOFF};
 use crate::docker::{CallContext, ErrorKind};
-use crate::logger::Level;
 use crate::metrics::Recorder;
 use crate::policy::Global;
 use crate::task::finish;
 use crate::test_support::fake_docker::FakeDocker;
 use crate::test_support::{capture_logs, eventually};
 use go_clock::{Clock, FakeClock, TokioClock};
+use go_slog::Level;
 
 /// Go: `TestCoordinator_ListFailsThenSucceeds`
 #[tokio::test(start_paused = true)]

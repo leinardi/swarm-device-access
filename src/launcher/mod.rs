@@ -69,7 +69,7 @@ use tokio::task::JoinHandle;
 
 use crate::daemon::DOCKER_CALL_TIMEOUT;
 use crate::docker::{CallContext, Client, Error, with_context};
-use crate::logger::{Attr, LogHandle};
+use go_slog::{Attr, LogHandle};
 
 /// The `component` attribute of every launcher log line.
 const COMPONENT: &str = "launcher";

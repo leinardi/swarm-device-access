@@ -51,11 +51,11 @@ use tokio_util::task::TaskTracker;
 use super::{MAX_BACKOFF, MIN_BACKOFF};
 use crate::docker::types::{ContainerSummary, Event};
 use crate::docker::{self, CallContext, DockerApi, with_context};
-use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
 use crate::processor::{self, Inspector, PassRequester, Processor};
 use crate::task::finish;
 use go_clock::Clock;
+use go_slog::{Attr, LogHandle};
 
 /// How long an enumerated container's entry suppresses a start event that is not newer than its
 /// inspect. After twice [`MAX_BACKOFF`] the overlap window between enumeration and the event

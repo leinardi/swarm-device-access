@@ -32,7 +32,7 @@ use super::owned::{
 };
 use super::v2::CgroupV2;
 use super::v2ops::{F_ALLOW_MULTI, V2Ops};
-use crate::logger::{Attr, LogHandle};
+use go_slog::{Attr, LogHandle};
 
 /// Remembers, per cgroup identity, the runtime originals (and the wrapper nonce of each lineage)
 /// that were attached the last time this daemon looked. systemd's daemon-reload can detach every

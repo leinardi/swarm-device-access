@@ -41,8 +41,8 @@ use crate::docker::{
     self, CallContext, ContextError, DockerApi, EventStream, Filters, StreamError, StreamErrorKind,
     with_context,
 };
-use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
+use go_slog::{Attr, LogHandle};
 
 /// The event actions subscribed to: `start` and `unpause` reconcile a container, `die` and
 /// `destroy` end a run and clean up after it.

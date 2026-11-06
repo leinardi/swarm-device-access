@@ -44,12 +44,12 @@ use crate::config::{self, Runtime};
 use crate::daemon::{self, DOCKER_CALL_TIMEOUT, Readiness};
 use crate::docker::{self, CallContext, Client};
 use crate::launcher::{self, spec};
-use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
 use crate::processor::{self, Processor, devfs};
 use crate::server::{self, App, MetricsServer};
 use crate::version::{COMMIT, DATE, VERSION};
 use go_clock::{Clock, SystemClock};
+use go_slog::{Attr, LogHandle, PlainStyle};
 
 /// The time from the first shutdown signal to the exit: Docker's stop timeout, which the launcher
 /// gives the daemon ([`spec::STOP_TIMEOUT`]).
@@ -165,7 +165,7 @@ where
         }
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let log = LogHandle::stdout(Arc::clone(&clock), &getenv);
+    let log = LogHandle::stdout(Arc::clone(&clock), &getenv, PlainStyle::Raw);
     log.configure(
         &effective.log_format,
         &effective.log_level,
@@ -362,7 +362,7 @@ where
             return Exit::code(exit.code);
         }
     };
-    let log = LogHandle::stdout(Arc::new(SystemClock), getenv);
+    let log = LogHandle::stdout(Arc::new(SystemClock), getenv, PlainStyle::Raw);
     log.configure(&launch.args.log_format, &launch.args.log_level, false);
     log.info(
         "swarm-device-access launcher starting",

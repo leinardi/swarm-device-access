@@ -31,8 +31,8 @@ use std::time::Duration;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-use crate::logger::{Config, Format, Level, LogHandle, Logger, MemorySink};
 use go_clock::FakeClock;
+use go_slog::{Config, Format, Level, LogHandle, Logger, MemorySink};
 
 /// A temporary directory, removed on drop. Moved out of SSE's `src/docker/tests.rs` at the same
 /// commit.
@@ -83,6 +83,7 @@ pub(crate) fn capture_logs(level: Level) -> (LogHandle, MemorySink) {
             format: Format::Plain,
             level,
             include_time: false,
+            plain_style: go_slog::PlainStyle::Raw,
         },
         Box::new(sink.clone()),
         TimeZone::UTC,

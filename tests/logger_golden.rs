@@ -36,12 +36,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use go_slog::{Attr, Config, Format, Level, Logger, MemorySink, Time, Value, parse_level};
 use jiff::Timestamp;
 use jiff::tz::{Offset, TimeZone};
 use serde_json::Value as Json;
-use swarm_device_access::logger::{
-    Attr, Config, Format, Level, Logger, MemorySink, Time, Value, parse_level,
-};
 
 fn testdata(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -121,6 +119,7 @@ fn log_corpus(format: Format, include_time: bool) -> String {
             format,
             level: Level::DEBUG,
             include_time,
+            plain_style: go_slog::PlainStyle::Raw,
         },
         Box::new(sink.clone()),
         TimeZone::fixed(record_time.offset),

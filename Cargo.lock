@@ -391,6 +391,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "go-slog"
+version = "0.1.0"
+source = "git+https://github.com/leinardi/rust-common?rev=afba1366f69b523a3143a0bc8cb312aac302c4d9#afba1366f69b523a3143a0bc8cb312aac302c4d9"
+dependencies = [
+ "go-clock",
+ "go-compat",
+ "jiff",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1069,6 +1079,7 @@ dependencies = [
  "futures-core",
  "go-clock",
  "go-compat",
+ "go-slog",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -1139,6 +1150,7 @@ dependencies = [
  "futures-util",
  "go-clock",
  "go-compat",
+ "go-slog",
  "jiff",
  "regex",
  "rustix",

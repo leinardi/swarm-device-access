@@ -27,11 +27,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use go_clock::SystemClock;
+use go_slog::LogHandle;
 use swarm_device_access::cgroup::{
     DeviceRule, KernelOps, OWNED_PROGRAM_NAME, V2Ops as _, canonical_bytes, emit_owned,
     from_canonical,
 };
-use swarm_device_access::logger::LogHandle;
 
 /// The nonce and rules the `.wrapped` fixtures were produced with.
 const FIXTURE_NONCE: u64 = 0x0123_4567_89ab_cdef;
@@ -71,7 +71,11 @@ fn load_and_dump(ops: &KernelOps, raw: &[u8], name: &str) -> Result<Vec<u8>, Box
 
 #[test]
 fn fixtures_load_and_dump_as_captured() -> Result<(), Box<dyn Error>> {
-    let ops = KernelOps::new(LogHandle::stdout(Arc::new(SystemClock), |_| None));
+    let ops = KernelOps::new(LogHandle::stdout(
+        Arc::new(SystemClock),
+        |_| None,
+        go_slog::PlainStyle::Raw,
+    ));
     for name in ["runc", "crun", "systemd"] {
         let original = read_fixture(&format!("{name}.orig"))?;
         assert_eq!(

@@ -21,9 +21,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use super::*;
 use crate::config::{Store, new_store};
-use crate::logger::{Level, MemorySink};
 use crate::policy::Mode;
 use crate::test_support::capture_logs;
+use go_slog::{Level, MemorySink};
 
 /// The flag defaults, as [`Settings::from_flags`] returns them without any flag.
 fn default_settings() -> Settings {

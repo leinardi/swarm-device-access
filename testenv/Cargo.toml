@@ -54,6 +54,8 @@ swarm-device-access = { path = ".." }
 go-compat.workspace = true
 # The wall clock the harness and its logs read.
 go-clock.workspace = true
+# The daemon's logger, for the harness's own records.
+go-slog.workspace = true
 # The sweep's started label, read as RFC 3339.
 jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 # The run filter: Go's -run patterns are regular expressions.

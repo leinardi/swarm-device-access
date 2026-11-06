@@ -20,7 +20,7 @@
 //! The shared helpers' own tests.
 
 use super::*;
-use crate::logger::Attr;
+use go_slog::Attr;
 
 #[test]
 fn capture_logs_records_what_is_logged_at_the_level() {

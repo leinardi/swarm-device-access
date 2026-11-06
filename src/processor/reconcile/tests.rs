@@ -38,13 +38,13 @@ use super::*;
 use crate::cgroup::{Conflict, GateError, OwnedError};
 use crate::config::new_store;
 use crate::docker::types::{ContainerConfig, HostConfig};
-use crate::logger::{Level, MemorySink};
 use crate::policy::{LABEL_ENABLE, LABEL_PREFIX, Mode};
 use crate::processor::devfs::NodeKind;
 use crate::processor::fake_devfs::{DEV_CARD, DEV_NULL, DEV_SDA, FakeDevFs, FakeNode};
 use crate::processor::pin::PinError;
 use crate::test_support::{TempDir, capture_logs};
 use go_clock::FakeClock;
+use go_slog::{Level, MemorySink};
 
 const RECONCILE_PID: i64 = 80;
 const RECONCILE_STARTED: &str = "2026-09-27T10:00:00.000000000Z";

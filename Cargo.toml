@@ -93,6 +93,9 @@ publish = false
 go-compat.workspace = true
 # The injected wall clock (rust-common): Clock, SystemClock, TokioClock, FakeClock.
 go-clock.workspace = true
+# Go's log/slog handlers and the plain format, byte for byte (rust-common), in the Raw plain
+# style with Go's fallback level and format parsing, through a LogHandle.
+go-slog.workspace = true
 # The flags (Q1). No color: help and errors are plain text, as Go's were.
 clap = { version = "4.6.7", default-features = false, features = [
     "std",

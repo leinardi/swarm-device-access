@@ -53,12 +53,12 @@ use crate::cgroup::{
 use crate::config::{Publisher, Runtime, Store};
 use crate::docker::types::{ContainerInspect, ContainerState, MountPoint};
 use crate::docker::{self, CallContext, ContextError, DockerApi, with_context};
-use crate::logger::{Attr, LogHandle};
 use crate::metrics::Recorder;
 use crate::policy::{Container, Global, unknown_labels};
 use crate::task::finish;
 use go_clock::Clock;
 use go_compat::quote::quote;
+use go_slog::{Attr, LogHandle};
 
 /// How long a provisional record without a cgroup is kept before the sweep drops it: it names no
 /// cgroup, so nothing can be revoked through it.

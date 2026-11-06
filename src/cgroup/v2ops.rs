@@ -34,9 +34,9 @@ use rustix::io::Errno;
 use super::asm::{DecodeError, EncodeCause, Instruction};
 use super::bpf_sys;
 use super::owned::ProgMeta;
-use crate::logger::{Attr, LogHandle};
 use go_compat::errno::errno_string;
 use go_compat::quote::is_space;
+use go_slog::{Attr, LogHandle};
 
 /// `BPF_F_ALLOW_OVERRIDE`.
 pub const F_ALLOW_OVERRIDE: u32 = 1;

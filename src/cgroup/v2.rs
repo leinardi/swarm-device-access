@@ -31,7 +31,7 @@ use super::v2ops::{F_ALLOW_MULTI, KernelOps, PROCESS_REPLACE_PROBE, ReplaceProbe
 use super::v2plan::{
     CacheEntry, FilterCache, PassPlan, group_wrappers, missing_lineages, plan_grant, plan_restore,
 };
-use crate::logger::{Attr, LogHandle};
+use go_slog::{Attr, LogHandle};
 
 /// The cgroup v2 device controller: the daemon's grants as a wrapper around each runtime device
 /// filter, changed through `ops`.
