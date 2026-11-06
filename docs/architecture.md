@@ -305,7 +305,7 @@ counts per-device failures.
 
 | Module | Responsibility |
 | --- | --- |
-| `src/main.rs`, `src/run.rs` | Entrypoint: the runtime, startup checks (`openat2` probe, `RLIMIT_MEMLOCK`), logger, store, Docker client, metrics server, processor and `daemon::run`; the shutdown budget; the `SIGHUP` reload task; `launch` dispatch |
+| `src/main.rs`, `src/run.rs` | Entrypoint: the runtime (service-kit's `build_runtime` and `run_until_exit`), startup checks (`openat2` probe, `RLIMIT_MEMLOCK`), logger, store, Docker client, metrics server, processor and `daemon::run`; the shutdown budget (service-kit's `shutdown_signal`); the `SIGHUP` reload task (`hangup_channel`); `launch` dispatch |
 | `src/cli.rs`, `src/cli/settings.rs` | The daemon's and `launch`'s flags (double-dash only, Q1); settings merge (command line over file over default), validation, restart-only changes and the `SIGHUP` `Reloader` |
 | `src/launcher` | Launcher mode: self-identification (`self_id.rs`), the daemon container spec (`spec.rs`, `daemon_spec`, the privileged set), stale-daemon cleanup (`stale.rs`), the write-capable Engine client (`engine.rs`), attach/wait/start and supervision |
 | `src/config` | Strict YAML loader (`load_file`, shape checks), runtime config `Store` with generations and its single `Publisher` |
@@ -313,12 +313,11 @@ counts per-device failures.
 | `src/daemon` | Event loop (`run`, `events.rs`: `listen_events`, `consume_events`) and the coordinator (`coordinator.rs`) that owns passes, retries, the `processed` dedup, container reservations and `process_one` |
 | `src/processor` | `reconcile`, `terminate`, `sweep`, `publish_and_reconcile` (`reconcile.rs`); desired-set computation (`rules.rs`: `collect_mount_rules`; `devfs.rs`), process pinning (`pin.rs`), lifecycle history (`lifecycle.rs`) |
 | `src/cgroup` | Device-rule application behind `Interface::set_device_rules(handle, rules)`: cgroup v1 (`v1.rs`, `v1set.rs`, `ledger.rs`) and v2 (`v2.rs`, `v2plan.rs`, `v2ops.rs`, `owned.rs`, `ebpf.rs`, `asm.rs`, `bpf_sys.rs`); cgroup handles (`handle.rs`); `/proc` cgroup parsing (`api.rs`). NVIDIA-derived code. |
-| `src/docker` | The daemon's read-only Docker Engine client: `GET` plus the `HEAD /_ping` of API version negotiation, over the configured unix socket only; the decoded types and the event stream |
-| `src/metrics`, `src/server.rs`, `src/server` | Prometheus metrics (`Recorder`, with a no-op form) and their text exposition; the `/metrics`, `/healthz` and `/readyz` server with Go's `http.Server` deadlines |
-| `src/logger` | slog-compatible logger with `text`, `json` and `plain` handlers, shared through a `LogHandle` |
+| `src/docker` | The daemon's read-only `DockerApi` on rust-common's `docker-engine` client: `GET` plus the `HEAD /_ping` of API version negotiation, over the configured unix socket only; the decoded types and the event stream; `Client::transport`, which only the launcher's engine takes |
+| `src/metrics`, `src/server.rs`, `src/server` | Prometheus metrics (`Recorder`, with a no-op form) on `go-prom`'s registry and text exposition (`ExpfmtVersion::V0_70_1`); the `/metrics`, `/healthz` and `/readyz` routes on `go-http`'s server with Go's `http.Server` deadlines (`TIMEOUTS`: 5 s, 10 s, 30 s, 60 s) |
 | `src/systemd.rs` | D-Bus watcher for systemd's `Reloading` signal (zbus) |
-| `src/go_compat` | Ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts) |
-| `src/clock.rs`, `src/task.rs`, `src/version.rs` | The one wall-clock read behind the injected `Clock`; awaiting spawned work to completion; the build's version stamps |
+| `src/task.rs`, `src/version.rs` | Awaiting spawned work to completion; the build's version stamps (`BUILD`, service-kit's `buildinfo!`) |
+| rust-common crates | `go-slog`: slog-compatible logger with `text`, `json` and `plain` (`PlainStyle::Raw`) handlers and Go's fallback level and format parsing, shared through a `LogHandle`; `go-compat`: ports of the Go standard library's formatting and parsing the 1.x contract depends on (durations, quoting, floats, `ParseBool`, `filepath.Match`, `errors.Join`, time layouts); `go-clock`: the one wall-clock read behind the injected `Clock` |
 
 ## Policy model
 
