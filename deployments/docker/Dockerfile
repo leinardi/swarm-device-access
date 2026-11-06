@@ -111,11 +111,13 @@ ARG VERSION="dev"
 ARG COMMIT="none"
 ARG DATE="unknown"
 
-# The registry and the target directory are BuildKit caches, so the binary is copied out of them.
-# The registry cache is shared by both platforms' builds, which run in parallel: sharing=locked
-# serialises them, since two cargo processes unpacking the same crate into it fail with
-# "File exists". The target cache is per platform and needs no lock.
+# The registry, the git checkouts (the rust-common crates) and the target directory are BuildKit
+# caches, so the binary is copied out of them. The registry and git caches are shared by both
+# platforms' builds, which run in parallel: sharing=locked serialises them, since two cargo
+# processes unpacking the same crate into one fail with "File exists". The target cache is per
+# platform and needs no lock.
 RUN --mount=type=cache,target=/root/.cargo/registry,id=cargo-registry,sharing=locked \
+	--mount=type=cache,target=/root/.cargo/git,id=cargo-git,sharing=locked \
 	--mount=type=cache,target=/src/target,id=cargo-target-${TARGETARCH} \
 	triple="$(cat /tmp/triple)" \
 	&& SWARM_DEVICE_ACCESS_VERSION="${VERSION}" \
