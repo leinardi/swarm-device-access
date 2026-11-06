@@ -249,9 +249,9 @@ Before accepting a new helper, search for the one that already exists in the wor
 `meta/**`, `testenv/**`) and in the rust-common crates it depends on, by *behavior*, not by the
 name the author chose. Shared code is changed in rust-common, never forked here. Check the logger, the
 `/dev` mount check, the injected clock, backoff, the metrics recorder and its no-op form, test
-waits and the go-compat ports. The reuse ledger in `docs/rust-port.md` lists the SSE and SRD
-code a component must start from. Two implementations of the same rule drift apart, and the one the
-reviewer did not read is the one that keeps the bug.
+waits and the in-tree `text` and `lexpath` helpers. The reuse ledger in `docs/rust-port.md` lists
+the SSE and SRD code a component must start from. Two implementations of the same rule drift
+apart, and the one the reviewer did not read is the one that keeps the bug.
 
 ### (e) Docs drift for config and flags
 

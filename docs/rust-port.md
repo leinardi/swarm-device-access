@@ -11,10 +11,13 @@ candidates.
   cutover commit, which removed the Go code. The 1.x Go sources stay in the git history and in
   the published 1.x images; the last one, v1.0.3, is the Go daemon of the integration suite's
   upgrade and rollback test.
-- Behaviour stays identical to 1.x except for the numbered intended differences, Q1 and later,
-  which the README's [Migrating from 1.x](../README.md#-migrating-from-1x) section lists. **Any
-  other difference is a defect.** 1.x, as its captures and the published v1.0.3 record it, is the
-  behavioural authority.
+- 2.0 keeps the 1.x contract that operators depend on (the image, `launch`, the config keys, the
+  labels, the `sda_` metric names, the device-filter encoding that makes an in-place upgrade or
+  rollback keep every grant) and is not byte-compatible with 1.x elsewhere. The numbered intended
+  differences, Q1 to Q17, are listed in the README's
+  [Migrating from 1.x](../README.md#-migrating-from-1x) section. **A difference that is not
+  listed there and not an improvement is a defect.** The one binary-level interop that stays
+  pinned is the device-filter goldens; the other Go captures below are history.
 - General Rust coding guidance lives in the maintainer's user-level skills; `AGENTS.md` records
   project rules. The porting traps found along the way were collected in a `go-to-rust-port` skill
   kept in this repository during the port and moved back to the maintainer's user skills after the field
@@ -88,7 +91,7 @@ Rejected:
 
 ## Intended differences from 1.x
 
-The numbered differences from 1.x (Q1 to Q15) are listed once, in the README's
+The numbered differences from 1.x (Q1 to Q17) are listed once, in the README's
 [Migrating from 1.x](../README.md#-migrating-from-1x) section, where users read them. Their
 numbers are stable: the module comments, the tests and this file refer to them. A new difference
 is added there, with the next number, in the commit that introduces it, and only when a test

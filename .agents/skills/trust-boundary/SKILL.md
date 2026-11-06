@@ -243,9 +243,9 @@ with the seven required OCI labels of `droast.toml`.
 The daemon serves HTTP only when told to: `--metrics-addr` (metrics, `/healthz`, `/readyz`) is
 empty by default, there is no debug listener (`--debug-addr` must be empty, Q2), and the
 launcher's daemon has network `none` unless `--host-network` is set. Whatever listens is reachable
-by anything on that network, so the server (`src/server.rs`) enforces 1.x's `http.Server`
-deadlines on every connection from the accept (`TIMEOUTS` in `src/server.rs`, kept by go-http's
-`Timeouts`: 5 s to read the request head, 10 s to read the request, 30 s to write, 60 s idle): a
+by anything on that network, so the server (`src/server.rs`) enforces deadlines on every
+connection from the accept (`HEADER_READ_TIMEOUT` and `WRITE_STALL_TIMEOUT`, on service-kit's `http`
+server: 5 s to read the request head, a 30 s write stall, a 5 s drain): a
 client that never finishes its headers cannot hold a connection open. The handlers read no request
 body and take no input that becomes a decision.
 

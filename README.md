@@ -450,14 +450,33 @@ win.
 ## 🔁 Migrating from 1.x
 
 Version 2.0 replaces the Go daemon with a Rust one. The image name, the
-`launch` mode, the config file keys, the labels, the log lines, the error texts
-and the `sda_` metrics are those of 1.x; what differs is in the numbered table
-below. Every flag now takes two dashes (Q1): update the `command:` of the Swarm
-service, both the launch flags and the daemon flags after `--`, before you
-deploy 2.0. A 1.x command line such as `- -log-level=info` makes the 2.0
-launcher or daemon exit with status 2 and
-`error: single-dash long flags are not supported: '-log-level'; use '--log-level'`,
-and Swarm keeps restarting the task until the command is fixed.
+`launch` mode, the config file keys, the container labels and the `sda_`
+metric names are unchanged. The wire formats and texts around them are not
+byte-compatible with 1.x: the log format (Q13), the metrics exposition (Q14),
+the HTTP server's wire behaviour (Q11), error wording (Q6, Q8, Q10, Q12, Q16,
+Q17) and several input spellings (Q1, Q17) differ, as the numbered table below
+lists, together with every behaviour 2.0 dropped (Q2, Q3, Q5).
+
+Upgrade checklist:
+
+1. Every flag takes two dashes (Q1): update the `command:` of the Swarm
+   service, both the launch flags and the daemon flags after `--`, before you
+   deploy 2.0. A 1.x command line such as `- -log-level=info` makes the 2.0
+   launcher or daemon exit with status 2 and
+   `error: single-dash long flags are not supported: '-log-level'; use '--log-level'`,
+   and Swarm keeps restarting the task until the command is fixed.
+2. Boolean flags take `true` or `false` only, and a container label
+   `swarm-device-access.enable` must be `true` or `false`; `1`, `t`, `yes` and
+   the other spellings are refused, and the container is not enabled (Q17).
+3. Check every `--device-allow`, `--device-deny` and label glob: backslash
+   escapes, `**`, `[!x]`, negated classes (`[^x]`) and classes that could match
+   `/` are rejected at load (Q17).
+4. Move off `--log-format=plain`, `--debug-addr` and the `GO*` runtime
+   variables (Q2, Q5, Q13), and update log parsers (`error` replaces `err`) and
+   scrapers or dashboards that expect `go_*` families, the 0.0.4 text format or
+   gzip (Q3, Q4, Q14).
+5. Config values written as `0x10` or `1_000` read as strings, not numbers
+   (Q17).
 
 Upgrading in place keeps every grant: the 2.0 daemon recognises the device
 filters 1.x attached, and a rollback to 1.x recognises the ones 2.0 attached,

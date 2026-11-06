@@ -38,7 +38,7 @@ src/
     v2.rs, v2plan.rs, v2ops.rs, owned.rs, ebpf.rs, asm.rs  # owned wrapper around runtime filter
     bpf_sys.rs             # raw bpf(2); the only unsafe module
   docker/                  # read-only DockerApi on docker-client/bollard (GET only, unix socket only)
-  metrics/, server.rs      # Recorder (noop form) on go-prom; /metrics, /healthz, /readyz on go-http
+  metrics/, server.rs      # Recorder (noop form) on prometheus-client; /metrics, /healthz, /readyz on service-kit http
   systemd.rs               # zbus D-Bus Reloading watcher
   version.rs               # BUILD stamps (service-kit's buildinfo!)
 tests/                     # goldens vs frozen 1.x captures (tests/testdata), wire, parity

@@ -181,13 +181,12 @@ the rust-common crates)**
   write-stall timeout and a 5 s drain). There is no pprof server (Q2).
 - clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`. Settings, labels,
   policy globs and `/proc` lines are read with std and the `glob` crate (`policy::glob`, `text`,
-  `lexpath`); the daemon does not depend on go-compat (Q17).
+  `lexpath`).
 
 ## Shared crates (rust-common)
 
 `clock`, `docker-client`,
-`service-kit`, `tracing-setup`, `testenv-core` (with `redact-go-slog` until the testenv is ported)
-and `repo-meta` come from
+`service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
 commit (`rev`) while the upstream-stack work is in flight, in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
