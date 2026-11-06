@@ -62,7 +62,7 @@ and `Cargo.lock` and checked by `cargo deny`.
 
 | Crate | Where | Reason |
 | --- | --- | --- |
-| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by `rev` (the upstream-stack work) in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies (`socket2` and `flate2` come with go-http and go-prom). |
+| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by `rev` (the upstream-stack work) in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies. |
 | `clap` 4 (derive, no colour) | daemon | The CLI, as in SSE (Q1). |
 | `tokio` (`net`, `time`, `sync`, `rt`, `io-util`, `io-std`, `macros`) | daemon; testenv (dev-dependency) | The sockets, the timers that follow the paused clock, `spawn_blocking` for the cgroup transaction, the launcher's output pump; in testenv the suite's daemon child processes. The runtime and the signal watches are service-kit's. |
 | `tokio-util` | daemon | `CancellationToken`, Go's context cancellation, and the `TaskTracker` of the blocking transactions. |
