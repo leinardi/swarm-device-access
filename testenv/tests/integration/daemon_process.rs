@@ -77,13 +77,13 @@ pub type Matcher<'matcher> = &'matcher dyn Fn(&Record) -> bool;
 /// Go's `forContainer`: records with `message` about `container_id`.
 pub fn for_container(message: &str, container_id: &str) -> impl Fn(&Record) -> bool {
     let (message, container_id) = (message.to_owned(), container_id.to_owned());
-    move |record| text(record, "msg") == message && text(record, "id") == container_id
+    move |record| text(record, "message") == message && text(record, "id") == container_id
 }
 
 /// Go's `withMsg`: records with `message`.
 pub fn with_msg(message: &str) -> impl Fn(&Record) -> bool {
     let message = message.to_owned();
-    move |record| text(record, "msg") == message
+    move |record| text(record, "message") == message
 }
 
 /// What the collecting tasks and the waits share.
@@ -257,17 +257,17 @@ impl DaemonLog {
         .await?;
         let watcher = self
             .wait(test, "systemd reload watcher outcome", &|record| {
-                let message = text(record, "msg");
+                let message = text(record, "message");
                 message == MSG_WATCHER_STARTED || message == MSG_WATCHER_UNAVAILABLE
             })
             .await?;
-        let requests = if text(&watcher, "msg") == MSG_WATCHER_STARTED {
+        let requests = if text(&watcher, "message") == MSG_WATCHER_STARTED {
             2
         } else {
             1
         };
         self.wait(test, "startup passes complete", &|record| {
-            text(record, "msg") == MSG_REQUEST_DONE && number(record, "epoch") == Some(requests)
+            text(record, "message") == MSG_REQUEST_DONE && number(record, "epoch") == Some(requests)
         })
         .await?;
         Ok(())

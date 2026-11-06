@@ -41,23 +41,16 @@ integration = [
     "testenv-core/async",
     "testenv-core/bollard",
     "testenv-core/redact",
-    "testenv-core/redact-go-slog",
     "dep:bollard",
     "dep:futures-util",
 ]
 
 [dependencies]
-# The daemon's slog-compatible logger, the wall clock, Go's time.ParseDuration and
-# Duration.String, strconv.Quote and errors.Join, and the label and launcher constants the suite
-# checks. The dependency only goes this way: the daemon package names testenv in no table (the
+# The label and launcher constants the suite checks. The dependency only goes this way: the daemon package names testenv in no table (the
 # docker_boundary meta-test checks its sources), so nothing here reaches the shipped binary.
 swarm-device-access = { path = ".." }
-# Go's strconv.Quote and Duration formatting, as the daemon writes them.
-go-compat.workspace = true
 # The wall clock the harness and its logs read.
 clock.workspace = true
-# The daemon's logger, for the harness's own records.
-go-slog.workspace = true
 # What the daemon crate logs through (its events, in the helper that dumps the filters).
 tracing.workspace = true
 tracing-setup.workspace = true

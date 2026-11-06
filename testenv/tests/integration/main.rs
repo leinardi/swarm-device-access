@@ -52,14 +52,10 @@ use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::time::Duration;
 
 use bollard::query_parameters::ListContainersOptions;
 use clock::{Clock as _, SystemClock};
-use go_compat::duration;
-use go_compat::local_zone::local_zone;
-use go_slog::Attr;
 use testenv::cleanup_command;
 use testenv::config::{ENV_IDS, LABELS};
 use testenv::enforce::{DUMP_FLAG, dump_device_programs};
@@ -69,7 +65,7 @@ use testenv::host::{
 use testenv::identity::check_identity;
 use testenv_core::context::Context;
 use testenv_core::identity::{IDENTITY_FLAG, is_static_elf};
-use testenv_core::redact::RedactingLogger;
+use testenv_core::redact::Logger;
 use testenv_core::run_filter::RunFilter;
 use testenv_core::sweep_rules::current_owner;
 use testenv_core::testing::{Runner, RunnerConfig, TallyStyle, Test, TimeoutRule, say};
@@ -284,8 +280,7 @@ async fn set_up(ctx: &Context, timeout: Duration) -> Result<(), String> {
     let owner = current_owner().map_err(|error| error.to_string())?;
     let labels = LABELS.run_labels(&env_id, &owner, SystemClock.now());
     say(&format!(
-        "integration run {env_id} (deadline {}); if it is killed, remove leftovers with:\n  {}",
-        duration::format(i64::try_from(timeout.as_nanos()).unwrap_or(i64::MAX)),
+        "integration run {env_id} (deadline {timeout:?}); if it is killed, remove leftovers with:\n  {}",
         cleanup_command(&env_id)
     ));
 
@@ -305,12 +300,7 @@ async fn set_up(ctx: &Context, timeout: Duration) -> Result<(), String> {
     ));
 
     let rules = default_sweep_rules(&env_id, &owner).map_err(|error| error.to_string())?;
-    let log = RedactingLogger::new(
-        Box::new(std::io::stderr()),
-        local_zone(|key| std::env::var(key).ok()),
-        Arc::new(SystemClock),
-    )
-    .with_attrs(&[Attr::string("envid", env_id.clone())]);
+    let log = Logger::stderr().with_fields(&[("envid", env_id.as_str())]);
     HOST_SWEEP.sweep(&setup, &docker, &rules, &log).await;
 
     install(Suite {

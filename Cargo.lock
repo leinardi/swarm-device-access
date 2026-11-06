@@ -466,24 +466,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
-name = "go-compat"
-version = "0.3.0"
-source = "git+https://github.com/leinardi/rust-common?rev=2a7e90b9d973340c075dd32cff77d8344adda798#2a7e90b9d973340c075dd32cff77d8344adda798"
-dependencies = [
- "jiff",
-]
-
-[[package]]
-name = "go-slog"
-version = "0.3.0"
-source = "git+https://github.com/leinardi/rust-common?rev=2a7e90b9d973340c075dd32cff77d8344adda798#2a7e90b9d973340c075dd32cff77d8344adda798"
-dependencies = [
- "clock",
- "go-compat",
- "jiff",
-]
-
-[[package]]
 name = "granit-parser"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1383,8 +1365,6 @@ dependencies = [
  "bollard",
  "clock",
  "futures-util",
- "go-compat",
- "go-slog",
  "rustix",
  "serde_json",
  "swarm-device-access",
@@ -1400,7 +1380,6 @@ version = "0.3.0"
 source = "git+https://github.com/leinardi/rust-common?rev=2a7e90b9d973340c075dd32cff77d8344adda798#2a7e90b9d973340c075dd32cff77d8344adda798"
 dependencies = [
  "bollard",
- "go-slog",
  "jiff",
  "regex",
  "rustix",

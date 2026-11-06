@@ -27,7 +27,6 @@
 //! The flag, the matching of a whole answer, the excerpt and the ELF check are testenv-core's
 //! `identity`; the two answers and the messages are this suite's.
 
-use go_compat::quote;
 use testenv_core::Error;
 use testenv_core::identity::{Answer, IDENTITY_FLAG, Quoting, Text, excerpt};
 
@@ -64,11 +63,10 @@ pub fn check_identity(
     }
     Err(Error::new(format!(
         "{subject} is not the Rust daemon: {IDENTITY_FLAG} exited {exit_code} with stdout {} and \
-         stderr {}, want exit {RUST_REFUSAL_EXIT_CODE} with {} on stderr alone (a Go build \
+         stderr {}, want exit {RUST_REFUSAL_EXIT_CODE} with {RUST_REFUSAL:?} on stderr alone (a Go build \
          prints its usage and exits 0)",
         excerpt(stdout, Quoting::Go),
         excerpt(stderr, Quoting::Go),
-        quote::quote(RUST_REFUSAL)
     )))
 }
 
@@ -105,11 +103,10 @@ pub fn check_go_identity(
     }
     Err(Error::new(format!(
         "{subject} is not the Go daemon: {IDENTITY_FLAG} exited {exit_code} with stdout {} and \
-         stderr {}, want exit {GO_HELP_EXIT_CODE} with stderr starting {} (the Rust daemon \
+         stderr {}, want exit {GO_HELP_EXIT_CODE} with stderr starting {GO_USAGE_PREFIX:?} (the Rust daemon \
          refuses the flag with exit {RUST_REFUSAL_EXIT_CODE})",
         excerpt(stdout, Quoting::Go),
         excerpt(stderr, Quoting::Go),
-        quote::quote(GO_USAGE_PREFIX)
     )))
 }
 
