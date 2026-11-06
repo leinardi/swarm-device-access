@@ -17,7 +17,7 @@
 //! End-to-end parity of the binary with the Go 1.x release (`v1.0.3`): the command line's exit
 //! codes and texts, and one daemon run on a scripted Engine (startup, a `SIGHUP` reload that
 //! applies, one that is rejected, a scrape and a `SIGTERM`), compared by the requests it sent
-//! the Engine and the `sda_` families it exposed. The log lines are not compared: the daemon
+//! the Engine; its scrape is checked for what the run recorded, as OpenMetrics text. The log lines are not compared: the daemon
 //! logs through `tracing`, so their format is no longer Go's (the run only waits for the
 //! events it logs).
 //!
@@ -462,7 +462,8 @@ struct Run {
     logs: Vec<String>,
     memlock: Vec<String>,
     requests: Vec<String>,
-    metrics: Vec<String>,
+    /// The body of the `/metrics` scrape.
+    scrape: String,
     exit: Option<i32>,
 }
 
@@ -587,41 +588,6 @@ fn mask(line: &str, dir: &Path, port: u16) -> String {
     masked
 }
 
-/// The samples whose value is a time: how long the dry-run passes took, and when the last
-/// container was processed.
-const TIMED_SAMPLES: [&str; 2] = [
-    "sda_apply_duration_seconds_sum ",
-    "sda_last_event_timestamp_seconds ",
-];
-
-/// The `sda_` families of a scrape, values included but those of [`TIMED_SAMPLES`], which are
-/// masked once checked to be positive numbers.
-fn sda_families(scrape: &str) -> Vec<String> {
-    scrape
-        .lines()
-        .filter(|line| {
-            line.starts_with("sda_")
-                || line.starts_with("# HELP sda_")
-                || line.starts_with("# TYPE sda_")
-        })
-        .map(|line| {
-            let timed = TIMED_SAMPLES
-                .iter()
-                .find_map(|name| line.strip_prefix(name).map(|value| (name, value)));
-            match timed {
-                Some((name, value)) => {
-                    let value: f64 = value
-                        .parse()
-                        .unwrap_or_else(|error| panic!("{line}: {error}"));
-                    assert!(value > 0.0, "{line}");
-                    format!("{name}<time>")
-                }
-                None => line.to_owned(),
-            }
-        })
-        .collect()
-}
-
 /// The `RLIMIT_MEMLOCK` warning, which depends on the host's privileges and limits.
 const MEMLOCK_LINE: &str = "could not remove RLIMIT_MEMLOCK; loading BPF device filters may fail";
 
@@ -719,7 +685,7 @@ fn run_daemon(binary: &str, go: bool) -> Run {
         logs,
         memlock,
         requests: requests.iter().map(|line| mask(line, &dir, port)).collect(),
-        metrics: sda_families(&scrape),
+        scrape,
         exit,
     }
 }
@@ -763,11 +729,22 @@ fn a_daemon_run_matches_go_s() {
         sorted(&go_requests),
         "the Engine requests"
     );
-    assert_eq!(
-        rust.metrics,
-        read_lines("go-metrics.txt"),
-        "the sda_ families"
-    );
+    // The scrape is OpenMetrics text, no longer Go's: the semantic tests of the recorder
+    // (`src/metrics/recorder/tests.rs`) check the families; here the daemon's own run shows up.
+    for line in [
+        "# TYPE sda_events counter\n",
+        "# TYPE sda_apply_duration_seconds histogram\n",
+        "# TYPE sda_reconcile_pending_containers gauge\n",
+        "sda_events_total{event=\"start\"} 1\n",
+        "# EOF\n",
+    ] {
+        assert!(
+            rust.scrape.contains(line),
+            "{line:?} not in:\n{}",
+            rust.scrape
+        );
+    }
+    assert!(!rust.scrape.contains("promhttp_"), "{}", rust.scrape);
 }
 
 /// Writes the Go side from the binary `SDA_GO_BINARY` names, the `v1.0.3` release.
@@ -787,7 +764,6 @@ fn capture_go_parity() {
     for (name, text) in [
         ("go-cli.txt", cli),
         ("go-requests.txt", run.requests.join("\n") + "\n"),
-        ("go-metrics.txt", run.metrics.join("\n") + "\n"),
     ] {
         std::fs::write(testdata(name), text)
             .unwrap_or_else(|error| panic!("write {name}: {error}"));

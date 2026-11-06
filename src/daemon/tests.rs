@@ -32,7 +32,8 @@ use super::{DOCKER_CALL_TIMEOUT, OnSubscribed, Options, Readiness, run_with};
 use crate::config::{Runtime, new_store};
 use crate::docker::CallContext;
 use crate::docker::types::{Actor, Event};
-use crate::metrics::{Recorder, Value};
+use crate::metrics::Recorder;
+use crate::metrics::testing::Scrape;
 use crate::policy::Global;
 use crate::processor::{self, Processor};
 use crate::systemd::OnReload;
@@ -210,15 +211,8 @@ async fn run_reapplies_on_a_completed_reload() {
     let on_reload = reloaded.await.unwrap();
     on_reload();
     eventually("the re-apply pass", WITHIN, || docker.list_calls() == 2).await;
-    let reapplies = daemon
-        .metrics
-        .registry()
-        .unwrap()
-        .gather()
-        .into_iter()
-        .find(|family| family.name == "sda_reload_reapplies_total")
-        .map(|family| family.series[0].value.clone());
-    assert_eq!(reapplies, Some(Value::Scalar(1.0)));
+    let reapplies = Scrape::of(&daemon.metrics).value("sda_reload_reapplies_total", &[]);
+    assert_eq!(reapplies, Some(1.0));
     daemon.stop().await;
 }
 

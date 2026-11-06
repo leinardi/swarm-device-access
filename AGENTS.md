@@ -173,15 +173,17 @@ the rust-common crates)**
 - `systemd` — D-Bus `Reloading` signal watcher (zbus). Triggers re-apply on the **completion** edge
   only (signal body `active=false`). The start edge (`true`) is mid-reload and races the cgroup
   wipe. Degrades to retrying in the background when D-Bus is unreachable.
-- `metrics`, `server` — the Prometheus `Recorder` (with a no-op form) on go-prom's registry
-  (`ExpfmtVersion::V0_70_1`), and the `/metrics`, `/healthz` and `/readyz` routes on go-http's
-  server with the daemon's `TIMEOUTS` (5 s, 10 s, 30 s, 60 s). There is no pprof server (Q2).
+- `metrics`, `server` — the Prometheus `Recorder` (with a no-op form) on prometheus-client's
+  registry (typed label sets, counters registered without `_total`, service-kit's
+  `ProcessCollector`), exposed as OpenMetrics text, and the `/metrics`, `/healthz` and `/readyz`
+  routes on go-http's server with the daemon's `TIMEOUTS` (5 s, 10 s, 30 s, 60 s). There is no
+  pprof server (Q2).
 - go-compat — the Go standard library's formatting and parsing the 1.x log, error and flag text
   depends on; clock — the one wall-clock read (`SystemClock`), behind the injected `Clock`.
 
 ## Shared crates (rust-common)
 
-`go-compat`, `clock`, `go-prom`, `go-http` (with `http-framing`), `docker-engine`,
+`go-compat`, `clock`, `go-http` (with `http-framing`), `docker-engine`,
 `service-kit`, `tracing-setup`, `testenv-core` (with `redact-go-slog` until the testenv is ported)
 and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
@@ -192,7 +194,7 @@ its own features.
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
   this daemon passes `Options` with no target and no span fields (tracing-setup),
-  `ExpfmtVersion::V0_70_1` (go-prom), its `TIMEOUTS` (go-http), moby's `User-Agent` and no
+  its `TIMEOUTS` (go-http), moby's `User-Agent` and no
   response-header timeout with only the `write` and `attach` features (docker-engine), its envid,
   labels and resources (`testenv/src/config.rs`) and runner settings
   (`testenv/tests/integration/main.rs`) to testenv-core, and

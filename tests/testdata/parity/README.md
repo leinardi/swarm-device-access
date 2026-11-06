@@ -15,10 +15,9 @@ SDA_GO_BINARY=/path/to/swarm-device-access-v1.0.3 cargo test --test parity -- --
   metrics address) sent the Engine on the test's scripted Engine (the startup, a `SIGHUP` reload
   that applies, one that is rejected, a scrape and `SIGTERM`), with the user agent up to its
   architecture.
-- `go-metrics.txt`: the `sda_` families of its scrape.
 
 The run masks what changes from run to run: the version stamps, the temporary directory, the metrics
-port, the events `since` and the two time-valued samples. The daemon's log lines are not compared
+port and the events `since`. The daemon's log lines are not compared
 since it logs through `tracing`; the `RLIMIT_MEMLOCK` warning, which depends on the host, is checked
 on its own. The `.conf` files are the YAML config fixtures,
 named so that the YAML hooks leave them as they are, of the command-line cases: `tab-value.conf` has

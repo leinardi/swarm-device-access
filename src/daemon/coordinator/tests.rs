@@ -685,7 +685,7 @@ async fn process_one_startup_success_records_metrics() {
 
     let after = harness.snapshot();
     assert!((after.applied_ok - before.applied_ok - 1.0).abs() < f64::EPSILON);
-    assert_eq!(after.duration_count - before.duration_count, 1);
+    assert!((after.duration_count - before.duration_count - 1.0).abs() < f64::EPSILON);
     let now = f64::from(i32::try_from(harness.now().as_second()).unwrap());
     assert!((after.last_event - now).abs() < f64::EPSILON);
     assert!(

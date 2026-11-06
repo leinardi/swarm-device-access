@@ -27,12 +27,11 @@
 //!
 //! - the routes: `/healthz` always `ok`; `/readyz` `ok` once the daemon is subscribed to the
 //!   Docker events, `not ready` with a 503 before (the injected [`Readiness`]), each with Go's
-//!   sniffed type; `/metrics` promhttp's answer for the [`Recorder`]'s registry, always in the
-//!   text format (Q4);
+//!   sniffed type; `/metrics` the [`Recorder`]'s registry as OpenMetrics text (Q4), uncompressed;
 //! - the server's timeouts, [`TIMEOUTS`]: 5 s for the request head, 10 s to read the request,
 //!   30 s to write the answer and 60 s idle;
-//! - a listen error's text, Go's `net.OpError` with no prefix; `net/http`'s own messages, Go's
-//!   `log.Printf` lines on stderr in the logger's zone;
+//! - a listen error's text, Go's `net.OpError` with no prefix; `net/http`'s own messages, logged
+//!   as warnings;
 //! - [`start_metrics_server`]: the listener is bound before it returns, as Go's `net.Listen`
 //!   binds it, so a busy or invalid address is a startup error; a server error is logged; the
 //!   stop runs once, from the caller or the context, and drains the open connections for five
@@ -53,9 +52,8 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::daemon::Readiness;
-use crate::metrics::exposition::{self, Exposition};
-use crate::metrics::promhttp::HandlerMetrics;
-use crate::metrics::{Recorder, Registry};
+use crate::metrics::Exposition;
+use crate::metrics::Recorder;
 use tracing::{error, info, warn};
 
 pub use go_http::MetricsRequest;
@@ -113,11 +111,7 @@ fn mux(
     Mux::new()
         .route(METRICS_PATH, move |request| {
             let exposition = metrics(&MetricsRequest::of(request));
-            Reply::metrics(
-                &exposition.content_type,
-                exposition.content_encoding,
-                exposition.body,
-            )
+            Reply::metrics(exposition.content_type, None, exposition.body)
         })
         .route(HEALTHZ_PATH, |_| healthz())
         .route(READYZ_PATH, move |_| readyz(&readiness))
@@ -142,26 +136,11 @@ fn readyz(readiness: &Readiness) -> Reply {
     }
 }
 
-/// promhttp's `Handler()`: the registry gathered and rendered for the scrape, inside its
-/// handler metrics (in flight while it runs, counted under 200 after).
-fn scrape_metrics(recorder: &Recorder, scrape: &MetricsRequest) -> Exposition {
-    let in_flight = recorder.handler_metrics().map(HandlerMetrics::begin);
-    let families = recorder
-        .registry()
-        .map(Registry::gather)
-        .unwrap_or_default();
-    let encodings: Vec<&str> = scrape.accept_encoding.iter().map(String::as_str).collect();
-    let exposition = exposition::render(
-        go_prom::ExpfmtVersion::V0_70_1,
-        &families,
-        scrape.accept.as_deref(),
-        &encodings,
-        scrape.names.as_ref(),
-    );
-    if let Some(in_flight) = in_flight {
-        in_flight.finish(StatusCode::OK.as_u16());
-    }
-    exposition
+/// The scrape's answer: the recorder's registry as OpenMetrics text. promhttp's `Accept`,
+/// `Accept-Encoding` and `name[]` handling is gone with it: the exposition is always that text,
+/// uncompressed and unfiltered.
+fn scrape_metrics(recorder: &Recorder, _scrape: &MetricsRequest) -> Exposition {
+    recorder.exposition()
 }
 
 /// Go's `StartMetricsServer` failing: `metrics server: listen on <address>: <cause>`.

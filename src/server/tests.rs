@@ -45,11 +45,14 @@ fn capture_time() -> Timestamp {
     "2026-10-27T15:18:56Z".parse().unwrap()
 }
 
-/// An exposition of `body` in the text format, as promhttp answers a scrape with no `Accept`.
+/// The `Content-Type` of the Go wire captures, promhttp's text format.
+const GO_TEXT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8; escaping=underscores";
+
+/// An exposition of `body` as the Go captures carry it: promhttp's content type, which the
+/// replayed captures compare byte for byte.
 fn text_exposition(body: &'static [u8]) -> Exposition {
     Exposition {
-        content_type: exposition::content_type(go_prom::ExpfmtVersion::V0_70_1, None),
-        content_encoding: None,
+        content_type: GO_TEXT_TYPE,
         body: body.to_vec(),
     }
 }
@@ -108,8 +111,8 @@ async fn exchange_text(app: App, request: &str) -> String {
 }
 
 /// Go: `TestMetricsServer_Endpoints`. `/healthz` is always `ok`, `/readyz` answers 503 until the
-/// daemon is ready and 200 after, and `/metrics` serves the recorder's registry (its process
-/// and handler families; Go's `go_*` families are gone, Q3).
+/// daemon is ready and 200 after, and `/metrics` serves the recorder's registry as OpenMetrics text
+/// (its `sda_` and process families; Go's `go_*` and promhttp's families are gone, Q3 and Q13).
 #[tokio::test(start_paused = true)]
 async fn metrics_server_endpoints() {
     let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
@@ -152,17 +155,20 @@ async fn metrics_server_endpoints() {
     let metrics = send(app(), get("/metrics")).await;
     assert!(metrics.starts_with("HTTP/1.1 200 OK\r\n"), "{metrics}");
     assert!(
-        metrics.contains("promhttp_metric_handler_requests_in_flight 1\n"),
+        metrics.contains(
+            "Content-Type: application/openmetrics-text; version=1.0.0; charset=utf-8\r\n"
+        ),
         "{metrics}"
     );
+    assert!(metrics.contains("# EOF\n"), "{metrics}");
     assert!(metrics.contains("process_"), "{metrics}");
+    assert!(!metrics.contains("promhttp_"), "{metrics}");
     assert!(!metrics.contains("go_goroutines"), "{metrics}");
 }
 
-/// The scrape is counted under its status once answered, as promhttp's instrumentation counts
-/// it: the second scrape sees the first.
+/// A scrape shows what the recorder has recorded so far, and no `Accept-Encoding` makes it gzip.
 #[tokio::test(start_paused = true)]
-async fn scrapes_are_counted() {
+async fn a_scrape_shows_the_recorder() {
     let recorder = Recorder::new();
     let app = || {
         App::new(
@@ -171,13 +177,17 @@ async fn scrapes_are_counted() {
             Arc::new(FakeClock::new(capture_time())),
         )
     };
-    let request = "GET /metrics HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
-    exchange_text(app(), request).await;
+    let request = "GET /metrics HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip\r\n\
+                   Connection: close\r\n\r\n";
+    let first = exchange_text(app(), request).await;
+    assert!(!first.contains("sda_events_total{"), "{first}");
+    recorder.record_event("start");
     let second = exchange_text(app(), request).await;
     assert!(
-        second.contains("promhttp_metric_handler_requests_total{code=\"200\"} 1\n"),
+        second.contains("sda_events_total{event=\"start\"} 1\n"),
         "{second}"
     );
+    assert!(!second.contains("Content-Encoding"), "{second}");
 }
 
 /// Q2 (Go: `TestDebugServer_ProfileCompletes`, whose pprof server is gone): an empty
@@ -193,19 +203,15 @@ fn refuse_debug_addr_is_q2() {
     );
 }
 
-/// promhttp reads the first `Accept`, every `Accept-Encoding` and the `name[]` filter; a gzip
-/// answer carries its `Content-Encoding` ahead of the `Content-Type`.
+/// The server still hands the metrics function the first `Accept`, every `Accept-Encoding` and the
+/// `name[]` filter (go-http's `MetricsRequest`), though the OpenMetrics answer ignores them.
 #[tokio::test(start_paused = true)]
 async fn the_scrape_request_reaches_the_metrics_function() {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = Arc::clone(&seen);
     let app = app_of(mux_with(true, move |scrape: &MetricsRequest| {
         recorded.lock().unwrap().push(scrape.clone());
-        Exposition {
-            content_type: exposition::content_type(go_prom::ExpfmtVersion::V0_70_1, None),
-            content_encoding: Some("gzip"),
-            body: b"z".to_vec(),
-        }
+        text_exposition(b"z")
     }));
     let response = exchange_text(
         app,
@@ -216,8 +222,8 @@ async fn the_scrape_request_reaches_the_metrics_function() {
     .await;
     assert!(
         response.starts_with(
-            "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Type: text/plain; \
-             version=0.0.4; charset=utf-8; escaping=underscores\r\nDate: "
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8; \
+             escaping=underscores\r\nDate: "
         ),
         "{response}"
     );

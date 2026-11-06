@@ -43,9 +43,9 @@ docker-engine = { git = "https://github.com/leinardi/rust-common", rev = "2179ec
 clock = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 go-compat = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 go-http = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
-go-prom = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 go-slog = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 repo-meta = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
+prometheus-client = { version = "0.25.1", default-features = false }
 service-kit = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 testenv-core = { git = "https://github.com/leinardi/rust-common", rev = "2179ec42584417bcea437b90b168f632890babe6" }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
@@ -100,9 +100,8 @@ clock.workspace = true
 # rust-common's tracing-setup (a reloadable subscriber for SIGHUP).
 tracing.workspace = true
 tracing-setup.workspace = true
-# The Prometheus Go client's registry and text exposition, byte for byte (rust-common), with
-# prometheus/common v0.70.1's content negotiation (ExpfmtVersion::V0_70_1).
-go-prom.workspace = true
+# The metrics: the registry, the counters, gauges and histogram, and the OpenMetrics text encoder.
+prometheus-client.workspace = true
 # Go's net/http server on hyper (rust-common): the mux's answers, header order and framing, the
 # four server deadlines, net.Listen's bind and the drain, for the metrics and health endpoints.
 go-http.workspace = true
@@ -170,7 +169,7 @@ tokio = { version = "1.54.1", default-features = false, features = [
 ] }
 # The runtime main builds (two workers, its shutdown bounded by the budget's deadline) and the
 # SIGINT, SIGTERM and SIGHUP watches it hands run_with, all installed at once (rust-common).
-service-kit = { workspace = true, features = ["runtime"] }
+service-kit = { workspace = true, features = ["runtime", "process-metrics"] }
 
 [dev-dependencies]
 # TempDir, eventually and OrPanic, which the unit and wire tests share.
@@ -179,8 +178,6 @@ docker-engine = { workspace = true, features = ["write", "attach", "test-util"] 
 serde_json = "1.0.154"
 # The log capture of the unit tests (Capture, set_default).
 tracing-setup = { workspace = true, features = ["testing"] }
-# The Go tests' gatherSeries and seriesID, for the collectors' tests.
-go-prom = { workspace = true, features = ["testing"] }
 # The Go wire captures' replay (Capture, replay).
 go-http = { workspace = true, features = ["testing"] }
 # The fake Engine of tests/parity.rs: hyper's HTTP/1 server.
