@@ -115,6 +115,7 @@ where
         clock,
     } = options;
     let since = clock.now();
+    let listener_clock = Arc::clone(&clock);
 
     // Events that arrive during the enumeration below wait, with backpressure on the socket,
     // until the listener reads them. A failed subscription leaves none; the listener then
@@ -179,6 +180,7 @@ where
         metrics: &metrics,
         readiness: &readiness,
         timeout: call_timeout,
+        clock: listener_clock.as_ref(),
     };
     listener.listen_events(context, since, stream).await;
 

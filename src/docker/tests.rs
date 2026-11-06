@@ -55,9 +55,8 @@ fn calls(engine: &FakeEngine) -> Vec<Request> {
 }
 
 /// The answers convert to the fields the daemon reads, the first call asks the engine for its API
-/// version (bollard 0.21.1 sends its requests without a version prefix whatever it negotiated:
-/// its `Url::join` of an absolute path drops it) and every request carries the program's
-/// `User-Agent`.
+/// version and every later request is sent under it (`/v1.45/...`), and every request carries the
+/// program's `User-Agent`.
 #[tokio::test]
 async fn the_answers_convert_and_the_requests_carry_the_user_agent() {
     let inspect = format!(
@@ -102,13 +101,13 @@ async fn the_answers_convert_and_the_requests_carry_the_user_agent() {
         1
     );
     let requests = calls(&engine);
-    let paths: Vec<_> = requests.iter().map(Request::path).collect();
+    let paths: Vec<_> = requests.iter().map(Request::raw_path).collect();
     assert_eq!(
         paths,
         [
-            "/_ping",
-            "/containers/json",
-            &format!("/containers/{ID}/json")
+            "/v1.45/_ping",
+            "/v1.45/containers/json",
+            &format!("/v1.45/containers/{ID}/json")
         ]
     );
     assert!(requests.iter().all(|request| request.method == "GET"));
@@ -121,7 +120,7 @@ async fn the_answers_convert_and_the_requests_carry_the_user_agent() {
     assert_eq!(requests[1].query(), "");
 }
 
-/// An engine that cannot negotiate (no `/version`) is spoken to at bollard's version, once: the
+/// An engine that cannot negotiate (no `/version`) is spoken to at the client's own version, once: the
 /// failed negotiation is not repeated before every call.
 #[tokio::test]
 async fn a_failed_negotiation_is_not_an_error_and_not_repeated() {
@@ -323,4 +322,20 @@ fn a_socket_that_does_not_exist_is_refused_up_front() {
         error.to_string().contains("/nonexistent/docker.sock"),
         "{error}"
     );
+}
+
+/// A record of a value this program's models do not know (here an event `Type` a newer Engine
+/// introduced) fails the whole decode, which the stream reports as a decode error: the event
+/// loop's skip-to-now (`src/daemon/events.rs`) exists for it.
+#[tokio::test]
+async fn an_unknown_event_type_is_a_decode_error() {
+    let unknown = r#"{"Type":"brand-new-type","Action":"start","Actor":{"ID":"c1"},"time":1,"timeNano":1000000000}"#;
+    let engine = FakeEngine::start(&[("/events", Reply::events(&[unknown]))]).unwrap();
+    let docker = client(&engine, CALL);
+    let mut stream = docker
+        .events(Timestamp::UNIX_EPOCH, &Filters::new())
+        .await
+        .unwrap();
+    let end = stream.next().await.unwrap_err();
+    assert_eq!(end.kind(), StreamErrorKind::Decode, "{end}");
 }

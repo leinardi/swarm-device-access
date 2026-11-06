@@ -68,6 +68,7 @@ impl Loop {
             metrics: &self.harness.metrics,
             readiness: &self.readiness,
             timeout: DOCKER_CALL_TIMEOUT,
+            clock: self.harness.clock.as_ref(),
         }
     }
 
@@ -812,5 +813,47 @@ async fn listen_events_reconnect_reenumerates() {
     assert!(
         seen.iter().any(|id| id == "a") && seen.iter().any(|id| id == "b"),
         "reconciled {seen:?}, want both running containers"
+    );
+}
+
+/// A record the stream cannot decode (an unknown enum value of a newer Engine) would fail again
+/// from the same point on every reconnect: the loop skips to now instead, warns with the decode
+/// error, backs off, and re-enumerates on the reconnect, which covers what the record announced.
+#[tokio::test(start_paused = true)]
+async fn listen_events_skips_an_undecodable_record_and_reenumerates() {
+    let mut docker = FakeDocker::listing(&["a"]);
+    let sender = docker.first_stream();
+    let fixture = Arc::new(Loop::started(docker, FakeReconciler::default()));
+    let docker = Arc::clone(&fixture.harness.docker);
+    let (context, task) = spawn_listener(&fixture, base(), None);
+
+    eventually("the first stream", WITHIN, || docker.sinces().len() == 1).await;
+    let failed_at = fixture.harness.now();
+    let list_before = docker.list_calls();
+    fail(
+        &sender,
+        StreamError::new(StreamErrorKind::Decode, "unknown variant `brand-new`"),
+    );
+    eventually("the resubscription", WITHIN, || docker.sinces().len() == 2).await;
+    eventually("the re-enumeration", WITHIN, || {
+        docker.list_calls() > list_before
+    })
+    .await;
+    // A few backoff periods on, the loop has not replayed the record in a tight loop.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    context.cancel();
+    task.await.unwrap();
+
+    let sinces = docker.sinces();
+    assert!(
+        sinces[1] > failed_at,
+        "resubscribed from {} (last event before {failed_at})",
+        sinces[1]
+    );
+    assert!(sinces.len() <= 4, "{} subscriptions in 5 s", sinces.len());
+    let logs = fixture.harness.logs();
+    assert!(
+        logs.contains("level=WARN docker event could not be decoded; skipping to now and re-enumerating on reconnect error=unknown variant `brand-new`"),
+        "{logs}"
     );
 }

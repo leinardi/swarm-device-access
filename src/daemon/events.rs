@@ -42,6 +42,7 @@ use crate::docker::{
     with_context,
 };
 use crate::metrics::Recorder;
+use clock::Clock;
 use tracing::{debug, error, info, warn};
 
 /// The event actions subscribed to: `start` and `unpause` reconcile a container, `die` and
@@ -94,6 +95,12 @@ pub(super) enum StreamEnd {
 }
 
 impl StreamEnd {
+    /// A record of the stream that is not an event this program can read (an unknown enum value,
+    /// say): nothing a retry from the same point would change.
+    fn is_undecodable(&self) -> bool {
+        matches!(self, Self::Stream(error) if error.kind() == StreamErrorKind::Decode)
+    }
+
     /// The source of the events went away without an error: Go's closed message channel.
     fn is_closed(&self) -> bool {
         matches!(self, Self::Stream(error) if error.kind() == StreamErrorKind::Closed)
@@ -178,6 +185,8 @@ pub(super) struct Listener<'run, D, L, R> {
     pub(super) metrics: &'run Recorder,
     pub(super) readiness: &'run Readiness,
     pub(super) timeout: Duration,
+    /// The wall clock: a record the stream cannot decode moves the resubscription to now.
+    pub(super) clock: &'run dyn Clock,
 }
 
 impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
@@ -275,6 +284,16 @@ impl<D: DockerApi, L: ContainerLister, R: Reconciler> Listener<'_, D, L, R> {
                     return context.err().is_none();
                 }
                 Err(end) => {
+                    if end.is_undecodable() {
+                        // Resubscribing from the last event would replay the same record and
+                        // fail again for ever: the stream restarts from now, and the
+                        // re-enumeration every resubscription requests covers what the skipped
+                        // record may have announced.
+                        let now =
+                            i64::try_from(self.clock.now().as_nanosecond()).unwrap_or(i64::MAX);
+                        *last_event_nano = (*last_event_nano).max(now);
+                        warn!(error = %end, "docker event could not be decoded; skipping to now and re-enumerating on reconnect");
+                    }
                     error!(error = %end, backoff = ?*backoff, "docker events stream error, reconnecting");
                     self.retry_after(context, backoff).await;
                     return context.err().is_none();

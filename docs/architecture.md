@@ -468,6 +468,6 @@ Check the socket path with `--docker-socket`. Default: `/var/run/docker.sock`. O
 Desktop uses a different path.
 
 The daemon requires Docker Engine 19.03+ (API 1.40). Its Docker client (`src/docker`)
-negotiates the API version once, with `GET /version`, and sends its requests at bollard's version
-behind the engine's: an engine older than that answers an error, which the daemon logs
-(Q16).
+negotiates the API version once, with `GET /version`, and sends every request under the
+negotiated `/v<major>.<minor>` prefix: an engine older than the client's floor answers an error,
+which the daemon logs (Q16).
