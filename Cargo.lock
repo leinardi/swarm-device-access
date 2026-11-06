@@ -391,6 +391,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "go-prom"
+version = "0.1.0"
+source = "git+https://github.com/leinardi/rust-common?rev=afba1366f69b523a3143a0bc8cb312aac302c4d9#afba1366f69b523a3143a0bc8cb312aac302c4d9"
+dependencies = [
+ "flate2",
+ "go-compat",
+]
+
+[[package]]
 name = "go-slog"
 version = "0.1.0"
 source = "git+https://github.com/leinardi/rust-common?rev=afba1366f69b523a3143a0bc8cb312aac302c4d9#afba1366f69b523a3143a0bc8cb312aac302c4d9"
@@ -1075,10 +1084,10 @@ version = "0.0.0"
 dependencies = [
  "bytes",
  "clap",
- "flate2",
  "futures-core",
  "go-clock",
  "go-compat",
+ "go-prom",
  "go-slog",
  "http-body-util",
  "hyper",

@@ -91,7 +91,13 @@ fn recorder_exposition_matches_go() {
     let registry = recorder
         .registry()
         .unwrap_or_else(|| panic!("a live recorder has a registry"));
-    let answer = exposition::render(&registry.gather(), None, &[], None);
+    let answer = exposition::render(
+        go_prom::ExpfmtVersion::V0_70_1,
+        &registry.gather(),
+        None,
+        &[],
+        None,
+    );
     assert_eq!(answer.content_encoding, None);
     let body = String::from_utf8(answer.body).unwrap_or_else(|error| panic!("body: {error}"));
     let sda: String = body

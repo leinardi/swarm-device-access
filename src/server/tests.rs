@@ -45,7 +45,7 @@ fn capture_time() -> Timestamp {
 /// An exposition of `body` in the text format, as promhttp answers a scrape with no `Accept`.
 fn text_exposition(body: &'static [u8]) -> Exposition {
     Exposition {
-        content_type: exposition::content_type(None),
+        content_type: exposition::content_type(go_prom::ExpfmtVersion::V0_70_1, None),
         content_encoding: None,
         body: body.to_vec(),
     }
@@ -240,7 +240,7 @@ async fn the_scrape_request_reaches_the_metrics_function() {
     app.exposition = Some(Box::new(move |scrape: &MetricsRequest| {
         recorded.lock().unwrap().push(scrape.clone());
         Exposition {
-            content_type: exposition::content_type(None),
+            content_type: exposition::content_type(go_prom::ExpfmtVersion::V0_70_1, None),
             content_encoding: Some("gzip"),
             body: b"z".to_vec(),
         }

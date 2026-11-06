@@ -307,6 +307,7 @@ fn scrape_metrics(recorder: &Recorder, scrape: &MetricsRequest) -> Exposition {
         .unwrap_or_default();
     let encodings: Vec<&str> = scrape.accept_encoding.iter().map(String::as_str).collect();
     let exposition = exposition::render(
+        go_prom::ExpfmtVersion::V0_70_1,
         &families,
         scrape.accept.as_deref(),
         &encodings,
