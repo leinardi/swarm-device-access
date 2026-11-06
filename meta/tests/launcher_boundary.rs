@@ -64,6 +64,12 @@ fn pattern(text: &str) -> Regex {
 /// A function of the hook's name, with its visibility.
 static HOOK_DECLARED: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+transport\b"));
+/// A function named as the streaming hook, `Client::streaming`, which hands out the config the
+/// streaming calls (the events read, the launcher's wait) are made with.
+static STREAMING_DECLARED: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(?:\bpub\b[^\n]*?)?\bfn\s+streaming\b"));
+/// A use of the streaming hook: a method call or a path to it.
+static STREAMING_CALLED: LazyLock<Regex> = LazyLock::new(|| pattern(r"(?:\.|::)\s*streaming\b"));
 /// A crate-visible function handing out bollard's client `Docker` (whatever its name), or the
 /// client renamed so one could hand it out under another type name.
 static CLIENT_HANDED_OUT: LazyLock<Regex> = LazyLock::new(|| {
@@ -188,6 +194,20 @@ fn problems(sources: &[(String, String)]) -> Vec<String> {
     if hooks.len() != 1 {
         problems.push(format!("hooks declared: {hooks:?}; want transport alone"));
     }
+    // The streaming hook: declared in the client alone, called by the client's reads and the
+    // engine only.
+    for site in found_in(&files, &STREAMING_DECLARED, |path| path == CLIENT) {
+        problems.push(format!(
+            "{site}: the streaming hook is declared in {CLIENT} alone"
+        ));
+    }
+    for site in found_in(&files, &STREAMING_CALLED, |path| {
+        path == ENGINE || path.starts_with("src/docker/")
+    }) {
+        problems.push(format!(
+            "{site}: only {ENGINE} and src/docker take the streaming config"
+        ));
+    }
     problems.extend(handout_problems(&files));
     for site in found_in(&files, &HOOK_CALLED, |path| {
         path == ENGINE || path == CLIENT
@@ -306,7 +326,15 @@ fn a_write_call_outside_the_launcher_is_refused() {
         ),
         with(
             "src/processor/reconcile.rs",
-            "\nfn wait(docker: &Docker) {\n    let _ = attach::wait(docker, \"x\", WaitCondition::Removed, cancel);\n}\n",
+            "\nasync fn wait(config: &Config) {\n    let _ = attach::wait(config, \"x\", WaitCondition::Removed, timeout, cancel).await;\n}\n",
+        ),
+        with(
+            "src/processor/reconcile.rs",
+            "\nasync fn peek(client: &Client) {\n    let _ = client.streaming().await;\n}\n",
+        ),
+        with(
+            "src/daemon/mod.rs",
+            "\npub(crate) async fn streaming() {}\n",
         ),
         with(
             "src/docker/api.rs",
