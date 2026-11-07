@@ -73,9 +73,9 @@ which `meta/tests/toolchain.rs` keeps equal.
 The meta crate's tests (`meta/tests`, run by `make rust-test`) guard the tooling itself: the pins,
 the Dockerfile's syntax and stages, the CI gates, flags that make a gate pass on nothing, and the
 Rust boundaries. Most run rust-common's `repo-meta` checks with this repository's parameters (a
-scratch repository runs git through `testenv_core::gitenv::isolate`); the boundaries and the
-integration images are local. They need only git and bash, never skip, and carry a negative
-control each. The `lychee` hook checks the relative links and fragments in the Markdown.
+scratch repository runs git through `testenv_core::gitenv::isolate`); the boundaries are local. They
+need only git and bash, never skip, and carry a negative control each. The `lychee` hook checks the
+relative links and fragments in the Markdown.
 
 ### Generated or vendored: never hand-edit
 
