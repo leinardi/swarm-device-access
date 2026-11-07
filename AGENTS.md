@@ -323,7 +323,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
 | `scripts/check-suppressions.sh`, `.suppressions-baseline` | `cargo test --locked -p meta --test suppressions` |
-| `scripts/check-license-headers.sh` | `cargo test --locked -p meta --test license_headers` |
+| `scripts/check-license-headers.sh` | `pre-commit run check-license-headers --all-files` |
 | `.github/scripts/**` | `bash .github/scripts/binary-attestation-status.test.sh`, shellcheck (in `make check`) |
 | `meta/**` | `make verify` |
 | `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, platforms, vacuous flags, required gates and skipped hooks) |
