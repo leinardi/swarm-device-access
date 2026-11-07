@@ -42,7 +42,7 @@ src/
   systemd.rs               # zbus D-Bus Reloading watcher
   version.rs               # BUILD stamps (service-kit's buildinfo!)
 tests/                     # goldens vs frozen 1.x captures (tests/testdata), wire, parity
-meta/                      # repository meta-tests (pins, Dockerfile, CI gates, links, boundaries)
+meta/                      # repository meta-tests (pins, Dockerfile, CI gates, boundaries)
 testenv/                   # integration harness (feature integration), host Docker
 deployments/docker/        # Dockerfile, compose file running the launcher, example config
 docs/                      # architecture.md, testing.md, release.md, rust-port.md (ledger)

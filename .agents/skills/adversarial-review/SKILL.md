@@ -143,8 +143,8 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   provenance comment, or a golden derived from reasoning instead of a 1.x capture, is a finding.
 - **No `unsafe` outside the bpf syscall module.** The workspace denies `unsafe_code`; only
   `src/cgroup/bpf_sys.rs` lifts it, with a file-level `#![expect(unsafe_code, reason = ...)]`,
-  and a meta-test pins that list. A second module with `unsafe`, `libc` outside `bpf_sys.rs`, a
-  widened allowlist or an `unsafe` block without a `// SAFETY:` comment is a finding.
+  and nothing else enforces that. A second module with `unsafe`, `libc` outside `bpf_sys.rs` or an
+  `unsafe` block without a `// SAFETY:` comment is a finding.
 - **No write Docker call outside the launcher.** The daemon path (processor, coordinator, event
   loop, observability) takes only the read-only Docker trait, whose client sends `GET` plus the
   one `HEAD /_ping` through one request builder. Create, start, attach, wait, stop and remove live

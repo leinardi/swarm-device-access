@@ -16,7 +16,7 @@
 
 //! Every CI gate is required: each job of ci.yaml that is a gate rather than an annotation is
 //! needed by `ci-result`, the one required check, and `pre-commit-all` skips only the hooks a
-//! needed job runs instead, and the rustdoc gate fails both. Ported from this project's Go
+//! needed job runs instead. Ported from this project's Go
 //! meta-test `test/toolchain/ci_test.go`; the checks are `repo_meta::ci`'s, extracted from this
 //! file, with this workflow's jobs.
 

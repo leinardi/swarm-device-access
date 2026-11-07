@@ -3,7 +3,7 @@
 ## Platform
 
 - Linux only: openat2, pidfds, bpf(2) and cgroups with no fallback; build and test on Linux.
-- Syscalls through rustix; `libc` and `unsafe` only in `src/cgroup/bpf_sys.rs` (meta-test pinned).
+- Syscalls through rustix; `libc` and `unsafe` only in `src/cgroup/bpf_sys.rs`.
 
 ## Lints and suppressions
 
