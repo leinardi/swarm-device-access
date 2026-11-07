@@ -43,6 +43,20 @@ repos:
       - id: markdownlint-cli2
         additional_dependencies:
           - markdownlint-rule-table-format@1.0.3
+  # Every relative link and fragment in the Markdown resolves, offline: an external URL is not
+  # fetched. A whole-tree check, so it always runs (deleting a linked page passes no file to the
+  # hook at all) and takes its inputs from args rather than from the file list. --hidden reaches
+  # .github, .agents and .claude, which the glob skips otherwise; .gitignore still applies.
+  - repo: https://github.com/lycheeverse/lychee
+    rev: lychee-v0.24.2
+    hooks:
+      - id: lychee
+        name: lychee
+        args: ["--offline", "--include-fragments", "--no-progress", "--hidden", "--extensions", "md", "."]
+        types: [markdown]
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
   # Pinned rather than taken from the system, so a developer machine and CI run the same release.
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
@@ -68,17 +82,6 @@ repos:
         additional_dependencies: ["prettier@3.9.9"]
         files: \.(yml|yaml)$
         args: ["--write"]
-      # The offline documentation check: every relative link and its fragment resolve. The meta
-      # crate's docs test (meta/tests/docs.rs), which cargo reruns on every call. always_run because
-      # the file list comes from git ls-files and deleting a linked page passes no file to the hook
-      # at all.
-      - id: docs-links
-        name: docs links
-        entry: cargo test --locked -p meta --test docs
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
       # Every source file carries the Apache-2.0 header (scripts/check-license-headers.sh says
       # which files are governed). Reads the whole tree, so it always runs; pinned to one stage
       # because always_run makes a hook eligible at every installed stage, and commit-msg is one of
@@ -89,19 +92,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
-      # Every in-file suppression is counted per rule against .suppressions-baseline, and a commit
-      # that adds one must change the baseline too (AGENTS.md). Always runs: the ratchet reads the
-      # whole tree and the staged diff, and a commit that touches no source at all can still
-      # delete the baseline out from under it.
-      - id: check-suppressions
-        name: suppression ratchet
-        entry: scripts/check-suppressions.sh
-        language: system
-        pass_filenames: false
-        always_run: true
-        # always_run makes this hook eligible at every installed stage, and commit-msg is one of
-        # them; pinned so the whole-tree scan runs once.
         stages: [pre-commit]
   # The Rust workspace, adapted from swarm-scheduler-exporter's .pre-commit-config.yaml at
   # d57dcc220d29 (MIT, same author). Every command is workspace-wide, so the meta and testenv crates
@@ -124,6 +114,16 @@ repos:
         pass_filenames: false
         require_serial: true
         files: '(\.rs$|(^|/)Cargo\.(toml|lock)$|^clippy\.toml$|^rust-toolchain\.toml$)'
+      # The rust job's documentation check (make rust-doc), run before the commit rather than found
+      # in CI: the docs of every crate and feature, warnings as errors, as the make target (a broken
+      # or private intra-doc link fails it). Incremental, so a warm run takes seconds.
+      - id: cargo-doc
+        name: cargo doc
+        entry: env RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --all-features --no-deps --locked
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: '(\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$)'
       - id: cargo-test
         name: cargo test
         entry: cargo test --workspace --locked

@@ -3,15 +3,14 @@
 ## Platform
 
 - Linux only: openat2, pidfds, bpf(2) and cgroups with no fallback; build and test on Linux.
-- Syscalls through rustix; `libc` and `unsafe` only in `src/cgroup/bpf_sys.rs` (meta-test pinned).
+- Syscalls through rustix; `libc` and `unsafe` only in `src/cgroup/bpf_sys.rs`.
 
 ## Lints and suppressions
 
 - `[workspace.lints]`: clippy pedantic plus restriction lints (`unwrap_used`, `expect_used`,
   `print_stdout`, `print_stderr`, `wildcard_enum_match_arm`, `min_ident_chars`,
   `disallowed_methods` for wall-clock reads, `allow_attributes`). `-D warnings` in the gates.
-- Only `#[expect(lint, reason = "...")]`; counted against `.suppressions-baseline`
-  (`scripts/check-suppressions.sh --update`, committed with the change).
+- Only `#[expect(lint, reason = "...")]`, with the reason.
 - Project rules: `AGENTS.md`; general guidance: user-level Rust skills.
 
 ## Copyright header

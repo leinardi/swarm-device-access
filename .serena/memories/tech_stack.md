@@ -6,7 +6,7 @@
   static musl release binaries with cargo-zigbuild and pinned zig
 - **Key crates**:
   - `tokio`, `tokio-util` — runtime, cancellation, task tracking
-  - rust-common (git, pinned by tag `v0.4.0`): `clock`,
+  - rust-common (git, pinned by release `tag`): `clock`,
     `docker-client`, `service-kit`, `testenv-core`, `repo-meta`
   - `serde_json` — the create body decoded into bollard's model (bollard comes with docker-client)
   - `rustix` — syscalls (openat2, fstat, pidfd); `libc` only for raw `bpf(2)` in `bpf_sys.rs`

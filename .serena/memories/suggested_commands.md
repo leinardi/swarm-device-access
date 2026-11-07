@@ -14,7 +14,7 @@ make docker-run      # run image locally with required host bind mounts
 ```bash
 make rust-test                                   # cargo test --workspace --locked (meta included)
 cargo test --locked --lib systemd::tests         # one module's unit tests
-cargo test --locked -p meta --test docs          # docs relative links (docs-links hook)
+pre-commit run lychee --all-files               # docs relative links
 make test-integration                            # testenv suite vs the Dockerfile image (Docker)
 make test-integration SDA_IT_ENFORCE=1           # plus enforcement; throwaway hosts only
 make sweep-test-leaks                            # remove leftovers of killed integration runs

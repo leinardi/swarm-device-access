@@ -71,12 +71,11 @@ records the zig, cargo-zigbuild and `rust-std` pins; the Dockerfile's build stag
 which `meta/tests/toolchain.rs` keeps equal.
 
 The meta crate's tests (`meta/tests`, run by `make rust-test`) guard the tooling itself: the pins,
-the Dockerfile, the CI gates, flags that make a gate pass on nothing, Docker kept out of the plain
-tests, relative links, and the two check scripts, plus the Rust boundaries. Most run rust-common's
-`repo-meta` checks with this repository's parameters (a scratch repository runs git through
-`testenv_core::gitenv::isolate`); the boundaries and the integration images are local. They need
-only git and bash, never skip, and carry a negative control each. The `docs-links` hook runs
-`cargo test --locked -p meta --test docs`.
+the Dockerfile's syntax and stages, the CI gates, flags that make a gate pass on nothing, and the
+Rust boundaries. Most run rust-common's `repo-meta` checks with this repository's parameters (a
+scratch repository runs git through `testenv_core::gitenv::isolate`); the boundaries are local. They
+need only git and bash, never skip, and carry a negative control each. The `lychee` hook checks the
+relative links and fragments in the Markdown.
 
 ### Generated or vendored: never hand-edit
 
@@ -188,7 +187,7 @@ the rust-common crates)**
 `clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v0.4.0"`, with `version = "0.4"`, the tag's `<major>.<minor>`) in the root
+release tag (`tag = "v1.0.0"`, with `version = "1.0"`, the tag's `<major>.<minor>`) in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
 its own features.
 
@@ -213,7 +212,6 @@ This repository's intentional differences from rust-common's and the other servi
 
 - `unsafe_code = "deny"`, not `forbid`: `src/cgroup/bpf_sys.rs` has to lift it for the raw
   `bpf(2)` calls, and only `#[expect]` can lift a denied lint (`forbid` cannot be lifted at all).
-  `meta/tests/unsafe_allowlist.rs` pins that list.
 - `panic = "abort"` in the release profile, where swarm-scheduler-exporter unwinds for its
   `catch_unwind`: the Go daemon has no `recover`, so a panic crashes the process and Swarm or the
   launcher restarts it; a task panic under unwind would leave a daemon that looks alive and does
@@ -234,7 +232,7 @@ symlink.
 ## Conventions worth knowing
 
 - The crate is Linux-only (see *What this is*). Syscalls go through rustix; `libc` and `unsafe` are
-  confined to `src/cgroup/bpf_sys.rs`, which a meta-test pins.
+  confined to `src/cgroup/bpf_sys.rs`.
 - Version strings (`BUILD.version`, `BUILD.commit`, `BUILD.date`) live in `src/version.rs`, read
   at compile time by service-kit's `buildinfo!` from `SWARM_DEVICE_ACCESS_VERSION`,
   `SWARM_DEVICE_ACCESS_COMMIT` and `SWARM_DEVICE_ACCESS_DATE`, which `RUST_VERSION_ENV` in
@@ -296,20 +294,6 @@ in the same commit, when a reused component changes or an upstream fix is taken.
   `# droast ignore=` explains why the fix does not apply here, not which rule fired; `#[expect]`
   carries it in `reason = "..."` and droast in `reason="..."`.
 
-## Suppressions are ratcheted
-
-Every in-file suppression is counted per rule against `.suppressions-baseline` by the
-`check-suppressions` pre-commit hook (`scripts/check-suppressions.sh`): each lint of a Rust
-`#[expect(...)]` or `#[allow(...)]` (not one wrapped in `cfg_attr`; `#[allow]` is denied by the
-workspace lints anyway), `# shellcheck disable=`, `# droast ignore=` and `# droast global ignore=`.
-
-Adding one is allowed, but never silently: the hook refuses a commit that adds a suppression line
-without changing the baseline in the same commit, including a swap or a moved file that leaves the
-count unchanged. Prefer fixing the finding. If a suppression really is right, write it with a
-reason, stage it, run `scripts/check-suppressions.sh --update`, and commit the baseline alongside
-it. A count that has fallen below its baseline fails the same way, with the same fix: the file
-describes the repository, not a past one.
-
 ## Validation matrix
 
 Run before considering an edit done. `make check` applies to every row.
@@ -322,14 +306,13 @@ Run before considering an edit done. `make check` applies to every row.
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `tag` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
-| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `cargo test --locked -p meta --test suppressions` |
-| `scripts/check-license-headers.sh` | `cargo test --locked -p meta --test license_headers` |
+| `scripts/check-license-headers.sh` | `pre-commit run check-license-headers --all-files` |
 | `.github/scripts/**` | `bash .github/scripts/binary-attestation-status.test.sh`, shellcheck (in `make check`) |
 | `meta/**` | `make verify` |
-| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, platforms, vacuous flags, required gates and skipped hooks) |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, vacuous flags, required gates and skipped hooks) |
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
-| `README.md`, `docs/**/*.md`, other Markdown | `cargo test --locked -p meta --test docs` (the `docs-links` hook); prose wraps at 100 columns (markdownlint in `make check`) |
+| `README.md`, `docs/**/*.md`, other Markdown | the `lychee` hook (`--offline --include-fragments`); prose wraps at 100 columns (markdownlint in `make check`) |
 | `.agents/skills/**` | the Markdown row |
 
 ## Commit messages

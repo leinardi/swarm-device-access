@@ -131,9 +131,12 @@ tagged commit (see [Recovering a failed publish](#recovering-a-failed-publish)).
    then created **locally only**.
 5. **Build** the static binaries and `checksums.txt` (`make rust-release-binaries`), and the whole
    multi-arch image into a job-local registry, then **scan** both platform images with the pinned
-   Trivy. A compile error, a Dockerfile error, an unreachable base image or a HIGH or CRITICAL
-   finding stops the run here, with no tag on the remote; only the scanned digest is later copied
-   to GHCR, attested and signed, and the binaries are attested before the release is drafted.
+   Trivy, and **smoke-test** the version stamps: each platform image (arm64 through QEMU) is run by
+   its digest with `--dry-run=true`, and the version and commit in its startup line must be the
+   ones being released. A compile error, a Dockerfile error, an unreachable base image, a HIGH or
+   CRITICAL finding or a wrong stamp stops the run here, with no tag on the remote; only the
+   scanned digest is later copied to GHCR, attested and signed, and the binaries are attested
+   before the release is drafted.
 6. **A dry run stops here.**
 7. **Gate the tag.** The highest released version is read again, from the remote, because a tag can
    arrive from outside the workflow while it builds. A fresh release that is no longer the highest

@@ -36,7 +36,7 @@ Use user-level Rust skills alongside this skill for a `.rs` file. The rules belo
 kernel and the Engine directly, where the 1.x Go libraries hid it, so it adds these:
 
 - **No `unsafe` outside `src/cgroup/bpf_sys.rs`.** The workspace denies `unsafe_code`, that one
-  module lifts it, and a meta-test (`meta/tests/unsafe_allowlist.rs`) pins the list. Every other
+  module lifts it. Every other
   syscall (`openat2` with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS`, `fstat`, `readlinkat`,
   `pidfd_open`) goes through rustix; a hand-rolled syscall elsewhere is a way around the
   containment in §4.

@@ -33,6 +33,9 @@ jobs:
     permissions:
       contents: read
     env:
+      # What dtolnay/rust-toolchain exported to every later step of the job.
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
       # A pull request whose head is another repository. Not head.repo.fork,
       # which is also true for this repository's own branches when the
       # repository itself is a GitHub fork.
@@ -45,9 +48,7 @@ jobs:
 
       - name: Set up Rust
         if: env.FROM_FORK != 'true'
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: 1.98.1
+        run: rustup toolchain install --no-self-update
 
       - name: Cache the Rust build
         if: env.FROM_FORK != 'true'

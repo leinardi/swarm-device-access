@@ -31,7 +31,7 @@ authors = ["Roberto Leinardi"]
 repository = "https://github.com/leinardi/swarm-device-access"
 
 # The crates shared with the other Rust services, from leinardi/rust-common: a git dependency
-# pinned by the release tag (`tag = "v0.4.0"`) with `version = "0.4"`, the tag's <major>.<minor>.
+# pinned by the release tag (`tag = "v1.0.0"`) with `version = "1.0"`, the tag's <major>.<minor>.
 # `version` keeps cargo-deny's `wildcards = "deny"` satisfied and makes cargo refuse a checkout of
 # another version. Moving the pin: change the `tag` (and `version` with it) on every rust-common
 # line, run `cargo fetch` (not `cargo update -p`), and `git diff Cargo.lock` touches only the
@@ -40,28 +40,27 @@ repository = "https://github.com/leinardi/swarm-device-access"
 # `[patch."https://github.com/leinardi/rust-common"]` table naming each crate with
 # `path = "../rust-common/crates/<name>"`.
 [workspace.dependencies]
-docker-client = { git = "https://github.com/leinardi/rust-common", tag = "v0.4.0", version = "0.4" }
-clock = { git = "https://github.com/leinardi/rust-common", tag = "v0.4.0", version = "0.4" }
-repo-meta = { git = "https://github.com/leinardi/rust-common", tag = "v0.4.0", version = "0.4" }
+docker-client = { git = "https://github.com/leinardi/rust-common", tag = "v1.0.0", version = "1.0" }
+clock = { git = "https://github.com/leinardi/rust-common", tag = "v1.0.0", version = "1.0" }
+repo-meta = { git = "https://github.com/leinardi/rust-common", tag = "v1.0.0", version = "1.0" }
 prometheus-client = { version = "0.25.2", default-features = false }
-service-kit = { git = "https://github.com/leinardi/rust-common", tag = "v0.4.0", version = "0.4" }
-testenv-core = { git = "https://github.com/leinardi/rust-common", tag = "v0.4.0", version = "0.4" }
+service-kit = { git = "https://github.com/leinardi/rust-common", tag = "v1.0.0", version = "1.0" }
+testenv-core = { git = "https://github.com/leinardi/rust-common", tag = "v1.0.0", version = "1.0" }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
-tracing-setup = { git = "https://github.com/leinardi/rust-common", tag = "v0.4.0", version = "0.4" }
+tracing-setup = { git = "https://github.com/leinardi/rust-common", tag = "v1.0.0", version = "1.0" }
 
 # The lint set lives here once. Every member opts in with `[lints] workspace = true` (a member does
 # not inherit it otherwise, and the meta crate asserts that each one does), and every clippy run is
 # workspace-wide.
 [workspace.lints.rust]
 # deny, not forbid: one audited module, src/cgroup/bpf_sys.rs, has to lift it for the raw bpf(2)
-# calls, and only #[expect] can lift a denied lint (forbid cannot be lifted at all). The meta crate
-# pins that list (meta/tests/unsafe_allowlist.rs).
+# calls, and only #[expect] can lift a denied lint (forbid cannot be lifted at all).
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 # Only `#[expect(lint, reason = "...")]` may silence a lint: it fails once the lint stops firing,
-# and the reason is mandatory. Every one is counted by scripts/check-suppressions.sh.
+# and the reason is mandatory.
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
 # No panics outside tests; clippy.toml allows both in tests.

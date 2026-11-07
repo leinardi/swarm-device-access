@@ -73,13 +73,13 @@ green. Load only what the diff touches.
 
 | Changed path | Load skill | It owns |
 | --- | --- | --- |
-| any `**/*.rs`, `Cargo.toml` (any member), `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | user-level Rust skills, `AGENTS.md`, and `docs/rust-port.md` (decisions, crates, reuse ledger) | the lint set, `#[expect]` and the ratchet, the single unsafe module, error and log text as the 1.x contract, the Docker read/write split, the blocking transaction, Go test provenance, the reuse ledger |
+| any `**/*.rs`, `Cargo.toml` (any member), `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | user-level Rust skills, `AGENTS.md`, and `docs/rust-port.md` (decisions, crates, reuse ledger) | the lint set, `#[expect]`, the single unsafe module, error and log text as the 1.x contract, the Docker read/write split, the blocking transaction, Go test provenance, the reuse ledger |
 | `src/config/**`, `src/policy/**`, `src/processor/**` (label handling, rule collection), the CLI and `SIGHUP` reload path (`src/cli.rs`, `src/cli/settings.rs`, `src/run.rs`), `src/launcher/**`, the HTTP server (`src/server.rs`, `src/server/**`), `deployments/**` (including `deployments/docker/Dockerfile`), `examples/**` | `trust-boundary` | fail-closed config and mode, label parsing, `/dev`-only rules, reload safety, image privilege, listeners |
 | `src/cgroup/**` | user-level Rust skills, `AGENTS.md` + the note below | NVIDIA-derived BPF/cgroup code; `src/cgroup/bpf_sys.rs` is the one audited `unsafe` module |
 | `meta/**`, `testenv/**` | `AGENTS.md`; the comment heading each test | a meta-test that can skip or pass on nothing is a finding; the integration harness's image identity check |
 | `tests/testdata/**` | `docs/rust-port.md` (1.x fixtures) | frozen 1.x captures: an edited or regenerated one is a finding unless it comes from running the 1.x code |
-| `scripts/check-*.sh` | the script's header comment and its meta-test (`meta/tests/suppressions.rs`, `meta/tests/license_headers.rs`) | the check still fails on what it exists to stop |
-| `.pre-commit-config.yaml`, `droast.toml`, `.suppressions-baseline`, `[workspace.lints]`, `clippy.toml` | `AGENTS.md` (coding rules and the ratchet); `meta/tests/toolchain.rs`, `meta/tests/vacuous_flags.rs`, `meta/tests/ci_gates.rs`, `meta/tests/dockerfiles.rs`, `meta/tests/workspace_lints.rs` | no lint disabled or narrowed, no hook dropped; §5 (c) |
+| `scripts/check-*.sh` | the script's header comment | the check still fails on what it exists to stop |
+| `.pre-commit-config.yaml`, `droast.toml`, `[workspace.lints]`, `clippy.toml` | `AGENTS.md` (coding rules); `meta/tests/toolchain.rs`, `meta/tests/vacuous_flags.rs`, `meta/tests/ci_gates.rs`, `meta/tests/dockerfiles.rs`, `meta/tests/workspace_lints.rs` | no lint disabled or narrowed, no hook dropped; §5 (c) |
 
 **`src/cgroup/{api,ebpf,v1,v2}.rs` port NVIDIA-derived code** (from libnvidia-container, Apache
 2.0). Touch it with care. They keep NVIDIA's block verbatim, the crun and runc provenance
@@ -87,13 +87,12 @@ paragraph and a modification notice under it; a diff that reformats or relicense
 finding, whatever else it does.
 
 A meta-test under `meta/tests` guards a claim nothing else checks: the Rust release, zig,
-cargo-zigbuild, `rust-std`, Trivy and ShellCheck pins, the Dockerfile's stages and labels, the CI
-gates, the relative links, the suppression and license-header checks, the workspace lints, the
-unsafe allowlist, the Docker read/write boundary, Docker kept out of the plain tests. Try to make
-the guarded thing go wrong and see whether the test still notices. A test that passes because its
-input is empty, its rule never ran or its negative control is missing is a false pass, and so is
-one whose scratch repository runs git without `testenv_core::gitenv::isolate` (repo-meta's
-`ScratchRepo` does), which under the commit hook acts on the real index.
+cargo-zigbuild, `rust-std`, Trivy and ShellCheck pins, the Dockerfile's stages, the CI gates, the
+workspace lints, the Docker read/write boundary. Try to make the guarded thing go wrong and see
+whether the test still notices. A test that passes because its input is empty, its rule never ran
+or its negative control is missing is a false pass, and so is one whose scratch repository runs git
+without `testenv_core::gitenv::isolate` (repo-meta's `ScratchRepo` does), which under the commit
+hook acts on the real index.
 
 No skill matches (bash, Makefile, `.mk/**`, plain YAML, Markdown, workflows)? Fall back to the
 passes in §4 plus the invariants in §3. **Same rigor** — an unmatched language is not a lighter
@@ -144,8 +143,8 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   provenance comment, or a golden derived from reasoning instead of a 1.x capture, is a finding.
 - **No `unsafe` outside the bpf syscall module.** The workspace denies `unsafe_code`; only
   `src/cgroup/bpf_sys.rs` lifts it, with a file-level `#![expect(unsafe_code, reason = ...)]`,
-  and a meta-test pins that list. A second module with `unsafe`, `libc` outside `bpf_sys.rs`, a
-  widened allowlist or an `unsafe` block without a `// SAFETY:` comment is a finding.
+  and nothing else enforces that. A second module with `unsafe`, `libc` outside `bpf_sys.rs` or an
+  `unsafe` block without a `// SAFETY:` comment is a finding.
 - **No write Docker call outside the launcher.** The daemon path (processor, coordinator, event
   loop, observability) takes only the read-only Docker trait, whose client sends `GET` plus the
   one `HEAD /_ping` through one request builder. Create, start, attach, wait, stop and remove live
@@ -232,11 +231,8 @@ intent was. If one exists, is the diff removing exactly what that line retires a
 
 Any new `#[expect(...)]` or `#[allow(...)]` (`#[allow]` is denied outright),
 `# shellcheck disable=` or `# droast ignore=` is a standing decision to let a linter stay
-silent. The `check-suppressions` hook counts them per rule against
-`.suppressions-baseline` and refuses one added without a baseline change, so the count is
-reviewed; the reason is not. A baseline raised in the same diff is the thing to read. So demand
-the attempt:
-for `too_many_lines`, was the obvious extraction tried and what broke? For a cast lint, why is
+silent. Nothing counts them, so the reason is the only record. Demand the attempt: for
+`too_many_lines`, was the obvious extraction tried and what broke? For a cast lint, why is
 `try_from` wrong here? For `min_ident_chars`, why does the name have to be short? A suppression
 whose reason restates the lint instead of explaining why the fix does not apply is a finding, and
 so is a suppression with no reason at all. The same holds for a lint lowered in
