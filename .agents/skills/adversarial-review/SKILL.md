@@ -87,13 +87,12 @@ paragraph and a modification notice under it; a diff that reformats or relicense
 finding, whatever else it does.
 
 A meta-test under `meta/tests` guards a claim nothing else checks: the Rust release, zig,
-cargo-zigbuild, `rust-std`, Trivy and ShellCheck pins, the Dockerfile's stages and labels, the CI
-gates, the relative links, the license-header check, the workspace lints, the
-unsafe allowlist, the Docker read/write boundary, Docker kept out of the plain tests. Try to make
-the guarded thing go wrong and see whether the test still notices. A test that passes because its
-input is empty, its rule never ran or its negative control is missing is a false pass, and so is
-one whose scratch repository runs git without `testenv_core::gitenv::isolate` (repo-meta's
-`ScratchRepo` does), which under the commit hook acts on the real index.
+cargo-zigbuild, `rust-std`, Trivy and ShellCheck pins, the Dockerfile's stages, the CI gates, the
+workspace lints, the Docker read/write boundary. Try to make the guarded thing go wrong and see
+whether the test still notices. A test that passes because its input is empty, its rule never ran
+or its negative control is missing is a false pass, and so is one whose scratch repository runs git
+without `testenv_core::gitenv::isolate` (repo-meta's `ScratchRepo` does), which under the commit
+hook acts on the real index.
 
 No skill matches (bash, Makefile, `.mk/**`, plain YAML, Markdown, workflows)? Fall back to the
 passes in §4 plus the invariants in §3. **Same rigor** — an unmatched language is not a lighter

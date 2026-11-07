@@ -54,8 +54,7 @@ tracing-setup = { git = "https://github.com/leinardi/rust-common", tag = "v0.4.0
 # workspace-wide.
 [workspace.lints.rust]
 # deny, not forbid: one audited module, src/cgroup/bpf_sys.rs, has to lift it for the raw bpf(2)
-# calls, and only #[expect] can lift a denied lint (forbid cannot be lifted at all). The meta crate
-# pins that list (meta/tests/unsafe_allowlist.rs).
+# calls, and only #[expect] can lift a denied lint (forbid cannot be lifted at all).
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

@@ -71,12 +71,11 @@ records the zig, cargo-zigbuild and `rust-std` pins; the Dockerfile's build stag
 which `meta/tests/toolchain.rs` keeps equal.
 
 The meta crate's tests (`meta/tests`, run by `make rust-test`) guard the tooling itself: the pins,
-the Dockerfile, the CI gates, flags that make a gate pass on nothing, Docker kept out of the plain
-tests, and the two check scripts, plus the Rust boundaries. Most run rust-common's
-`repo-meta` checks with this repository's parameters (a scratch repository runs git through
-`testenv_core::gitenv::isolate`); the boundaries and the integration images are local. They need
-only git and bash, never skip, and carry a negative control each. The `lychee` hook checks the
-relative links and fragments in the Markdown.
+the Dockerfile's syntax and stages, the CI gates, flags that make a gate pass on nothing, and the
+Rust boundaries. Most run rust-common's `repo-meta` checks with this repository's parameters (a
+scratch repository runs git through `testenv_core::gitenv::isolate`); the boundaries and the
+integration images are local. They need only git and bash, never skip, and carry a negative
+control each. The `lychee` hook checks the relative links and fragments in the Markdown.
 
 ### Generated or vendored: never hand-edit
 
@@ -213,7 +212,6 @@ This repository's intentional differences from rust-common's and the other servi
 
 - `unsafe_code = "deny"`, not `forbid`: `src/cgroup/bpf_sys.rs` has to lift it for the raw
   `bpf(2)` calls, and only `#[expect]` can lift a denied lint (`forbid` cannot be lifted at all).
-  `meta/tests/unsafe_allowlist.rs` pins that list.
 - `panic = "abort"` in the release profile, where swarm-scheduler-exporter unwinds for its
   `catch_unwind`: the Go daemon has no `recover`, so a panic crashes the process and Swarm or the
   launcher restarts it; a task panic under unwind would leave a daemon that looks alive and does
@@ -234,7 +232,7 @@ symlink.
 ## Conventions worth knowing
 
 - The crate is Linux-only (see *What this is*). Syscalls go through rustix; `libc` and `unsafe` are
-  confined to `src/cgroup/bpf_sys.rs`, which a meta-test pins.
+  confined to `src/cgroup/bpf_sys.rs`.
 - Version strings (`BUILD.version`, `BUILD.commit`, `BUILD.date`) live in `src/version.rs`, read
   at compile time by service-kit's `buildinfo!` from `SWARM_DEVICE_ACCESS_VERSION`,
   `SWARM_DEVICE_ACCESS_COMMIT` and `SWARM_DEVICE_ACCESS_DATE`, which `RUST_VERSION_ENV` in
@@ -311,7 +309,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `scripts/check-license-headers.sh` | `pre-commit run check-license-headers --all-files` |
 | `.github/scripts/**` | `bash .github/scripts/binary-attestation-status.test.sh`, shellcheck (in `make check`) |
 | `meta/**` | `make verify` |
-| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, platforms, vacuous flags, required gates and skipped hooks) |
+| `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, vacuous flags, required gates and skipped hooks) |
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
 | `README.md`, `docs/**/*.md`, other Markdown | the `lychee` hook (`--offline --include-fragments`); prose wraps at 100 columns (markdownlint in `make check`) |

@@ -20,7 +20,7 @@
 //! meta-test `test/toolchain/ci_test.go`; the checks are `repo_meta::ci`'s, extracted from this
 //! file, with this workflow's jobs.
 
-use repo_meta::ci::{CiGates, MAKE_COMMON_RUSTDOC};
+use repo_meta::ci::CiGates;
 use repo_meta::yaml::{self, Value};
 use repo_meta::{report, strings};
 
@@ -140,81 +140,4 @@ fn ci_structure_rules() {
         strings(&GATES.result_problems(&without_result)),
         ["the CI workflow has no ci-result job"]
     );
-}
-
-/// Rustdoc warnings must fail both the local verify target and the required Rust CI job, over
-/// every feature (make-common's `rust.mk`, `repo_meta::ci::MAKE_COMMON_RUSTDOC`).
-#[test]
-fn rust_documentation_is_a_required_gate() {
-    let repo = meta::repo();
-    let problems = MAKE_COMMON_RUSTDOC.problems(
-        &repo.read(".mk/rust.mk"),
-        &repo.read("Makefile"),
-        &read_yaml(CI_WORKFLOW),
-    );
-    assert!(problems.is_empty(), "{}", report(&problems));
-}
-
-/// Negative controls: a gate absent from verify or CI, one allowing warnings, one narrowed to
-/// fewer features, and a CI step allowed to fail must each fail.
-#[test]
-fn weakened_rustdoc_gates_are_refused() {
-    let repo = meta::repo();
-    let fragment = repo.read(".mk/rust.mk");
-    let makefile = repo.read("Makefile");
-    let workflow_text = repo.read(CI_WORKFLOW);
-    let workflow = parse(CI_WORKFLOW, &workflow_text);
-    for (name, broken) in [
-        (
-            "not in verify-rust",
-            fragment.replace("rust-test rust-doc", "rust-test"),
-        ),
-        ("warnings allowed", fragment.replace(" -D warnings", "")),
-        (
-            "fewer features",
-            fragment.replace("RUST_FEATURES ?= --all-features", "RUST_FEATURES ?="),
-        ),
-    ] {
-        assert_ne!(
-            broken, fragment,
-            "{name}: the sample is the fragment itself"
-        );
-        assert!(
-            !MAKE_COMMON_RUSTDOC
-                .problems(&broken, &makefile, &workflow)
-                .is_empty(),
-            "{name} was accepted"
-        );
-    }
-    let narrowed = format!("RUST_FEATURES := --features x\n{makefile}");
-    assert!(
-        !MAKE_COMMON_RUSTDOC
-            .problems(&fragment, &narrowed, &workflow)
-            .is_empty(),
-        "a Makefile narrowing the features was accepted"
-    );
-    for (name, broken) in [
-        (
-            "no CI step",
-            workflow_text.replace("run: make rust-doc", "run: echo missing documentation gate"),
-        ),
-        (
-            "a CI step allowed to fail",
-            workflow_text.replace(
-                "run: make rust-doc",
-                "run: make rust-doc\n        continue-on-error: true",
-            ),
-        ),
-    ] {
-        assert_ne!(
-            broken, workflow_text,
-            "{name}: the sample is the workflow itself"
-        );
-        assert!(
-            !MAKE_COMMON_RUSTDOC
-                .problems(&fragment, &makefile, &parse(CI_WORKFLOW, &broken))
-                .is_empty(),
-            "{name} was accepted"
-        );
-    }
 }

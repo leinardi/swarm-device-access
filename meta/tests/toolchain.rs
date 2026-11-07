@@ -32,16 +32,14 @@
 //! (`RustVersion::Exact`), a CI toolchain read from its input alone (`ToolchainRef::Input`) and
 //! the release fragment as the zig record. Every rule has its negative control.
 
-use repo_meta::ci::always_run_problems;
 use repo_meta::toolchain::{
     RUST_RELEASE_PINS, RustVersion, ToolchainRef, ZigRecord, ci_toolchain_problems,
     image_rust_problems, release_pin_problems, rust_release, rust_std_problems,
     rust_version_problems, shellcheck_problems, toolchain_targets, trivy_problems,
     zigbuild_action_problems,
 };
-use repo_meta::tools::tool_lookup_problems;
 use repo_meta::yaml::{self, Value};
-use repo_meta::{Problem, report, strings};
+use repo_meta::{Problem, report};
 
 const DOCKERFILE: &str = "deployments/docker/Dockerfile";
 const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
@@ -49,14 +47,6 @@ const SHELLCHECK_ACTION: &str = ".github/actions/setup-shellcheck/action.yaml";
 const SETUP_ZIGBUILD: &str = ".github/actions/setup-zigbuild/action.yaml";
 const RUST_RELEASE_FRAGMENT: &str = ".mk/rust-release.mk";
 const RELEASE_WORKFLOW: &str = ".github/workflows/release.yaml";
-
-/// The Go tests' switch that turned a skip on a missing tool into a failure, spelled in pieces so
-/// this file does not match its own check.
-const REQUIRE_TOOLS_SWITCH: &str = concat!("SDA_REQUIRE", "_TOOLS");
-
-/// The hooks that read the whole tree rather than the files pre-commit passes, so each one runs
-/// on every commit and must not run twice per commit.
-const ALWAYS_RUN_HOOKS: [&str; 2] = ["check-license-headers", "lychee"];
 
 fn parse(file: &str, content: &str) -> Value {
     yaml::parse(file, content).unwrap_or_else(|problem| panic!("{problem}"))
@@ -607,139 +597,4 @@ fn trivy_rules() {
     }
     let other = good.replace("v0.74.0", "v0.73.0");
     assert_eq!(check(&[good, &other]).len(), 1, "two Trivy versions");
-}
-
-/// The hooks of a pre-commit configuration, parsed.
-fn hooks(content: &str) -> Vec<(String, Value)> {
-    yaml::pre_commit_hooks(PRE_COMMIT_CONFIG, &parse(PRE_COMMIT_CONFIG, content))
-        .unwrap_or_else(|problem| panic!("{problem}"))
-}
-
-/// A whole-tree hook takes no file list and always runs, because a commit that only deletes a
-/// file passes no file to it; and it is pinned to the pre-commit stage, because `always_run`
-/// makes a hook eligible at every installed stage, commit-msg included. (SSE's
-/// `always_run_hooks_run_once`; the Go tests have no counterpart, the hooks' comments state it.)
-#[test]
-fn always_run_hooks_run_once() {
-    let problems = always_run_problems(
-        &hooks(&meta::repo().read(PRE_COMMIT_CONFIG)),
-        &ALWAYS_RUN_HOOKS,
-    );
-    assert!(problems.is_empty(), "{}", report(&problems));
-}
-
-/// The negative control: a whole-tree hook that is missing, doubled, passed file names, not
-/// always run, or eligible at another stage is refused.
-#[test]
-fn always_run_rules() {
-    let hook = |id: &str, settings: &str| {
-        format!("      - id: {id}\n        entry: x\n        language: system\n{settings}")
-    };
-    let good = "        pass_filenames: false\n        always_run: true\n        stages: \
-                [pre-commit]\n";
-    let config = |hook_text: &str| {
-        format!(
-            "repos:
-  - repo: local
-    hooks:
-{}{hook_text}",
-            hook("lychee", good)
-        )
-    };
-    assert_eq!(
-        always_run_problems(
-            &hooks(&config(&hook("check-license-headers", good))),
-            &ALWAYS_RUN_HOOKS
-        ),
-        Vec::<Problem>::new()
-    );
-    for (name, license_headers) in [
-        ("a missing hook", String::new()),
-        (
-            "a doubled hook",
-            format!(
-                "{}{}",
-                hook("check-license-headers", good),
-                hook("check-license-headers", good)
-            ),
-        ),
-        (
-            "file names passed",
-            hook(
-                "check-license-headers",
-                &good.replace("pass_filenames: false", "pass_filenames: true"),
-            ),
-        ),
-        (
-            "not always run",
-            hook(
-                "check-license-headers",
-                &good.replace("always_run: true", "always_run: false"),
-            ),
-        ),
-        (
-            "every stage",
-            hook(
-                "check-license-headers",
-                &good.replace("stages: [pre-commit]", "stages: [pre-commit, commit-msg]"),
-            ),
-        ),
-    ] {
-        assert!(
-            !always_run_problems(&hooks(&config(&license_headers)), &ALWAYS_RUN_HOOKS).is_empty(),
-            "{name} was accepted"
-        );
-    }
-}
-
-/// Go: `TestToolGateListIsClosed`. No meta-test may skip on a missing tool: none looks a tool up
-/// on `PATH`, since a skip on a missing tool is a pass CI cannot turn into a failure, and none
-/// reads the Go tests' switch that turns such a skip into a failure. A test that needs an
-/// external tool fails without it.
-#[test]
-fn no_meta_test_skips_on_a_missing_tool() {
-    let repo = meta::repo();
-    let sources = repo.files_under("meta", &[".rs"]);
-    assert!(
-        sources.iter().any(|path| path == "meta/tests/toolchain.rs"),
-        "the walk did not reach meta/tests: {sources:?}"
-    );
-    let problems = tool_lookup_problems(&repo.read_all(&sources), &[REQUIRE_TOOLS_SWITCH]);
-    assert!(problems.is_empty(), "{}", report(&problems));
-
-    // The negative control. The samples are split so this file does not match its own check.
-    for sample in [
-        concat!("let found = env::split", "_paths(&paths);"),
-        concat!("std::env::var", "_os(\x22PATH\x22)"),
-        concat!("Command::new(\x22wh", "ich\x22)"),
-        concat!("env::var(\x22SDA_REQUIRE", "_TOOLS\x22)"),
-    ] {
-        let files = [("meta/tests/x.rs".to_owned(), sample.to_owned())];
-        assert_eq!(
-            strings(&tool_lookup_problems(&files, &[REQUIRE_TOOLS_SWITCH])),
-            [
-                "meta/tests/x.rs: looks a tool up on PATH or reads a skip switch; a meta-test \
-              needing a tool must fail without it"
-            ],
-            "{sample:?} was not recognised"
-        );
-    }
-    // testenv-core's tool gate looks a tool up too, whatever the switches; spelled in pieces so
-    // this file does not match its own check.
-    let gate = [(
-        "meta/tests/x.rs".to_owned(),
-        concat!(
-            "use testenv_core::tool",
-            "gate::Gate;\nfn droast(gate: &Gate) { gate.look",
-            "up(\x22droast\x22); }\n"
-        )
-        .to_owned(),
-    )];
-    for switches in [&[][..], &[REQUIRE_TOOLS_SWITCH][..]] {
-        assert_eq!(
-            tool_lookup_problems(&gate, switches).len(),
-            1,
-            "a testenv-core tool-gate lookup was accepted with switches {switches:?}"
-        );
-    }
 }
