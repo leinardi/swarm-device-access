@@ -71,6 +71,8 @@ env:
   SIGNER_IDENTITY: https://github.com/leinardi/swarm-device-access/.github/workflows/release.yaml@refs/heads/master
   SIGNER_ISSUER: https://token.actions.githubusercontent.com
   PLATFORMS: linux/amd64,linux/arm64
+  # The emulators the smoke test of the non-native platform image needs, by the name binfmt knows.
+  QEMU_PLATFORMS: arm64
   # The job-local registries the image is built into, and a dry run copies to.
   # Pinned by index digest, like every image this workflow runs.
   REGISTRY_IMAGE: registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649
@@ -523,6 +525,16 @@ jobs:
             dist/${{ env.APP_NAME }}-linux-arm64
             dist/checksums.txt
 
+      # The smoke test below runs the arm64 image on this amd64 runner, which
+      # needs the kernel's binfmt handlers. The binfmt image is pinned by digest,
+      # like every image this workflow runs.
+      - name: Set up QEMU
+        if: steps.mode.outputs.build == 'true'
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: ${{ env.QEMU_PLATFORMS }}
+
       # Host network, so the builder reaches the job-local registry on localhost.
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -621,6 +633,41 @@ jobs:
             SCANNED+=("$platform=$PLATFORM_DIGEST")
           done
           echo "platforms=${SCANNED[*]}" >> "$GITHUB_OUTPUT"
+
+      # The image was built from build arguments, and nothing above looks at what
+      # the binary inside reports. This runs each platform image of the index and
+      # reads the version and commit from the startup line, so a build that
+      # dropped or mangled a stamp stops here, before the tag exists and with
+      # nothing in GHCR. The daemon has no --version, so the container is started
+      # with --dry-run=true (no cgroup write) and exits on its own when the Docker
+      # socket is missing, after logging the line. It runs on every path that
+      # builds an image: a fresh release, a publish re-run and a dry run. A reuse
+      # re-run builds nothing and pushes no tag.
+      - name: Smoke-test the built image's version stamps
+        if: steps.mode.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMIT: ${{ steps.version.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          for platform in ${PLATFORMS//,/ }; do
+            CID=$(docker run -d --platform "$platform" "$LOCAL_IMAGE@$DIGEST" --dry-run=true)
+            OUT=""
+            for _ in $(seq 1 30); do
+              OUT=$(docker logs "$CID" 2>&1)
+              if grep -q 'swarm-device-access starting' <<<"$OUT"; then
+                break
+              fi
+              sleep 1
+            done
+            docker rm -f "$CID" >/dev/null
+            if ! grep -qF "version=\"$VERSION\"" <<<"$OUT" || ! grep -qF "commit=\"$COMMIT\"" <<<"$OUT"; then
+              echo "$platform does not report version=\"$VERSION\" commit=\"$COMMIT\" in its startup line: $OUT" >&2
+              exit 1
+            fi
+            echo "$platform reports version=$VERSION commit=$COMMIT"
+          done
 
       # The last look at the tags before the point of no return. Concurrency
       # serializes the workflow, but a tag can also arrive from outside it, and
