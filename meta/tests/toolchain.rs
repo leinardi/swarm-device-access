@@ -16,585 +16,394 @@
 // Adapted from swarm-scheduler-exporter/meta/tests/toolchain.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! The repository's tooling pins: one exact Rust release across rust-toolchain.toml, the
-//! workspace's `rust-version`, the image's dhi.io/rust tag and `RUST_VERSION`, and every CI
-//! toolchain step; one zig and one cargo-zigbuild between the setup-zigbuild action, the release
-//! fragment and the Dockerfile, and the musl standard libraries of the fragment and the Dockerfile
-//! at that exact Rust release; one exact Trivy for the release scan; one ShellCheck between the
-//! hook and the CI action; the whole-tree hooks running once; and no meta-test that skips on a
-//! missing tool. `ci_gates.rs` and `vacuous_flags.rs` check the rest of the gates.
+//! The repository's tooling pins, each one value everywhere it is written: the exact Rust release
+//! (`rust-toolchain.toml`, the workspace's `rust-version`, the image's dhi.io/rust tag and
+//! `RUST_VERSION`, and the fragment's `rust-std` release); zig and cargo-zigbuild between the
+//! setup-zigbuild action, the release fragment and the Dockerfile, with their archive digests, and
+//! the musl standard libraries' digests between the fragment and the Dockerfile; one ShellCheck
+//! between the hook and the CI action; and an exact Trivy for the release scan. `ci_gates.rs` and
+//! `vacuous_flags.rs` check the rest of the gates.
 //!
-//! `.mk/rust-release.mk` is the one record of the zig, cargo-zigbuild and rust-std pins: the
-//! action and the Dockerfile's build stage carry copies, and every copy is checked against it.
-//! SSE checks the Dockerfile against the action alone and keeps no such record. The checks are
-//! `repo_meta::toolchain`'s, `repo_meta::ci`'s and `repo_meta::tools`'s (extracted from this
-//! file), with this repository's parameters: the exact release in `rust-version`
-//! (`RustVersion::Exact`), a CI toolchain read from its input alone (`ToolchainRef::Input`) and
-//! the release fragment as the zig record. Every rule has its negative control.
+//! `.mk/rust-release.mk` is the one record of the zig, cargo-zigbuild and `rust-std` pins: the
+//! action and the Dockerfile's build stage carry copies, and every copy is checked against it. The
+//! checks are `repo_meta::toolchain::one_value`'s over [`PinSource`]s, and each has a negative
+//! control that runs it on an altered copy. CI installs the toolchain from `rust-toolchain.toml`,
+//! so no workflow repeats the release.
 
-use repo_meta::toolchain::{
-    RUST_RELEASE_PINS, RustVersion, ToolchainRef, ZigRecord, ci_toolchain_problems,
-    image_rust_problems, release_pin_problems, rust_release, rust_std_problems,
-    rust_version_problems, shellcheck_problems, toolchain_targets, trivy_problems,
-    zigbuild_action_problems,
-};
-use repo_meta::yaml::{self, Value};
+use repo_meta::toolchain::{PinSource, one_value, rust_release, toolchain_targets};
 use repo_meta::{Problem, report};
 
+const TOOLCHAIN: &str = "rust-toolchain.toml";
+const MANIFEST: &str = "Cargo.toml";
 const DOCKERFILE: &str = "deployments/docker/Dockerfile";
-const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
+const FRAGMENT: &str = ".mk/rust-release.mk";
+const ZIGBUILD_ACTION: &str = ".github/actions/setup-zigbuild/action.yaml";
 const SHELLCHECK_ACTION: &str = ".github/actions/setup-shellcheck/action.yaml";
-const SETUP_ZIGBUILD: &str = ".github/actions/setup-zigbuild/action.yaml";
-const RUST_RELEASE_FRAGMENT: &str = ".mk/rust-release.mk";
+const HOOKS: &str = ".pre-commit-config.yaml";
 const RELEASE_WORKFLOW: &str = ".github/workflows/release.yaml";
 
-fn parse(file: &str, content: &str) -> Value {
-    yaml::parse(file, content).unwrap_or_else(|problem| panic!("{problem}"))
+/// The musl archives' targets of the fragment and the Dockerfile, with the Dockerfile's `case` arm
+/// that names each: (target, arm text before the digest).
+const ZIGBUILD_ARMS: [(&str, &str); 2] = [
+    (
+        "x86_64-unknown-linux-musl",
+        "zigbuild_asset=x86_64-unknown-linux-musl; zigbuild_sha256=",
+    ),
+    (
+        "aarch64-unknown-linux-gnu",
+        "zigbuild_asset=aarch64-unknown-linux-gnu; zigbuild_sha256=",
+    ),
+];
+const STD_ARMS: [(&str, &str); 2] = [
+    (
+        "x86_64-unknown-linux-musl",
+        "triple=x86_64-unknown-linux-musl; std_sha256=",
+    ),
+    (
+        "aarch64-unknown-linux-musl",
+        "triple=aarch64-unknown-linux-musl; std_sha256=",
+    ),
+];
+
+/// The text of every file a pin is written in.
+#[derive(Clone)]
+struct Files {
+    toolchain: String,
+    manifest: String,
+    dockerfile: String,
+    fragment: String,
+    zigbuild_action: String,
+    shellcheck_action: String,
+    hooks: String,
+    release: String,
 }
 
-/// The exact release rust-toolchain.toml pins: `channel = "X.Y.Z"`, never a channel or a release
-/// without its patch.
-fn release() -> String {
-    rust_release(
-        "rust-toolchain.toml",
-        &meta::repo().read("rust-toolchain.toml"),
-    )
-    .unwrap_or_else(|problem| panic!("{problem}"))
-}
-
-/// Every YAML file under .github, the workflows and the composite actions alike, parsed.
-fn github_documents() -> Vec<(String, Value)> {
-    let repo = meta::repo();
-    let files = repo.files_under(".github", &[".yaml", ".yml"]);
-    assert!(
-        !files.is_empty(),
-        "no YAML files under .github; the checks would see nothing"
-    );
-    repo.read_all(&files)
-        .into_iter()
-        .map(|(file, content)| {
-            let document = parse(&file, &content);
-            (file, document)
-        })
-        .collect()
-}
-
-/// Go: `TestRustLineIsOneRelease`. One exact Rust release, patch included, is shared by
-/// rust-toolchain.toml's channel, the workspace's rust-version, the image's build stage and every
-/// CI toolchain (each action's `toolchain` input, and any a script names), so the toolchain a
-/// developer, a hook, CI and the image build with is one compiler. (SSE pins only the line in
-/// `rust-version`; this workspace pins the release there too.)
-#[test]
-fn rust_line_is_one_release() {
-    let repo = meta::repo();
-    let release = release();
-    let mut problems = rust_version_problems(
-        "Cargo.toml",
-        &repo.read("Cargo.toml"),
-        &release,
-        RustVersion::Exact,
-    );
-    problems.extend(image_rust_problems(
-        DOCKERFILE,
-        &repo.read(DOCKERFILE),
-        &release,
-        RustVersion::Exact,
-    ));
-    problems.extend(ci_toolchain_problems(
-        &github_documents(),
-        &release,
-        ToolchainRef::Input,
-    ));
-    assert!(problems.is_empty(), "{}", report(&problems));
-}
-
-/// Go: `TestRustStepRules`, the negative control of the Rust toolchain step rule: another
-/// release, a channel, a release without its patch, and no toolchain at all.
-#[test]
-fn rust_step_rules() {
-    let document = parse(
-        "sample.yaml",
-        r#"jobs:
-  ok:
-    steps:
-      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567 # master
-        with:
-          toolchain: 1.98.1
-  bad:
-    steps:
-      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
-        with:
-          toolchain: 1.98.0
-      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
-        with:
-          toolchain: stable
-      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
-        with:
-          toolchain: "1.98"
-      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567
-"#,
-    );
-    let documents = [("sample.yaml".to_owned(), document)];
-    let problems = ci_toolchain_problems(&documents, "1.98.1", ToolchainRef::Input);
-    assert_eq!(problems.len(), 4, "{problems:#?}");
-
-    // A script naming another toolchain, and a workflow with no toolchain step at all.
-    let script = parse(
-        "script.yaml",
-        "jobs:\n  a:\n    steps:\n      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567\n        with:\n          toolchain: 1.98.1\n      - run: cargo +nightly test\n",
-    );
-    assert_eq!(
-        ci_toolchain_problems(
-            &[("script.yaml".to_owned(), script)],
-            "1.98.1",
-            ToolchainRef::Input
-        )
-        .len(),
-        1
-    );
-    let none = parse("none.yaml", "jobs:\n  a:\n    steps:\n      - run: make\n");
-    assert!(
-        !ci_toolchain_problems(
-            &[("none.yaml".to_owned(), none)],
-            "1.98.1",
-            ToolchainRef::Input
-        )
-        .is_empty(),
-        "a CI with no toolchain step was accepted"
-    );
-}
-
-/// SSE's `image_toolchain_patch_is_the_standard_library_version`, the negative control of the
-/// image's Rust: another release in the tag or in `RUST_VERSION`, a floating tag, and a missing
-/// argument are each refused.
-#[test]
-fn image_rust_rules() {
-    let good = "FROM --platform=$BUILDPLATFORM dhi.io/rust:1.98.1-debian13-dev AS build\n\
-                ARG RUST_VERSION=1.98.1\n";
-    let check =
-        |sample: &str| image_rust_problems(DOCKERFILE, sample, "1.98.1", RustVersion::Exact);
-    assert_eq!(check(good), Vec::<Problem>::new());
-    for (name, sample, want) in [
-        // Another tag is both another release than ARG RUST_VERSION's and than the toolchain's.
-        (
-            "another tag",
-            good.replace("rust:1.98.1-", "rust:1.98.0-"),
-            2,
-        ),
-        (
-            "another standard library",
-            good.replace("RUST_VERSION=1.98.1", "RUST_VERSION=1.98.0"),
-            1,
-        ),
-        ("a floating tag", good.replace("rust:1.98.1-", "rust:1-"), 1),
-        (
-            "no RUST_VERSION",
-            good.replace("ARG RUST_VERSION=1.98.1\n", ""),
-            1,
-        ),
-        ("both moved together", good.replace("1.98.1", "1.98.0"), 1),
-    ] {
-        assert_ne!(sample, good, "{name}: the sample is the good one");
-        let problems = check(&sample);
-        assert_eq!(problems.len(), want, "{name}: {problems:#?}");
+impl Files {
+    fn read() -> Self {
+        let repo = meta::repo();
+        Self {
+            toolchain: repo.read(TOOLCHAIN),
+            manifest: repo.read(MANIFEST),
+            dockerfile: repo.read(DOCKERFILE),
+            fragment: repo.read(FRAGMENT),
+            zigbuild_action: repo.read(ZIGBUILD_ACTION),
+            shellcheck_action: repo.read(SHELLCHECK_ACTION),
+            hooks: repo.read(HOOKS),
+            release: repo.read(RELEASE_WORKFLOW),
+        }
     }
 }
 
-/// The negative control on the real Dockerfile: a dhi.io/rust reference of another release
-/// anywhere, not only in the build stage's FROM (here a COPY --from= of another toolchain), is
-/// refused.
-#[test]
-fn image_rust_refuses_another_release_anywhere() {
-    let dockerfile = meta::repo().read(DOCKERFILE);
-    let release = release();
-    assert!(image_rust_problems(DOCKERFILE, &dockerfile, &release, RustVersion::Exact).is_empty());
-    assert!(
-        dockerfile.contains("WORKDIR /src\n"),
-        "WORKDIR /src is gone"
-    );
-    let broken = dockerfile.replacen(
-        "WORKDIR /src\n",
-        "WORKDIR /src\nCOPY --from=dhi.io/rust:1.97.0-debian13-dev /usr/local/rustup /usr/local/rustup\n",
-        1,
-    );
-    let problems = image_rust_problems(DOCKERFILE, &broken, &release, RustVersion::Exact);
-    assert!(
-        !problems.is_empty(),
-        "a COPY --from= of another dhi.io/rust release was accepted"
-    );
+/// A fragment variable's value: `NAME := value`.
+fn fragment_pin(files: &Files, name: &str) -> PinSource {
+    PinSource::new(
+        FRAGMENT,
+        &files.fragment,
+        &format!(r"(?m)^{}\s*:=\s*(\S+)\s*$", regex_escape(name)),
+    )
 }
 
-/// Go: `TestRustLineReading`. The readings the Rust line rests on: a channel or a release without
-/// its patch is not an exact release, and a `rust-version` of the line alone is not the release.
-#[test]
-fn rust_line_reading() {
-    assert_eq!(
-        rust_release("rust-toolchain.toml", "[toolchain]\nchannel = \"1.98.1\"\n").ok(),
-        Some("1.98.1".to_owned())
+/// The `name` without regex metacharacters it could carry (`-` and `_` need none).
+fn regex_escape(name: &str) -> String {
+    name.replace('.', r"\.")
+}
+
+/// A Dockerfile pin: the text of its `pattern`'s first group.
+fn dockerfile_pin(files: &Files, pattern: &str) -> PinSource {
+    PinSource::new(DOCKERFILE, &files.dockerfile, pattern)
+}
+
+/// The exact Rust release, in every file that writes it.
+fn rust_release_problems(files: &Files) -> Vec<Problem> {
+    one_value(
+        "the Rust release",
+        &[
+            PinSource::rust_channel(TOOLCHAIN, &files.toolchain),
+            PinSource::rust_version(MANIFEST, &files.manifest),
+            PinSource::rust_image_tag(DOCKERFILE, &files.dockerfile),
+            PinSource::rust_version_arg(DOCKERFILE, &files.dockerfile),
+            fragment_pin(files, "RUST_RELEASE_RUST_STD_VERSION"),
+        ],
+        &[],
+    )
+}
+
+/// zig between the action, the fragment and the Dockerfile.
+fn zig_problems(files: &Files) -> Vec<Problem> {
+    one_value(
+        "zig",
+        &[
+            PinSource::new(
+                ZIGBUILD_ACTION,
+                &files.zigbuild_action,
+                r#"(?m)^\s*ZIG_VERSION:\s*"?([^"\s]+)"?\s*$"#,
+            ),
+            fragment_pin(files, "RUST_RELEASE_ZIG_VERSION"),
+            dockerfile_pin(files, r"(?m)^ARG ZIG_VERSION=(\S+)\s*$"),
+        ],
+        &[],
+    )
+}
+
+/// cargo-zigbuild between the action, the fragment and the Dockerfile.
+fn cargo_zigbuild_problems(files: &Files) -> Vec<Problem> {
+    one_value(
+        "cargo-zigbuild",
+        &[
+            PinSource::new(
+                ZIGBUILD_ACTION,
+                &files.zigbuild_action,
+                r#"(?m)^\s*CARGO_ZIGBUILD_VERSION:\s*"?([^"\s]+)"?\s*$"#,
+            ),
+            fragment_pin(files, "RUST_RELEASE_CARGO_ZIGBUILD_VERSION"),
+            dockerfile_pin(files, r"(?m)^ARG CARGO_ZIGBUILD_VERSION=(\S+)\s*$"),
+        ],
+        &[],
+    )
+}
+
+/// Every archive digest the fragment records, against the copies of the action and the
+/// Dockerfile: zig for each build platform, cargo-zigbuild for each, rust-std for each target.
+fn digest_problems(files: &Files) -> Vec<Problem> {
+    let mut problems = one_value(
+        "the zig x86_64 digest",
+        &[
+            PinSource::new(
+                ZIGBUILD_ACTION,
+                &files.zigbuild_action,
+                r"(?m)^\s*ZIG_SHA256:\s*([0-9a-f]{64})\s*$",
+            ),
+            fragment_pin(files, "RUST_RELEASE_ZIG_SHA256_x86_64"),
+            dockerfile_pin(files, r"zig_arch=x86_64; zig_sha256=([0-9a-f]{64})"),
+        ],
+        &[],
     );
-    for inexact in ["stable", "1.98", "nightly-2026-10-01", "1.98.1-x86_64"] {
+    problems.extend(one_value(
+        "the zig aarch64 digest",
+        &[
+            fragment_pin(files, "RUST_RELEASE_ZIG_SHA256_aarch64"),
+            dockerfile_pin(files, r"zig_arch=aarch64; zig_sha256=([0-9a-f]{64})"),
+        ],
+        &[],
+    ));
+    for (index, (target, arm)) in ZIGBUILD_ARMS.iter().enumerate() {
+        let mut sources = vec![
+            fragment_pin(
+                files,
+                &format!("RUST_RELEASE_CARGO_ZIGBUILD_SHA256_{target}"),
+            ),
+            dockerfile_pin(files, &format!("{arm}([0-9a-f]{{64}})")),
+        ];
+        if index == 0 {
+            sources.push(PinSource::new(
+                ZIGBUILD_ACTION,
+                &files.zigbuild_action,
+                r"(?m)^\s*CARGO_ZIGBUILD_SHA256:\s*([0-9a-f]{64})\s*$",
+            ));
+        }
+        problems.extend(one_value(
+            &format!("the cargo-zigbuild digest for {target}"),
+            &sources,
+            &[],
+        ));
+    }
+    for (target, arm) in STD_ARMS {
+        problems.extend(one_value(
+            &format!("the rust-std digest for {target}"),
+            &[
+                fragment_pin(files, &format!("RUST_RELEASE_RUST_STD_SHA256_{target}")),
+                dockerfile_pin(files, &format!("{arm}([0-9a-f]{{64}})")),
+            ],
+            &[],
+        ));
+    }
+    problems
+}
+
+/// The ShellCheck release of the hook (its rev adds a fourth component for the wrapper, so only
+/// the first three count) and of the action that installs it.
+fn shellcheck_problems(files: &Files) -> Vec<Problem> {
+    one_value(
+        "ShellCheck",
+        &[
+            PinSource::new(
+                HOOKS,
+                &files.hooks,
+                r"repo: https://github\.com/shellcheck-py/shellcheck-py\s+rev:\s*(v\d+\.\d+\.\d+)",
+            ),
+            PinSource::new(
+                SHELLCHECK_ACTION,
+                &files.shellcheck_action,
+                r#"SHELLCHECK_VERSION:\s*["']?(v\d+\.\d+\.\d+)"#,
+            ),
+        ],
+        &[],
+    )
+}
+
+/// Trivy is pinned to an exact release, not a floating tag, so a finding means the same on every
+/// release and every recovery re-run.
+fn trivy_problems(files: &Files) -> Vec<Problem> {
+    one_value(
+        "Trivy",
+        &[PinSource::new(
+            RELEASE_WORKFLOW,
+            &files.release,
+            r"(?m)^\s*TRIVY_VERSION:\s*(v\d+\.\d+\.\d+)\s*$",
+        )],
+        &[],
+    )
+}
+
+/// A check over the files' text.
+type Check = fn(&Files) -> Vec<Problem>;
+
+fn assert_none(problems: &[Problem]) {
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+#[test]
+fn rust_release_is_one_value() {
+    let files = Files::read();
+    assert_none(&rust_release_problems(&files));
+    // The pin is an exact release, never a channel or a line.
+    rust_release(TOOLCHAIN, &files.toolchain).unwrap_or_else(|problem| panic!("{problem}"));
+}
+
+#[test]
+fn every_toolchain_target_has_a_rust_std_digest() {
+    let files = Files::read();
+    let targets = toolchain_targets(&files.toolchain);
+    assert!(!targets.is_empty(), "{TOOLCHAIN} names no target");
+    for target in targets {
         assert!(
-            rust_release(
-                "rust-toolchain.toml",
-                &format!("[toolchain]\nchannel = \"{inexact}\"\n")
-            )
-            .is_err(),
-            "{inexact:?} was accepted as an exact release"
-        );
-    }
-    assert!(rust_release("rust-toolchain.toml", "[toolchain]\n").is_err());
-    for (manifest, refused) in [
-        ("[workspace.package]\nrust-version = \"1.98.1\"\n", false),
-        ("[workspace.package]\nrust-version = \"1.98\"\n", true),
-        ("[workspace.package]\nrust-version = \"1.98.0\"\n", true),
-        ("[workspace.package]\n", true),
-    ] {
-        assert_eq!(
-            !rust_version_problems("Cargo.toml", manifest, "1.98.1", RustVersion::Exact).is_empty(),
-            refused,
-            "{manifest:?}"
+            files
+                .fragment
+                .contains(&format!("RUST_RELEASE_RUST_STD_SHA256_{target} :=")),
+            "{FRAGMENT} records no rust-std digest for {target}"
         );
     }
 }
 
-/// The zig and cargo-zigbuild pins between the setup-zigbuild action and the release fragment.
-fn zigbuild_problems(action: &str, fragment: &str) -> Vec<Problem> {
-    zigbuild_action_problems(
-        SETUP_ZIGBUILD,
-        action,
-        ZigRecord::Fragment {
-            file: RUST_RELEASE_FRAGMENT,
-            content: fragment,
-        },
-    )
-}
-
-/// SSE's `zig_is_one_version` and `cargo_zigbuild_is_one_version`, with the release fragment in
-/// place of the Dockerfile: CI's static builds (setup-zigbuild) and the record the image takes use
-/// one zig and one cargo-zigbuild, from the same `x86_64` archives, so a bump that moves one copy
-/// fails here rather than in the first build that runs it.
 #[test]
 fn zig_and_cargo_zigbuild_are_one_version() {
-    let repo = meta::repo();
-    let problems = zigbuild_problems(
-        &repo.read(SETUP_ZIGBUILD),
-        &repo.read(RUST_RELEASE_FRAGMENT),
-    );
-    assert!(problems.is_empty(), "{}", report(&problems));
+    let files = Files::read();
+    assert_none(&zig_problems(&files));
+    assert_none(&cargo_zigbuild_problems(&files));
 }
 
-/// The negative control: a moved version or digest on either side, and a pin the fragment does
-/// not write, are each a problem; a pin written twice with two values is one.
 #[test]
-fn zigbuild_pin_rules() {
-    let digest = "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026";
-    let zigbuild_digest = "52be2cb85ad3875682564a29bac1832b2ab3db68b1c504765c92d5249cc9b96f";
-    let action = format!(
-        "      env:\n        ZIG_VERSION: \"0.17.0\"\n        ZIG_SHA256: {digest}\n        \
-         CARGO_ZIGBUILD_VERSION: \"0.24.0\"\n        CARGO_ZIGBUILD_SHA256: {zigbuild_digest}\n"
-    );
-    let fragment = format!(
-        "RUST_RELEASE_ZIG_VERSION := 0.17.0\nRUST_RELEASE_ZIG_SHA256_x86_64 := {digest}\n\
-         RUST_RELEASE_CARGO_ZIGBUILD_VERSION := 0.24.0\n\
-         RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := {zigbuild_digest}\n"
-    );
-    assert_eq!(zigbuild_problems(&action, &fragment), Vec::<Problem>::new());
-
-    let other_digest = "9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8";
-    for (name, action, fragment) in [
-        (
-            "a moved zig in the action",
-            action.replace("ZIG_VERSION: \"0.17.0\"", "ZIG_VERSION: \"0.16.0\""),
-            fragment.clone(),
-        ),
-        (
-            "a moved cargo-zigbuild in the fragment",
-            action.clone(),
-            fragment.replace("ZIGBUILD_VERSION := 0.24.0", "ZIGBUILD_VERSION := 0.23.0"),
-        ),
-        (
-            "another zig digest in the fragment",
-            action.clone(),
-            fragment.replace(digest, other_digest),
-        ),
-        (
-            "another cargo-zigbuild digest in the action",
-            action.replace(zigbuild_digest, other_digest),
-            fragment.clone(),
-        ),
-        (
-            "a fragment without the zig digest",
-            action.clone(),
-            fragment.replace(&format!("RUST_RELEASE_ZIG_SHA256_x86_64 := {digest}\n"), ""),
-        ),
-        (
-            "a fragment writing zig twice",
-            action.clone(),
-            format!("{fragment}RUST_RELEASE_ZIG_VERSION := 0.16.0\n"),
-        ),
-    ] {
-        let problems = zigbuild_problems(&action, &fragment);
-        assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
-    }
+fn archive_digests_are_the_fragments() {
+    assert_none(&digest_problems(&Files::read()));
 }
 
-/// The release pins the Dockerfile repeats from the fragment.
-fn dockerfile_pin_problems(dockerfile: &str, fragment: &str) -> Vec<Problem> {
-    release_pin_problems(
-        DOCKERFILE,
-        dockerfile,
-        RUST_RELEASE_FRAGMENT,
-        fragment,
-        &RUST_RELEASE_PINS,
-    )
-}
-
-/// SSE's `zig_is_one_version` and `cargo_zigbuild_is_one_version` for the image, against the
-/// fragment's record: the image's build stage downloads the zig, cargo-zigbuild and rust-std
-/// releases the fragment pins, each `case` arm with the fragment's digest for its archive and no
-/// other arm, so the image and the release binaries are built by one toolchain; and every other
-/// sha256 the Dockerfile writes is an image or frontend digest.
-#[test]
-fn dockerfile_pins_are_the_fragments() {
-    let repo = meta::repo();
-    let problems =
-        dockerfile_pin_problems(&repo.read(DOCKERFILE), &repo.read(RUST_RELEASE_FRAGMENT));
-    assert!(problems.is_empty(), "{}", report(&problems));
-}
-
-/// The negative control: a moved version or digest in the Dockerfile, a pin the Dockerfile does
-/// not write, a swapped arm and a digest the record does not hold are each refused.
-#[test]
-fn dockerfile_pin_rules() {
-    let repo = meta::repo();
-    let dockerfile = repo.read(DOCKERFILE);
-    let fragment = repo.read(RUST_RELEASE_FRAGMENT);
-    assert_eq!(
-        dockerfile_pin_problems(&dockerfile, &fragment),
-        Vec::<Problem>::new()
-    );
-    let arm64_std = "7e0ad2e67817f224b7a6331e48d6397303fc050edaccf81784ed786ffddc884a";
-    assert!(
-        dockerfile.contains(arm64_std) && fragment.contains(arm64_std),
-        "the aarch64 rust-std digest; the negative control would test nothing"
-    );
-    for (name, sample) in [
-        (
-            "a moved zig",
-            dockerfile.replace("ARG ZIG_VERSION=0.17.0", "ARG ZIG_VERSION=0.16.0"),
-        ),
-        (
-            "another aarch64 rust-std digest",
-            dockerfile.replace(arm64_std, &"0".repeat(64)),
-        ),
-        (
-            "no cargo-zigbuild version",
-            dockerfile.replace("ARG CARGO_ZIGBUILD_VERSION=0.24.0\n", ""),
-        ),
-        (
-            "a swapped rust-std arm",
-            dockerfile.replace(
-                "arm64) triple=aarch64-unknown-linux-musl;",
-                "arm64) triple=x86_64-unknown-linux-musl;",
-            ),
-        ),
-        (
-            "a stray digest",
-            format!("{dockerfile}\n# {}\n", "a".repeat(64)),
-        ),
-    ] {
-        assert_ne!(
-            sample, dockerfile,
-            "{name}: the sample is the Dockerfile itself"
-        );
-        let problems = dockerfile_pin_problems(&sample, &fragment);
-        assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
-    }
-}
-
-/// The musl standard libraries the image's build stage unpacks are the exact release of
-/// rust-toolchain.toml, one sha256 for each of its targets, and the release binaries are built for
-/// exactly those targets. (SSE's `image_toolchain_patch_is_the_standard_library_version`, against
-/// the toolchain file rather than the image tag.)
-#[test]
-fn rust_std_is_the_rust_release() {
-    let repo = meta::repo();
-    let toolchain = repo.read("rust-toolchain.toml");
-    let problems = rust_std_problems(
-        RUST_RELEASE_FRAGMENT,
-        &repo.read(RUST_RELEASE_FRAGMENT),
-        &release(),
-        &toolchain_targets(&toolchain),
-    );
-    assert!(problems.is_empty(), "{}", report(&problems));
-}
-
-/// The negative control: another release, a missing, short, doubled or extra digest, and a
-/// platform list that leaves a target out are each refused.
-#[test]
-fn rust_std_rules() {
-    let targets = toolchain_targets(
-        "[toolchain]\nchannel = \"1.98.1\"\ntargets = [\"x86_64-unknown-linux-musl\", \
-         \"aarch64-unknown-linux-musl\"]\n",
-    );
-    assert_eq!(targets.len(), 2, "{targets:?}");
-    let amd64 = "bd9f35880de21dab0e387e84009c00001ae7836a4ba565cb16823f13f75f325f";
-    let arm64 = "7e0ad2e67817f224b7a6331e48d6397303fc050edaccf81784ed786ffddc884a";
-    let fragment = format!(
-        "RUST_RELEASE_RUST_STD_VERSION := 1.98.1\n\
-         RUST_RELEASE_RUST_STD_SHA256_x86_64-unknown-linux-musl := {amd64}\n\
-         RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := {arm64}\n\
-         RUST_RELEASE_PLATFORMS := amd64:x86_64-unknown-linux-musl \
-         arm64:aarch64-unknown-linux-musl\n"
-    );
-    let check = |fragment: &str, release: &str, targets: &[String]| {
-        rust_std_problems(RUST_RELEASE_FRAGMENT, fragment, release, targets)
-    };
-    assert_eq!(check(&fragment, "1.98.1", &targets), Vec::<Problem>::new());
-    assert!(
-        !check(&fragment, "1.98.1", &[]).is_empty(),
-        "no target at all was accepted"
-    );
-
-    let arm64_line =
-        format!("RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := {arm64}\n");
-    for (name, sample, release) in [
-        ("another release", fragment.clone(), "1.98.0"),
-        (
-            "no rust-std version",
-            fragment.replace("RUST_RELEASE_RUST_STD_VERSION := 1.98.1\n", ""),
-            "1.98.1",
-        ),
-        (
-            "a missing digest",
-            fragment.replace(&arm64_line, ""),
-            "1.98.1",
-        ),
-        (
-            "a short digest",
-            fragment.replace(arm64, &arm64[1..]),
-            "1.98.1",
-        ),
-        (
-            "a doubled digest",
-            format!("{fragment}{arm64_line}"),
-            "1.98.1",
-        ),
-        (
-            "a digest of another target",
-            format!(
-                "{fragment}RUST_RELEASE_RUST_STD_SHA256_riscv64gc-unknown-linux-musl := {arm64}\n"
-            ),
-            "1.98.1",
-        ),
-        (
-            "a platform left out",
-            fragment.replace(" arm64:aarch64-unknown-linux-musl", ""),
-            "1.98.1",
-        ),
-    ] {
-        let problems = check(&sample, release, &targets);
-        assert_eq!(problems.len(), 1, "{name}: {problems:#?}");
-    }
-}
-
-/// Go: `TestShellCheckIsOneVersion`. droast's ShellCheck bridge runs the `shellcheck` on `PATH`,
-/// which CI installs with setup-shellcheck; it must be the release the shellcheck-py hook wraps
-/// (its rev adds a fourth component for the wrapper), which Dependabot moves.
 #[test]
 fn shellcheck_is_one_version() {
-    let repo = meta::repo();
-    let problems = shellcheck_problems(
-        PRE_COMMIT_CONFIG,
-        &repo.read(PRE_COMMIT_CONFIG),
-        SHELLCHECK_ACTION,
-        &repo.read(SHELLCHECK_ACTION),
-    );
-    assert!(problems.is_empty(), "{}", report(&problems));
+    assert_none(&shellcheck_problems(&Files::read()));
 }
 
-/// The negative control of the version check: a moved hook, a moved action and a missing pin are
-/// each a problem.
-#[test]
-fn hook_version_rules() {
-    let hooks = "  - repo: https://github.com/shellcheck-py/shellcheck-py\n    rev: v0.11.0.1\n";
-    let shellcheck = "        SHELLCHECK_VERSION: v0.11.0\n";
-    let check = |hooks: &str, action: &str| {
-        shellcheck_problems(PRE_COMMIT_CONFIG, hooks, SHELLCHECK_ACTION, action)
-    };
-    assert_eq!(check(hooks, shellcheck), Vec::<Problem>::new());
-    for (name, problems) in [
-        (
-            "a moved ShellCheck action",
-            check(hooks, "        SHELLCHECK_VERSION: v0.10.0\n"),
-        ),
-        (
-            "a moved ShellCheck hook",
-            check(
-                &hooks.replace("rev: v0.11.0.1", "rev: v0.12.0.1"),
-                shellcheck,
-            ),
-        ),
-        ("a missing ShellCheck pin", check(hooks, "")),
-    ] {
-        assert!(!problems.is_empty(), "{name} was accepted");
-    }
-}
-
-/// SSE's `trivy_is_one_version`, for every workflow that scans (the release, which scans the
-/// image): one pinned Trivy, so a finding means the same on every release and a recovery re-run.
 #[test]
 fn trivy_is_pinned() {
-    let repo = meta::repo();
-    let scanning: Vec<(String, String)> = repo
-        .read_all(&repo.files_under(".github/workflows", &[".yaml", ".yml"]))
-        .into_iter()
-        .filter(|(_, content)| content.contains("trivy") || content.contains("TRIVY"))
-        .collect();
-    assert!(
-        scanning.iter().any(|(file, _)| file == RELEASE_WORKFLOW),
-        "{RELEASE_WORKFLOW} no longer scans; the check would see nothing"
-    );
-    let problems = trivy_problems(&scanning);
-    assert!(problems.is_empty(), "{}", report(&problems));
+    assert_none(&trivy_problems(&Files::read()));
 }
 
-/// The negative control: a floating version, a second pin, no setup-trivy step, a step that
-/// installs its own version, and two workflows on two versions are each refused.
+/// The negative controls: a pin bumped in one file only, and a pin a file no longer writes, are
+/// each refused.
 #[test]
-fn trivy_rules() {
-    let good = "env:\n  TRIVY_VERSION: v0.74.0\njobs:\n  release:\n    steps:\n      \
-                - uses: aquasecurity/setup-trivy@0123456789abcdef0123456789abcdef01234567\n        \
-                with:\n          version: ${{ env.TRIVY_VERSION }}\n";
-    let check = |samples: &[&str]| {
-        let workflows: Vec<(String, String)> = samples
-            .iter()
-            .enumerate()
-            .map(|(index, sample)| (format!("w{index}.yaml"), (*sample).to_owned()))
-            .collect();
-        trivy_problems(&workflows)
-    };
-    assert_eq!(check(&[good]), Vec::<Problem>::new());
-    for (name, sample) in [
+fn a_pin_changed_in_one_file_is_refused() {
+    let files = Files::read();
+    let release = rust_release(TOOLCHAIN, &files.toolchain).expect("an exact release");
+    let other = "0.0.1";
+    let digest_x86 = "bd9f35880de21dab0e387e84009c00001ae7836a4ba565cb16823f13f75f325f";
+    let flipped = format!("{}0", &digest_x86[..63]);
+    let cases: Vec<(&str, Files, Check)> = vec![
         (
-            "a floating version",
-            good.replace("TRIVY_VERSION: v0.74.0", "TRIVY_VERSION: latest"),
+            "the toolchain on another release",
+            Files {
+                toolchain: files.toolchain.replace(&release, other),
+                ..files.clone()
+            },
+            rust_release_problems,
         ),
         (
-            "a second pin",
-            good.replace("jobs:", "  OTHER:\n    TRIVY_VERSION: v0.73.0\njobs:"),
+            "the image on another release",
+            Files {
+                dockerfile: files.dockerfile.replace(
+                    &format!("ARG RUST_VERSION={release}"),
+                    &format!("ARG RUST_VERSION={other}"),
+                ),
+                ..files.clone()
+            },
+            rust_release_problems,
         ),
         (
-            "no setup-trivy step",
-            good.replace("aquasecurity/setup-trivy", "some/other-action"),
+            "the rust-std release",
+            Files {
+                fragment: files.fragment.replace(
+                    &format!("RUST_RELEASE_RUST_STD_VERSION := {release}"),
+                    &format!("RUST_RELEASE_RUST_STD_VERSION := {other}"),
+                ),
+                ..files.clone()
+            },
+            rust_release_problems,
         ),
         (
-            "a step with its own version",
-            good.replace("${{ env.TRIVY_VERSION }}", "v0.73.0"),
+            "the Dockerfile's zig",
+            Files {
+                dockerfile: files
+                    .dockerfile
+                    .replace("ARG ZIG_VERSION=0.17.0", "ARG ZIG_VERSION=0.16.0"),
+                ..files.clone()
+            },
+            zig_problems,
         ),
-    ] {
-        assert_eq!(check(&[&sample]).len(), 1, "{name} was not refused once");
+        (
+            "the action's cargo-zigbuild",
+            Files {
+                zigbuild_action: files.zigbuild_action.replace(
+                    "CARGO_ZIGBUILD_VERSION: \"0.24.0\"",
+                    "CARGO_ZIGBUILD_VERSION: \"0.23.0\"",
+                ),
+                ..files.clone()
+            },
+            cargo_zigbuild_problems,
+        ),
+        (
+            "a rust-std digest in the fragment",
+            Files {
+                fragment: files.fragment.replace(digest_x86, &flipped),
+                ..files.clone()
+            },
+            digest_problems,
+        ),
+        (
+            "a rust-std digest the Dockerfile no longer writes",
+            Files {
+                dockerfile: files.dockerfile.replace("std_sha256=", "std_digest="),
+                ..files.clone()
+            },
+            digest_problems,
+        ),
+        (
+            "the hook's ShellCheck",
+            Files {
+                hooks: files.hooks.replace("rev: v0.11.0.1", "rev: v0.12.0.1"),
+                ..files.clone()
+            },
+            shellcheck_problems,
+        ),
+        (
+            "a floating Trivy",
+            Files {
+                release: files
+                    .release
+                    .replace("TRIVY_VERSION: v0.74.0", "TRIVY_VERSION: latest"),
+                ..files.clone()
+            },
+            trivy_problems,
+        ),
+    ];
+    for (name, changed, check) in cases {
+        assert!(!check(&changed).is_empty(), "{name} was accepted");
     }
-    let other = good.replace("v0.74.0", "v0.73.0");
-    assert_eq!(check(&[good, &other]).len(), 1, "two Trivy versions");
 }
