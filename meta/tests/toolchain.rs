@@ -56,7 +56,7 @@ const REQUIRE_TOOLS_SWITCH: &str = concat!("SDA_REQUIRE", "_TOOLS");
 
 /// The hooks that read the whole tree rather than the files pre-commit passes, so each one runs
 /// on every commit and must not run twice per commit.
-const ALWAYS_RUN_HOOKS: [&str; 3] = ["check-license-headers", "check-suppressions", "docs-links"];
+const ALWAYS_RUN_HOOKS: [&str; 3] = ["check-license-headers", "check-suppressions", "lychee"];
 
 fn parse(file: &str, content: &str) -> Value {
     yaml::parse(file, content).unwrap_or_else(|problem| panic!("{problem}"))
@@ -637,50 +637,55 @@ fn always_run_rules() {
     };
     let good = "        pass_filenames: false\n        always_run: true\n        stages: \
                 [pre-commit]\n";
-    let config = |docs_links: &str| {
+    let config = |hook_text: &str| {
         format!(
-            "repos:\n  - repo: local\n    hooks:\n{}{}{docs_links}",
-            hook("check-license-headers", good),
+            "repos:\n  - repo: local\n    hooks:\n{}{}{}",
             hook("check-suppressions", good),
+            hook("lychee", good),
+            hook_text,
         )
     };
     assert_eq!(
         always_run_problems(
-            &hooks(&config(&hook("docs-links", good))),
+            &hooks(&config(&hook("check-license-headers", good))),
             &ALWAYS_RUN_HOOKS
         ),
         Vec::<Problem>::new()
     );
-    for (name, docs_links) in [
+    for (name, license_headers) in [
         ("a missing hook", String::new()),
         (
             "a doubled hook",
-            format!("{}{}", hook("docs-links", good), hook("docs-links", good)),
+            format!(
+                "{}{}",
+                hook("check-license-headers", good),
+                hook("check-license-headers", good)
+            ),
         ),
         (
             "file names passed",
             hook(
-                "docs-links",
+                "check-license-headers",
                 &good.replace("pass_filenames: false", "pass_filenames: true"),
             ),
         ),
         (
             "not always run",
             hook(
-                "docs-links",
+                "check-license-headers",
                 &good.replace("always_run: true", "always_run: false"),
             ),
         ),
         (
             "every stage",
             hook(
-                "docs-links",
+                "check-license-headers",
                 &good.replace("stages: [pre-commit]", "stages: [pre-commit, commit-msg]"),
             ),
         ),
     ] {
         assert!(
-            !always_run_problems(&hooks(&config(&docs_links)), &ALWAYS_RUN_HOOKS).is_empty(),
+            !always_run_problems(&hooks(&config(&license_headers)), &ALWAYS_RUN_HOOKS).is_empty(),
             "{name} was accepted"
         );
     }

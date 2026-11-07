@@ -72,11 +72,11 @@ which `meta/tests/toolchain.rs` keeps equal.
 
 The meta crate's tests (`meta/tests`, run by `make rust-test`) guard the tooling itself: the pins,
 the Dockerfile, the CI gates, flags that make a gate pass on nothing, Docker kept out of the plain
-tests, relative links, and the two check scripts, plus the Rust boundaries. Most run rust-common's
+tests, and the two check scripts, plus the Rust boundaries. Most run rust-common's
 `repo-meta` checks with this repository's parameters (a scratch repository runs git through
 `testenv_core::gitenv::isolate`); the boundaries and the integration images are local. They need
-only git and bash, never skip, and carry a negative control each. The `docs-links` hook runs
-`cargo test --locked -p meta --test docs`.
+only git and bash, never skip, and carry a negative control each. The `lychee` hook checks the
+relative links and fragments in the Markdown.
 
 ### Generated or vendored: never hand-edit
 
@@ -329,7 +329,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `.github/workflows/**`, `.github/actions/**` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std, Trivy and ShellCheck pins, platforms, vacuous flags, required gates and skipped hooks) |
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
-| `README.md`, `docs/**/*.md`, other Markdown | `cargo test --locked -p meta --test docs` (the `docs-links` hook); prose wraps at 100 columns (markdownlint in `make check`) |
+| `README.md`, `docs/**/*.md`, other Markdown | the `lychee` hook (`--offline --include-fragments`); prose wraps at 100 columns (markdownlint in `make check`) |
 | `.agents/skills/**` | the Markdown row |
 
 ## Commit messages

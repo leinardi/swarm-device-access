@@ -11,7 +11,7 @@ Also, by what changed (full table: AGENTS.md, Validation matrix):
 
 - a Cargo manifest, `Cargo.lock` or `deny.toml`: `make rust-deny` (network).
 - `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**`: `make test-integration` (Docker).
-- Markdown: `cargo test --locked -p meta --test docs`; prose wraps at 100 columns.
+- Markdown: `pre-commit run lychee --all-files`; prose wraps at 100 columns.
 - a new suppression: `scripts/check-suppressions.sh --update`, commit the baseline.
 
 Or run `make check` to run pre-commit on all files (slower but thorough).
