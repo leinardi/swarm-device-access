@@ -56,7 +56,7 @@ const REQUIRE_TOOLS_SWITCH: &str = concat!("SDA_REQUIRE", "_TOOLS");
 
 /// The hooks that read the whole tree rather than the files pre-commit passes, so each one runs
 /// on every commit and must not run twice per commit.
-const ALWAYS_RUN_HOOKS: [&str; 3] = ["check-license-headers", "check-suppressions", "lychee"];
+const ALWAYS_RUN_HOOKS: [&str; 2] = ["check-license-headers", "lychee"];
 
 fn parse(file: &str, content: &str) -> Value {
     yaml::parse(file, content).unwrap_or_else(|problem| panic!("{problem}"))
@@ -639,10 +639,11 @@ fn always_run_rules() {
                 [pre-commit]\n";
     let config = |hook_text: &str| {
         format!(
-            "repos:\n  - repo: local\n    hooks:\n{}{}{}",
-            hook("check-suppressions", good),
-            hook("lychee", good),
-            hook_text,
+            "repos:
+  - repo: local
+    hooks:
+{}{hook_text}",
+            hook("lychee", good)
         )
     };
     assert_eq!(

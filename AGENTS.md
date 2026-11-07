@@ -296,20 +296,6 @@ in the same commit, when a reused component changes or an upstream fix is taken.
   `# droast ignore=` explains why the fix does not apply here, not which rule fired; `#[expect]`
   carries it in `reason = "..."` and droast in `reason="..."`.
 
-## Suppressions are ratcheted
-
-Every in-file suppression is counted per rule against `.suppressions-baseline` by the
-`check-suppressions` pre-commit hook (`scripts/check-suppressions.sh`): each lint of a Rust
-`#[expect(...)]` or `#[allow(...)]` (not one wrapped in `cfg_attr`; `#[allow]` is denied by the
-workspace lints anyway), `# shellcheck disable=`, `# droast ignore=` and `# droast global ignore=`.
-
-Adding one is allowed, but never silently: the hook refuses a commit that adds a suppression line
-without changing the baseline in the same commit, including a swap or a moved file that leaves the
-count unchanged. Prefer fixing the finding. If a suppression really is right, write it with a
-reason, stage it, run `scripts/check-suppressions.sh --update`, and commit the baseline alongside
-it. A count that has fallen below its baseline fails the same way, with the same fix: the file
-describes the repository, not a past one.
-
 ## Validation matrix
 
 Run before considering an edit done. `make check` applies to every row.
@@ -322,7 +308,6 @@ Run before considering an edit done. `make check` applies to every row.
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `tag` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`), `make docker-build` |
 | `.mk/rust-release.mk`, `.github/actions/setup-zigbuild/**` | `make rust-release-binaries` (pinned zig on PATH), `cargo test --locked -p meta --test toolchain` |
-| `scripts/check-suppressions.sh`, `.suppressions-baseline` | `cargo test --locked -p meta --test suppressions` |
 | `scripts/check-license-headers.sh` | `pre-commit run check-license-headers --all-files` |
 | `.github/scripts/**` | `bash .github/scripts/binary-attestation-status.test.sh`, shellcheck (in `make check`) |
 | `meta/**` | `make verify` |
