@@ -8,13 +8,18 @@ assignees: []
 ## Step 1: Are you in the right place?
 
 * [ ] I have checked that there are no duplicate active or recent issues (bugs, questions, or
-      feature requests) describing this problem.
-* [ ] I am using the latest released version of this project (or have tested on the main/default
-      branch).
+  feature requests) describing this problem.
+* [ ] I am using the latest release (the binary, or `ghcr.io/leinardi/swarm-device-access:latest`),
+  or have tested a build of `master`.
+* [ ] This is not a security vulnerability (those go through the private process in SECURITY.md).
 
 ## Step 2: Describe your environment
 
-* swarm-device-access version (image tag or digest, or the `version` the daemon logs at start): `?`
+<!-- The version is in the daemon's startup line (`swarm-device-access starting version=...
+commit=...`); the binary has no --version. -->
+
+* swarm-device-access version and commit (startup line, or the image tag and digest): `?`
+* How it runs (the launcher as a Swarm service, `docker run`, the release binary, own build): `?`
 * Operating system, kernel version (`uname -r`) and cgroup version (v1 or v2): `?`
 * Docker Engine version (`docker version`), and whether the node runs in Swarm mode: `?`
 * Container runtime (runc, crun, ...) and init system (systemd or other): `?`
@@ -42,10 +47,11 @@ assignees: []
 
 ### Relevant code, configuration, or data
 
-<!-- Paste the smallest possible code or config snippet that reproduces the issue. -->
+<!-- Paste the smallest service definition, command line or config file that reproduces the
+issue, with the device paths it bind-mounts. Never paste a secret, such as a registry token. -->
 
-```text
-// Example snippet (replace with your own)
+```yaml
+# Example snippet (replace with your own)
 ```
 
 ### Error / log output

@@ -1,25 +1,29 @@
 name: Integration tests
 
+# On every pull request and every push to master: release.yaml gates on this job having passed on
+# the push of the exact commit it releases (require-ci-green), as it does on ci.yaml's ci-result.
 on:
   pull_request:
   push:
     branches:
       - master
-      - devel
 
 concurrency:
-  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
-  cancel-in-progress: true
+  # As in ci.yaml: a pull request's runs share one group per branch, so a newer push cancels the
+  # older run; every push to master gets a group of its own, so a newer push never replaces a
+  # queued run of an earlier commit.
+  group: "${{ github.workflow }} @ ${{ github.event_name == 'pull_request' && github.event.pull_request.head.label || github.run_id }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Nothing by default: every job states the permissions it needs.
-permissions: {}
+# Every job reads the repository and nothing else.
+permissions:
+  contents: read
 
 jobs:
   # The integration suite (the testenv crate) against the image built from the shipped Dockerfile,
   # and the binary copied out of it; make test-integration builds both, pulls the pinned 1.x image
   # the identity control and the upgrade test run, and owns the suite deadline, so CI and local runs
-  # share one source of truth. The toolchain is the exact release of rust-toolchain.toml; the Rust
-  # cache is saved only on a pull request, as in ci.yaml.
+  # share one source of truth. The toolchain is the exact release of rust-toolchain.toml.
   #
   # The image builds from dhi.io bases, which need a login. A pull request from another repository
   # (a fork) gets no secrets, so it cannot build the image the whole suite runs against, and the
@@ -30,8 +34,6 @@ jobs:
     name: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'integration (fork: not run)' || 'integration' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: read
     env:
       # What dtolnay/rust-toolchain exported to every later step of the job.
       CARGO_INCREMENTAL: "0"
@@ -45,16 +47,22 @@ jobs:
       - name: Checkout
         if: env.FROM_FORK != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Rust
         if: env.FROM_FORK != 'true'
         run: rustup toolchain install --no-self-update
 
+      # Its own key: the integration feature builds other units than CI's rust job. Saved only on
+      # master, the one ref whose caches every pull request can restore.
       - name: Cache the Rust build
         if: env.FROM_FORK != 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          save-if: ${{ github.event_name == 'pull_request' }}
+          shared-key: ci
+          key: integration
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Require the dhi.io token
         if: env.FROM_FORK != 'true'
@@ -71,7 +79,7 @@ jobs:
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: dhi.io
-          username: ${{ vars.DHI_USERNAME }}
+          username: leinardi
           password: ${{ secrets.DHI_TOKEN }}
 
       # The enforcement flags turn every missing prerequisite into a failure,

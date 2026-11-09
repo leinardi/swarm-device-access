@@ -19,19 +19,29 @@
 # MIT-licensed, Copyright (c) 2026 Roberto Leinardi.
 #
 
-# The Dockerfile frontend above is pinned as tag@sha256:<index digest>, so a
-# moved 1.7 tag cannot change how this file is built; it is updated by hand.
+# The Dockerfile frontend above is pinned as tag@sha256:<index digest>, so a moved 1.7 tag cannot
+# change how this file is built. Dependabot's docker ecosystem does not update it: bump it by hand
+# (docs/release.md).
 #
-# Base images are pinned by tag, not by digest: dhi.io republishes its tags
-# often to ship security fixes, and a rebuild should pick those up. Every
-# release build is scanned, so a newer base never ships unscanned. The rust tag
-# names the exact release of rust-toolchain.toml, so the image builds with the
-# toolchain CI tests; a new Rust release moves rust-toolchain.toml, this tag and
-# RUST_VERSION together, by hand.
+# The dhi.io bases are pinned by an explicit tag, deliberately not by digest: dhi.io rebuilds its
+# tags too often (security fixes) for a digest pin to be worth following by hand, and a rebuild
+# picks those fixes up. Each is one literal FROM, so Dependabot's docker ecosystem can move the tag
+# (it does not read ARG defaults). Every release build is smoke-tested and scanned, and the release
+# notes record the base digest each platform was built on, read from the build's provenance. The
+# rust tag names the exact release of rust-toolchain.toml, so the image builds with the toolchain
+# CI tests; a new Rust release moves rust-toolchain.toml, this tag and RUST_VERSION together, by
+# hand.
 #
-# The zig, cargo-zigbuild and rust-std versions and digests below are copies of
-# the pins recorded in .mk/rust-release.mk; meta/tests/toolchain.rs keeps them
-# equal.
+# The zig, cargo-zigbuild and rust-std versions and digests below are copies of the pins recorded
+# in .mk/rust-release.mk; meta/tests/toolchain.rs keeps them equal.
+#
+# Two targets ship the same runtime stage on the same base:
+#   runtime (the default, last stage): the binary is cross-compiled in the build stage below. For
+#     local development: `make docker-build`.
+#   prebuilt: the binary is the release asset already built outside Docker (`make
+#     rust-release-binaries`), COPYed from the `dist` build context, so the image binary is byte for
+#     byte the attested release asset. CI and the release build this one: `make
+#     image-build-prebuilt`. The build stage, and so dhi.io/rust, is never used.
 
 ########################
 # build: cross-compile a static musl binary for the target platform on the build platform, with
@@ -128,27 +138,18 @@ RUN --mount=type=cache,target=/root/.cargo/registry,id=cargo-registry,sharing=lo
 	&& cp "target/${triple}/release/swarm-device-access" /out/swarm-device-access
 
 ########################
-# runtime: dhi.io hardened static base (distroless-style, no shell).
-# The binary is statically linked against musl, so no libc is required.
+# dist: the prebuilt target's binaries. Empty here: the build replaces this stage with the `dist`
+# directory (`--build-context dist=dist`), which holds the release assets
+# swarm-device-access-<os>-<arch>. Without that context the prebuilt target fails on the missing
+# file instead of pulling anything.
 ########################
-FROM dhi.io/static:20250419 AS runtime
+FROM scratch AS dist
 
-# The same build arguments as the build stage: an ARG is scoped to the stage that declares it.
-ARG VERSION="dev"
-ARG COMMIT="none"
-ARG DATE="unknown"
-
-# The seven OCI labels droast.toml requires ([required-labels], strict-labels).
-LABEL org.opencontainers.image.title="swarm-device-access" \
-	org.opencontainers.image.description="Listens to Docker container-start events and injects cgroup v2 BPF device-allow rules for containers that bind-mount /dev/... paths" \
-	org.opencontainers.image.source="https://github.com/leinardi/swarm-device-access" \
-	org.opencontainers.image.version="${VERSION}" \
-	org.opencontainers.image.revision="${COMMIT}" \
-	org.opencontainers.image.created="${DATE}" \
-	org.opencontainers.image.licenses="Apache-2.0"
-
-# Copy the binary
-COPY --from=build /out/swarm-device-access /usr/local/bin/swarm-device-access
+########################
+# base: dhi.io hardened static base (distroless-style, no shell), shared by both targets: the user
+# and the entrypoint. The binary is statically linked against musl, so no libc is required.
+########################
+FROM dhi.io/static:20250419 AS base
 
 # NOTE: the daemon must run as root and with elevated privileges. It writes
 # eBPF programs into the host's cgroup v2 hierarchy via /sys/fs/cgroup and
@@ -167,3 +168,51 @@ COPY --from=build /out/swarm-device-access /usr/local/bin/swarm-device-access
 # droast ignore=DF002 reason="bpf(2) and cgroup v2 writes require root"
 USER 0
 ENTRYPOINT ["/usr/local/bin/swarm-device-access"]
+
+########################
+# prebuilt: the release asset of the target platform, from the dist context, as the binary.
+########################
+FROM base AS prebuilt
+
+# The same build arguments as the build stage: an ARG is scoped to the stage that declares it.
+ARG VERSION="dev"
+ARG COMMIT="none"
+ARG DATE="unknown"
+
+# The seven OCI labels droast.toml requires ([required-labels], strict-labels), the same in both
+# targets (meta/tests/dockerfiles.rs): droast reads the default target's own. Version, revision and
+# created come from the same build arguments the binary is stamped with.
+LABEL org.opencontainers.image.title="swarm-device-access" \
+	org.opencontainers.image.description="Listens to Docker container-start events and injects cgroup v2 BPF device-allow rules for containers that bind-mount /dev/... paths" \
+	org.opencontainers.image.source="https://github.com/leinardi/swarm-device-access" \
+	org.opencontainers.image.version="${VERSION}" \
+	org.opencontainers.image.revision="${COMMIT}" \
+	org.opencontainers.image.created="${DATE}" \
+	org.opencontainers.image.licenses="Apache-2.0"
+
+ARG TARGETOS
+ARG TARGETARCH
+COPY --from=dist --chmod=0755 swarm-device-access-${TARGETOS}-${TARGETARCH} /usr/local/bin/swarm-device-access
+
+########################
+# runtime (default): the binary the build stage cross-compiled.
+########################
+FROM base AS runtime
+
+# The same build arguments as the build stage: an ARG is scoped to the stage that declares it.
+ARG VERSION="dev"
+ARG COMMIT="none"
+ARG DATE="unknown"
+
+# The seven OCI labels droast.toml requires ([required-labels], strict-labels), the same in both
+# targets (meta/tests/dockerfiles.rs): droast reads the default target's own. Version, revision and
+# created come from the same build arguments the binary is stamped with.
+LABEL org.opencontainers.image.title="swarm-device-access" \
+	org.opencontainers.image.description="Listens to Docker container-start events and injects cgroup v2 BPF device-allow rules for containers that bind-mount /dev/... paths" \
+	org.opencontainers.image.source="https://github.com/leinardi/swarm-device-access" \
+	org.opencontainers.image.version="${VERSION}" \
+	org.opencontainers.image.revision="${COMMIT}" \
+	org.opencontainers.image.created="${DATE}" \
+	org.opencontainers.image.licenses="Apache-2.0"
+
+COPY --from=build /out/swarm-device-access /usr/local/bin/swarm-device-access

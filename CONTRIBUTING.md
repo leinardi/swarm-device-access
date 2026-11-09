@@ -34,7 +34,8 @@ CI runs the same checks on every pull request in `.github/workflows/ci.yaml`.
 The Dockerfile is linted by [droast](https://github.com/immanuwell/dockerfile-roast) (Dockerfile
 Roast) with the policy in `droast.toml`. pre-commit builds droast from source, so `make check`
 needs a Rust toolchain (`cargo`); its required ShellCheck bridge runs the `shellcheck` on PATH, at
-the release `.github/actions/setup-shellcheck` pins.
+the release the `shellcheck-py` hook in `.pre-commit-config.yaml` wraps (CI installs it with
+gh-composite-actions' `setup-shellcheck`).
 
 ## Branch and PR conventions
 

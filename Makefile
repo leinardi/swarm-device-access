@@ -26,7 +26,7 @@ MK_COMMON_DIR         := $(REPO_ROOT)/.mk
 MK_COMMON_FILES       := docker.mk help.mk password.mk pre-commit.mk rust.mk
 
 # Repo-local snippets that are NOT in make-common
-MK_LOCAL_FILES        := docker-run.mk integration-test.mk audit-deps.mk rust-release.mk verify.mk
+MK_LOCAL_FILES        := docker-run.mk integration-test.mk audit-deps.mk rust-release.mk image.mk verify.mk
 
 MK_COMMON_BOOTSTRAP_SCRIPT := $(REPO_ROOT)/scripts/bootstrap-mk-common.sh
 

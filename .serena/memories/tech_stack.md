@@ -17,7 +17,13 @@
 - **Linters**: clippy (pedantic + restriction lints, `-D warnings`), rustfmt, cargo-deny,
   cargo-machete, droast, ShellCheck; enforced via pre-commit hooks
 - **Pre-commit**: `make check` (all files) / `make check-stage` (staged only)
-- **Container**: `deployments/docker/Dockerfile`; image name = `swarm-device-access`
+- **Container**: `deployments/docker/Dockerfile` (dhi.io bases by tag; targets `runtime`, the
+  default, compiling its own binary, and `prebuilt`, COPYing `dist/swarm-device-access-linux-<arch>`,
+  the one CI tests and the release ships); image name = `swarm-device-access`
+- **CI/release**: `ci.yaml` (`ci-result` needs `pre-commit-all`, `rust`, `image`,
+  `conventional-commits`), `integration.yaml`, `release.yaml` (`guard`, `ci-green`, `audit`,
+  `release`; build once, smoke + `trivy-gate`), `scheduled-scan.yaml`; shared steps from
+  gh-composite-actions; Trivy never pinned, exceptions in `.trivyignore.yaml`
 - **Runtime**: must run with `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`;
   bind mounts: `/var/run/docker.sock`, `/sys → /host/sys`, `/dev`;
   `/run/dbus/system_bus_socket` optional (enables reload handling)

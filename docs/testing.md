@@ -47,7 +47,8 @@ named `integration (fork: not run)`, runs nothing and says so with a warning; th
 that merges the pull request runs the suite in full. The gate is where the pull request comes from,
 not whether the secret is set: on a same-repository pull request or a push, a missing `DHI_TOKEN`
 fails the job. A push to a branch of a contributor's fork therefore fails that check, since the
-fork has no `DHI_TOKEN`. The release workflow runs the same enforced suite.
+fork has no `DHI_TOKEN`. The release workflow does not run the suite again: it requires this job
+to have passed on the push of the commit it releases ([`docs/release.md`](release.md#what-ci-proves)).
 
 Prerequisites for the enforcement tests:
 
