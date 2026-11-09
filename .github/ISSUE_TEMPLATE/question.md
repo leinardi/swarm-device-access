@@ -43,10 +43,15 @@ assignees: []
 
 <!-- Fill in what makes sense for your question, or remove fields that don't apply. -->
 
-* swarm-device-access version (image tag or digest): `?`
+<!-- The version is in the daemon's startup line (`swarm-device-access starting version=...
+commit=...`); the binary has no --version. -->
+
+* swarm-device-access version and commit (startup line, or the image tag and digest): `?`
+* How it runs (the launcher as a Swarm service, `docker run`, the release binary, own build): `?`
 * Operating system, kernel version (`uname -r`) and cgroup version (v1 or v2): `?`
 * Docker Engine version (`docker version`), and whether the node runs in Swarm mode: `?`
-* Any relevant tooling / dependencies and versions: `?`
+* Container runtime (runc, crun, ...) and init system (systemd or other): `?`
+* Daemon flags or config file (redact anything private): `?`
 
 ---
 
