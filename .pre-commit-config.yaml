@@ -178,7 +178,7 @@ repos:
   # a message nobody can classify is a release nobody can version. With
   # --force-scope: every commit here names a scope, and AGENTS.md requires one.
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
