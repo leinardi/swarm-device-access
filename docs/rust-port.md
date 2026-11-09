@@ -155,7 +155,8 @@ actual adaptation, in the commit that lands the component.
 
 ### Post-port maintenance
 
-These rows extend the component rows above; their pinned source revisions are unchanged.
+These rows extend the component rows above; their pinned source revisions are unchanged unless a row
+names its own.
 
 | Component | Source | Maintenance adaptation |
 | --- | --- | --- |
@@ -165,6 +166,7 @@ These rows extend the component rows above; their pinned source revisions are un
 | Metrics registry | SSE `src/metrics/{mod,tests}.rs` at `d57dcc220d29` | Snapshot descriptor names before taking the registry lock; compare cached names and insert under one lock. No descriptor callback runs while locked, including when listing described names. Regression tests cover reentrant descriptors and concurrent duplicate registrations. Now go-prom's, with its tests. |
 | Rustdoc and verification | SSE `.mk/rust.mk` and CI workflow at `d57dcc220d29`; this project's CI meta-tests | Fix ambiguous and private rustdoc links in the reused duration, launcher and timeout modules (the duration and timeout modules now in rust-common). `rust-doc` documents every workspace member with all features and warnings as errors; local `verify-rust` and the required Rust CI job run it. Meta-tests reject removing or weakening the gate. |
 | Make fragments: `rust.mk` | make-common v1 `.mk/rust.mk` (MIT), which took SSE's targets upstream | The local `.mk/rust.mk` is replaced by make-common's, fetched by the bootstrap like the other shared snippets and listed in `MK_COMMON_FILES`; the Makefile sets `RUST_STAMP_PREFIX := SWARM_DEVICE_ACCESS` for the stamps. The recipes `make -n` prints are the same as before; upstream adds `rust-run` and `rust-dist`. `audit-deps.mk` takes its scope from `RUST_DENY_ARGS`. `dockerfiles.rs` checks the prefix in the Makefile and the `$(RUST_STAMP_PREFIX)_*` stamps in the fragment, and `ci_gates.rs` the upstream `rust-doc` recipe. |
+| Lean release packaging: the `prebuilt` target on a shared `base` stage, the image tests in three tiers, CI's `image` job, the release built once with the audit alongside | SSE `deployments/docker/Dockerfile`, `.mk/image.mk`, `scripts/image-test.sh`, `meta/tests/dockerfiles.rs`, `meta/tests/toolchain.rs`, `.github/workflows/{ci,release}.yaml` at `88394aad4cf9` | `.mk/image.mk` and `scripts/image-test.sh` are new here, adapted from that revision (their headers name it); the Dockerfile, `dockerfiles.rs` and `toolchain.rs` keep their original `d57dcc220d29` provenance and take these changes from `88394aad4cf9`. Adaptations: the release binaries stay `.mk/rust-release.mk`'s `rust-release-binaries` (SSE's `dist-static`), which gains `RUST_RELEASE_PLATFORMS` and `rust-release-checksums`; `prebuilt` copies `dist/swarm-device-access-${TARGETOS}-${TARGETARCH}`; the base runs as `USER 0` with no `HEALTHCHECK` (the daemon serves no endpoint by default), which `dockerfiles.rs` checks; the tiers test the daemon's dry-run startup, its exit with no Docker socket and, in the full tier, `/readyz`, `/healthz` and `/metrics` with the runner's socket (the binary has no `--version`); `toolchain.rs` keeps the fragment as the record of the zig, cargo-zigbuild and `rust-std` pins and checks Cargo's `rust-version` as the exact release; the release also gates on `integration.yaml`'s `integration` job. |
 
 ### Moved to rust-common
 
