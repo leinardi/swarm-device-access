@@ -6,6 +6,7 @@
       "Bash(pre-commit run *)",
       "Bash(scripts/check-*.sh)",
       "Bash(scripts/check-*.sh *)",
+      "Bash(scripts/image-test.sh *)",
       "mcp__serena__initial_instructions",
       "mcp__serena__find_symbol",
       "mcp__serena__find_referencing_symbols",

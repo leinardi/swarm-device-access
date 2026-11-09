@@ -35,20 +35,27 @@ use repo_meta::vacuous::{AllowedFragment, Hit, VacuousFlags};
 /// run without `-D warnings`). A cargo call is cargo itself or make's `$(CARGO)`.
 static FLAGS: LazyLock<VacuousFlags> = LazyLock::new(|| VacuousFlags::core().with_rust());
 
-/// The exact pieces of shell, each in one file, whose `|| true` is not a gate passing on
-/// nothing; the reason says why. Each one tolerates a command whose failure is an answer, not an
-/// error.
-const ALLOWED_FRAGMENTS: [AllowedFragment<'static>; 2] = [
+/// The exact pieces, each in one file, that look like a gate passing on nothing and are not; the
+/// reason says why.
+const ALLOWED_FRAGMENTS: [AllowedFragment<'static>; 3] = [
     AllowedFragment {
         file: ".github/workflows/release.yaml",
         fragment: r#"{ grep -E "$RELEASE_TAG_REGEX" || true; }"#,
         reason: "grep exits 1 when no tag matches the release pattern, and no release tag is a \
                  result the release workflow handles after the pipe",
     },
+    // pre-commit-all restores the rust job's Rust cache and never saves it, so one job writes it.
+    AllowedFragment {
+        file: ".github/workflows/ci.yaml",
+        fragment: "save-if: false",
+        reason: "a restore-only Rust cache",
+    },
+    // A recovery that reuses a published image scans it again, but cannot change it: its findings
+    // are reported as a warning by the step after, not a failure of the publish.
     AllowedFragment {
         file: ".github/workflows/release.yaml",
-        fragment: r#"{ git tag --merged "HEAD^" 2>/dev/null || true; }"#,
-        reason: "HEAD^ does not exist on a root commit, which has no previous release",
+        fragment: "continue-on-error: true # findings in an image already published are warnings",
+        reason: "the scan of a reused, already published image",
     },
 ];
 
@@ -144,13 +151,14 @@ fn vacuous_flags_are_recognized() {
     );
 
     let extended = format!("{allowed} || true");
+    let reuse_scan =
+        "        continue-on-error: true # findings in an image already published are warnings";
     for (file, sample) in [
         (".github/workflows/ci.yaml", allowed),
         (release, extended.as_str()),
-        (
-            ".github/workflows/x.yaml",
-            r#"  { git tag --merged "HEAD^" 2>/dev/null || true; }"#,
-        ),
+        (".github/workflows/ci.yaml", reuse_scan),
+        (release, "        continue-on-error: true"),
+        (release, "          save-if: false"),
     ] {
         assert!(
             !vacuous_hits(file, sample, &mut [false; ALLOWED_FRAGMENTS.len()]).is_empty(),
@@ -180,7 +188,7 @@ fn an_unused_exception_is_refused() {
         )],
         &ALLOWED_FRAGMENTS,
     );
-    assert_eq!(problems.len(), 2, "{problems:?}");
+    assert_eq!(problems.len(), ALLOWED_FRAGMENTS.len(), "{problems:?}");
     assert!(
         problems
             .iter()
