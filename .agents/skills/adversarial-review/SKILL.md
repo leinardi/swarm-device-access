@@ -87,7 +87,8 @@ paragraph and a modification notice under it; a diff that reformats or relicense
 finding, whatever else it does.
 
 A meta-test under `meta/tests` guards a claim nothing else checks: the Rust release, zig,
-cargo-zigbuild, `rust-std`, Trivy and ShellCheck pins, the Dockerfile's stages, the CI gates, the
+cargo-zigbuild, `rust-std` and ShellCheck pins, Trivy never pinned, the Dockerfile's five stages
+and the `prebuilt` target's binary, the CI gates, the
 workspace lints, the Docker read/write boundary. Try to make the guarded thing go wrong and see
 whether the test still notices. A test that passes because its input is empty, its rule never ran
 or its negative control is missing is a false pass, and so is one whose scratch repository runs git
@@ -270,8 +271,8 @@ a failure it caused as a confirmed finding with the output attached:
 | --- | --- |
 | any `**/*.rs`, a Cargo manifest or lock, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | `make verify` (build, fmt check, clippy with `-D warnings` and tests, the meta-tests included), `make rust-deny` when a manifest or `Cargo.lock` changed (network required), then `make check` |
 | `src/daemon/**`, `src/processor/**`, `src/cgroup/**`, `src/launcher/**`, `testenv/**` | also `make test-integration` (needs Docker and a `dhi.io` login) — it builds the image from the Dockerfile, copies its binary out and pulls the pinned 1.x image; add `SDA_IT_ENFORCE=1` only on a throwaway host, since it attaches BPF and runs `systemctl daemon-reload`. Check that it proved the binary and the image under test are Rust before any test ran |
-| `deployments/docker/Dockerfile` | droast via `make check`, `cargo test --locked -p meta --test dockerfiles --test toolchain`, plus `make docker-build` |
-| `meta/**`, `scripts/check-*.sh`, `.github/**`, `.pre-commit-config.yaml` | `cargo test --locked -p meta`, `pre-commit run actionlint --all-files` |
+| `deployments/docker/Dockerfile`, `.mk/rust-release.mk`, `.mk/image.mk`, `scripts/image-test.sh` | droast via `make check`, `cargo test --locked -p meta --test dockerfiles --test toolchain`, gh-composite-actions' `check-pinned-bases` with `--tag-only dhi.io`, `make rust-release-binaries image-build-prebuilt image-test` (and the arm64 reduced tier under QEMU), plus `make docker-build` |
+| `meta/**`, `scripts/check-*.sh`, `.github/**`, `.pre-commit-config.yaml` | `cargo test --locked -p meta`, `pre-commit run actionlint --all-files`; for `release.yaml` and `ci.yaml`'s `image` job, `docs/release.md` ("What CI proves") still true |
 | anything else | `make check` (pre-commit on all files) |
 
 The integration suite drives the binary and the image `make test-integration` builds

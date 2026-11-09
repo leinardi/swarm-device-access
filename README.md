@@ -643,10 +643,11 @@ level=DEBUG setting device rule pid=1234 cgroup=/host/sys/fs/cgroup/... type=c m
 - `pre-commit`, `cargo-deny`, [droast](https://github.com/immanuwell/dockerfile-roast),
   `markdownlint-cli2`, `yamllint`, `shellcheck`, `actionlint`, and `checkmake`. The pre-commit
   hooks install most of these tools when needed; droast is built from source, which needs `cargo`.
-- A local `shellcheck` at the release `.github/actions/setup-shellcheck` pins: droast's required
-  ShellCheck bridge runs the one on PATH.
+- A local `shellcheck` at the release the `shellcheck-py` hook in `.pre-commit-config.yaml` wraps:
+  droast's required ShellCheck bridge runs the one on PATH.
 - For the static release binaries only (`make rust-release-binaries`): the zig and cargo-zigbuild
-  releases `.github/actions/setup-zigbuild` pins, on PATH.
+  releases `.mk/rust-release.mk` pins, on PATH. QEMU (binfmt) to run the arm64 image tests on
+  another architecture.
 
 ### Common Tasks
 
@@ -655,7 +656,8 @@ make help              # list all available targets
 make check             # run every pre-commit hook on every file
 make verify            # build, format check, clippy and every test, meta-tests included
 make rust-build        # build the workspace (target/debug/swarm-device-access)
-make docker-build      # build the container image
+make docker-build      # build the container image's default target, which compiles the binary
+make rust-release-binaries image-build-prebuilt image-test  # the release binaries, the image from them, its tests
 make test-integration  # the integration suite against the image (Docker, dhi.io login)
 ```
 

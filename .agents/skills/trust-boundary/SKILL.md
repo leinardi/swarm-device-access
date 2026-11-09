@@ -218,14 +218,17 @@ and `daemon_spec_body_matches_go` the create body, so a new mount or flag shows 
 change. The launcher's own inputs are checked too: `--config-dir` and `--host-docker-socket` must
 be absolute, clean paths, and it removes a `swarm-device-access` container only when its
 owning launcher is confirmed gone — never on a transient error, and never a foreign container.
-`deployments/docker/Dockerfile` builds a static binary onto `dhi.io/static` with `USER 0` and
-nothing else in the runtime stage.
+`deployments/docker/Dockerfile` puts a static binary onto `dhi.io/static` with `USER 0` and
+nothing else, in one `base` stage both targets share: `runtime` (the default) copies the binary its
+build stage compiles, and `prebuilt` (the one CI tests and the release ships) copies the release
+asset from the `dist` build context, byte for byte.
 
 What goes into the image is pinned too. The BuildKit frontend is pinned by digest; the `dhi.io`
 bases by literal tag, deliberately (dhi.io republishes its tags to ship security fixes, and the
 Dockerfile says so), with the rust tag on rust-toolchain.toml's exact release so the image builds
 with the toolchain CI tests, and every zig, cargo-zigbuild and rust-std download checked by the
-sha256 `.mk/rust-release.mk` records. `.dockerignore` keeps the agent tooling, docs and tests out
+sha256 `.mk/rust-release.mk` records. Each release records the base digest it shipped, read from
+the build's provenance. `.dockerignore` keeps the agent tooling, docs and tests out
 of the build context. `meta/tests/dockerfiles.rs` and `meta/tests/toolchain.rs` pin all of it,
 with the seven required OCI labels of `droast.toml`.
 

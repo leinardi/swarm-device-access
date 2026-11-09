@@ -44,7 +44,8 @@ src/
 tests/                     # goldens vs frozen 1.x captures (tests/testdata), wire, parity
 meta/                      # repository meta-tests (pins, Dockerfile, CI gates, boundaries)
 testenv/                   # integration harness (feature integration), host Docker
-deployments/docker/        # Dockerfile, compose file running the launcher, example config
+deployments/docker/        # Dockerfile (runtime + prebuilt targets on one base), compose file, example config
+scripts/image-test.sh      # image tests: smoke (release), reduced (CI arm64), full (CI amd64)
 docs/                      # architecture.md, testing.md, release.md, rust-port.md (ledger)
 ```
 
