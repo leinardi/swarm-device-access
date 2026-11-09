@@ -3,11 +3,11 @@
 ## Build & run
 
 ```bash
-make rust-build      # cargo build --workspace --all-targets --all-features --locked (stamped)
-make rust-release-binaries rust-release-checksums  # static musl amd64/arm64 + checksums.txt into dist/ (pinned zig)
-make image-build-prebuilt image-test  # prebuilt image from dist/, full tier (IMAGE_PLATFORM, IMAGE_TEST_TIER)
-make docker-build    # build Docker image's default target (needs docker login dhi.io)
-make docker-run      # run image locally with required host bind mounts
+make rust-build         # cargo build --workspace --all-targets --all-features --locked (stamped)
+make rust-release-dist  # static musl amd64/arm64, then checksums.txt, into dist/ (pinned zig)
+make image-build-test   # prebuilt image from dist/, then its full tier (IMAGE_PLATFORM, IMAGE_TEST_TIER)
+make docker-build       # build Docker image's default target (needs docker login dhi.io)
+make docker-run         # run image locally with required host bind mounts
 ```
 
 ## Test

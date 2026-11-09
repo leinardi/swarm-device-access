@@ -657,7 +657,8 @@ make check             # run every pre-commit hook on every file
 make verify            # build, format check, clippy and every test, meta-tests included
 make rust-build        # build the workspace (target/debug/swarm-device-access)
 make docker-build      # build the container image's default target, which compiles the binary
-make rust-release-binaries image-build-prebuilt image-test  # the release binaries, the image from them, its tests
+make rust-release-dist # the static release binaries, then checksums.txt, into dist/
+make image-build-test  # the prebuilt image from those binaries, then its tests
 make test-integration  # the integration suite against the image (Docker, dhi.io login)
 ```
 
