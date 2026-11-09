@@ -50,4 +50,12 @@ image-test: ## Test the prebuilt image against its release binary (IMAGE_TEST_TI
 	  --platform "$(IMAGE_PLATFORM)" --binary "$(call rust_release_asset,$(IMAGE_PLATFORM))" \
 	  --expect-version "$(GIT_VERSION) $(GIT_COMMIT) $(BUILD_DATE)"
 
+# The two above in order, for the same reason as rust-release-dist: under make -j,
+# `make image-build-prebuilt image-test` could test a missing or previous image before the build
+# has loaded the new one.
+.PHONY: image-build-test
+image-build-test: ## Build the prebuilt image for IMAGE_PLATFORM, then test it (ordered, safe under make -j)
+	$(MAKE) --no-print-directory image-build-prebuilt
+	$(MAKE) --no-print-directory image-test
+
 endif  # MK_LOCAL_IMAGE_INCLUDED

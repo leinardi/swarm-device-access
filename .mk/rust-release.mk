@@ -122,4 +122,14 @@ rust-release-binaries: rust-zigbuild-check ## Build the static musl release bina
 rust-release-checksums: ## Write dist/checksums.txt over every shipped platform's release binary
 	cd "$(RUST_RELEASE_DIR)" && sha256sum $(foreach platform,$(RUST_RELEASE_SHIPPED_PLATFORMS),"$(notdir $(call rust_release_asset,$(platform)))") > checksums.txt
 
+# The two above in order. Goals on one command line are not ordered under make -j, so
+# `make rust-release-binaries rust-release-checksums` could checksum binaries a parallel build has
+# not written yet; each step here is its own make run, the second started only after the first
+# succeeded. rust-release-checksums stays on its own for a recovery, which checksums published
+# binaries without rebuilding them.
+.PHONY: rust-release-dist
+rust-release-dist: ## Build the release binaries, then write dist/checksums.txt (ordered, safe under make -j)
+	$(MAKE) --no-print-directory rust-release-binaries
+	$(MAKE) --no-print-directory rust-release-checksums
+
 endif  # MK_LOCAL_RUST_RELEASE_INCLUDED

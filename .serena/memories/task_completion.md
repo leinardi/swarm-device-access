@@ -12,7 +12,7 @@ Also, by what changed (full table: AGENTS.md, Validation matrix):
 - a Cargo manifest, `Cargo.lock` or `deny.toml`: `make rust-deny` (network).
 - `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**`: `make test-integration` (Docker).
 - the Dockerfile, `.mk/rust-release.mk`, `.mk/image.mk`, `scripts/image-test.sh`:
-  `make rust-release-binaries image-build-prebuilt image-test` (zig, `dhi.io` login), and the arm64
+  `make rust-release-dist`, then `make image-build-test` (zig, `dhi.io` login), and the arm64
   reduced tier under QEMU.
 - `.github/**`: `cargo test --locked -p meta`, `pre-commit run actionlint --all-files`; keep
   `docs/release.md` true.

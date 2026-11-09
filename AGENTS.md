@@ -34,8 +34,10 @@ make rust-deny     # cargo deny --workspace check (network required)
 make audit-deps    # cargo deny --workspace check advisories (network required)
 make rust-release-binaries  # static musl amd64 and arm64 release binaries into dist/ (pinned zig and cargo-zigbuild on PATH; RUST_RELEASE_PLATFORMS for a subset)
 make rust-release-checksums # dist/checksums.txt over both release binaries
+make rust-release-dist      # rust-release-binaries, then rust-release-checksums (ordered, safe under make -j)
 make image-build-prebuilt   # the image's prebuilt target from dist/, for IMAGE_PLATFORM (default: the host's; needs a dhi.io login)
 make image-test             # scripts/image-test.sh on that image, IMAGE_TEST_TIER full (default), reduced or smoke
+make image-build-test       # image-build-prebuilt, then image-test (ordered, safe under make -j)
 make check         # pre-commit on all files: the authoritative local gate, as CI's pre-commit-all
 make check-stage   # pre-commit on staging area only
 make pre-commit-install  # install the pre-commit and commit-msg hooks
@@ -364,8 +366,8 @@ Run before considering an edit done. `make check` applies to every row.
 | `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
 | `tests/testdata/**` (the 1.x captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, 1.x fixtures): never regenerate one by hand |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `tag` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
-| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`); gh-composite-actions' `check-pinned-bases` with `--tag-only dhi.io` on the Dockerfile; `make rust-release-binaries image-build-prebuilt image-test`, and with QEMU `make image-build-prebuilt image-test IMAGE_PLATFORM=linux/arm64 IMAGE_TEST_TIER=reduced`; `make docker-build` (all need a `dhi.io` login) |
-| `.mk/rust-release.mk`, `.mk/image.mk`, `scripts/image-test.sh` | `make rust-release-binaries rust-release-checksums image-build-prebuilt image-test` (pinned zig on PATH) and the arm64 run above, `cargo test --locked -p meta --test toolchain`; keep `docs/release.md#what-ci-proves` true |
+| `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`); gh-composite-actions' `check-pinned-bases` with `--tag-only dhi.io` on the Dockerfile; `make rust-release-dist`, then `make image-build-test`, and with QEMU `make image-build-test IMAGE_PLATFORM=linux/arm64 IMAGE_TEST_TIER=reduced`; `make docker-build` (all need a `dhi.io` login) |
+| `.mk/rust-release.mk`, `.mk/image.mk`, `scripts/image-test.sh` | `make rust-release-dist`, then `make image-build-test` (pinned zig on PATH) and the arm64 run above, `cargo test --locked -p meta --test toolchain`; keep `docs/release.md#what-ci-proves` true |
 | `.trivyignore.yaml` | every entry scoped to paths or purls, with a statement and an `expired_at`; scan the prebuilt image with the latest Trivy as `trivy-gate` runs it (`--ignore-unfixed --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml`) |
 | `scripts/check-license-headers.sh` | `pre-commit run check-license-headers --all-files` |
 | `meta/**` | `make verify` |

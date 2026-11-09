@@ -400,7 +400,7 @@ jobs:
           VERSION: ${{ steps.stamp.outputs.version }}
           COMMIT: ${{ steps.stamp.outputs.commit }}
           DATE: ${{ steps.stamp.outputs.date }}
-        run: make rust-release-binaries rust-release-checksums GIT_VERSION="${VERSION}" GIT_COMMIT="${COMMIT}" BUILD_DATE="${DATE}"
+        run: make rust-release-dist GIT_VERSION="${VERSION}" GIT_COMMIT="${COMMIT}" BUILD_DATE="${DATE}"
 
       # A binary with a program interpreter is not static, and one that names the runner's home
       # (the checkout and the cargo home are under it) was not remapped.
@@ -450,7 +450,7 @@ jobs:
         run: |
           set -euo pipefail
           stamps=(GIT_VERSION="${VERSION}" GIT_COMMIT="${COMMIT}" BUILD_DATE="${DATE}")
-          make image-build-prebuilt image-test "${stamps[@]}" IMAGE_PLATFORM=linux/amd64 IMAGE_TEST_TIER=full
+          make image-build-test "${stamps[@]}" IMAGE_PLATFORM=linux/amd64 IMAGE_TEST_TIER=full
 
       - name: Build and test the linux/arm64 image (reduced suite, QEMU)
         if: steps.dhi.outputs.available == 'true'
@@ -461,7 +461,7 @@ jobs:
         run: |
           set -euo pipefail
           stamps=(GIT_VERSION="${VERSION}" GIT_COMMIT="${COMMIT}" BUILD_DATE="${DATE}")
-          make image-build-prebuilt image-test "${stamps[@]}" IMAGE_PLATFORM=linux/arm64 IMAGE_TEST_TIER=reduced
+          make image-build-test "${stamps[@]}" IMAGE_PLATFORM=linux/arm64 IMAGE_TEST_TIER=reduced
 
   # The one check that stands for the rest, for the branch ruleset to require and for release.yaml
   # to gate on: GitHub counts a skipped required job as passing, so this job runs always and
