@@ -82,11 +82,12 @@ binary is the release asset byte for byte; `scripts/image-test.sh` tests that im
 
 The meta crate's tests (`meta/tests`, run by `make rust-test`) guard the tooling itself: the pins
 and Trivy never pinned, the Dockerfile's frontend and its five stages (two targets, `runtime` and
-`prebuilt`, on one tag-pinned `base`), the CI gates, flags that make a gate pass on nothing, and the
-Rust boundaries. Most run rust-common's `repo-meta` checks with this repository's parameters (a
-scratch repository runs git through `testenv_core::gitenv::isolate`); the boundaries are local. They
-need only git and bash, never skip, and carry a negative control each. The `lychee` hook checks the
-relative links and fragments in the Markdown.
+`prebuilt`, on one tag-pinned `base`), the CI gates, the rust-common git pins (one `vX.Y.Z` tag,
+`version` its `<major>.<minor>`), flags that make a gate pass on nothing, and the Rust boundaries.
+Most run rust-common's `repo-meta` checks with this repository's parameters (a scratch repository
+runs git through `testenv_core::gitenv::isolate`); the boundaries are local. They need only git and
+bash, never skip, and carry a negative control each. The `lychee` hook checks the relative links and
+fragments in the Markdown.
 
 ### Generated or vendored: never hand-edit
 
@@ -198,7 +199,7 @@ the rust-common crates)**
 `clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v1.0.0"`, with `version = "1.0"`, the tag's `<major>.<minor>`) in the root
+release tag (`tag = "v1.1.0"`, with `version = "1.1"`, the tag's `<major>.<minor>`) in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
 its own features.
 
