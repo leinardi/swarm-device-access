@@ -24,7 +24,6 @@
 //! ([`HOST_SWEEP`]).
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::hash::BuildHasher;
 use std::time::Duration;
 
@@ -41,7 +40,7 @@ use futures_util::StreamExt as _;
 use testenv_core::Error;
 use testenv_core::context::Context;
 use testenv_core::host::{HostSweep, sweep_rules};
-pub use testenv_core::host::{OP_TIMEOUT, OpError};
+pub use testenv_core::host::{OP_TIMEOUT, OpError, with_timeout};
 use testenv_core::identity::IDENTITY_FLAG;
 use testenv_core::sweep_rules::{DEFAULT_STALE_AFTER, Owner, SweepRules, stale_after_from_env};
 
@@ -77,20 +76,6 @@ pub fn host_client() -> Result<Docker, Error> {
     Docker::connect_with_unix_defaults()
         .map(|client| client.with_timeout(Duration::from_secs(CLIENT_TIMEOUT_SECS)))
         .map_err(|error| Error::new(format!("connect to host Docker daemon: {error}")))
-}
-
-/// testenv-core's `with_timeout`, with the call boxed: bollard's request futures are large, and
-/// every caller's future would otherwise carry one inline.
-///
-/// # Errors
-///
-/// The call failed, or `ctx` or the deadline ended first.
-pub async fn with_timeout<T, E: Into<OpError>>(
-    ctx: &Context,
-    timeout: Duration,
-    call: impl Future<Output = Result<T, E>>,
-) -> Result<T, OpError> {
-    testenv_core::host::with_timeout(ctx, timeout, Box::pin(call)).await
 }
 
 /// The sweep rules for this process: now, this host, the window [`ENV_STALE_AFTER`] sets (an hour
