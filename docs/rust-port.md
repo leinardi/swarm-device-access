@@ -168,6 +168,24 @@ names its own.
 | Make fragments: `rust.mk` | make-common v1 `.mk/rust.mk` (MIT), which took SSE's targets upstream | The local `.mk/rust.mk` is replaced by make-common's, fetched by the bootstrap like the other shared snippets and listed in `MK_COMMON_FILES`; the Makefile sets `RUST_STAMP_PREFIX := SWARM_DEVICE_ACCESS` for the stamps. The recipes `make -n` prints are the same as before; upstream adds `rust-run` and `rust-dist`. `audit-deps.mk` takes its scope from `RUST_DENY_ARGS`. `dockerfiles.rs` checks the prefix in the Makefile and the `$(RUST_STAMP_PREFIX)_*` stamps in the fragment, and `ci_gates.rs` the upstream `rust-doc` recipe. |
 | Lean release packaging: the `prebuilt` target on a shared `base` stage, the image tests in three tiers, CI's `image` job, the release built once with the audit alongside | SSE `deployments/docker/Dockerfile`, `.mk/image.mk`, `scripts/image-test.sh`, `meta/tests/dockerfiles.rs`, `meta/tests/toolchain.rs`, `.github/workflows/{ci,release}.yaml` at `88394aad4cf9` | `.mk/image.mk` and `scripts/image-test.sh` are new here, adapted from that revision (their headers name it); the Dockerfile, `dockerfiles.rs` and `toolchain.rs` keep their original `d57dcc220d29` provenance and take these changes from `88394aad4cf9`. Adaptations: the release binaries stay `.mk/rust-release.mk`'s `rust-release-binaries` (SSE's `dist-static`), which gains `RUST_RELEASE_PLATFORMS` and `rust-release-checksums`; `prebuilt` copies `dist/swarm-device-access-${TARGETOS}-${TARGETARCH}`; the base runs as `USER 0` with no `HEALTHCHECK` (the daemon serves no endpoint by default), which `dockerfiles.rs` checks; the tiers test the daemon's dry-run startup, its exit with no Docker socket and, in the full tier, `/readyz`, `/healthz` and `/metrics` with the runner's socket (the binary has no `--version`); `toolchain.rs` keeps the fragment as the record of the zig, cargo-zigbuild and `rust-std` pins and checks Cargo's `rust-version` as the exact release; the release also gates on `integration.yaml`'s `integration` job. |
 
+### Shared release and image snippets
+
+The release-packaging row above now uses make-common v1.14.0's `rust-release.mk` and
+`image.mk`, fetched through `MK_COMMON_FILES`, rather than local adaptations. Their defaults
+retain the release assets, checksums ordering and image coordinates. The Makefile owns the
+toolchain pins, target mappings, checksum coverage and output directory with `:=` assignments
+so environment variables cannot replace them, and maps the
+existing `PREBUILT_IMAGE` override to the shared per-image setting. The shared snippet
+also exposes per-image targets and `rust-zigbuild-install`; its full image tier is host-only,
+with `IMAGE_TEST_TIER=reduced` for foreign platforms. The bootstrap also refreshes `password.mk`
+to the released bounded-input password pipeline.
+
+The image-test script, Docker runner, integration harness, dependency audit and verification
+targets remain local because they encode this daemon's runtime and repository policy.
+`image-policy.mk` rejects image gates with an empty `DOCKER_TARGETS`, rather than reporting
+success without testing anything. The toolchain meta-tests read the Makefile's pins and retain
+their negative controls.
+
 ### Moved to rust-common
 
 After the port, the components the services share moved to

@@ -255,6 +255,9 @@ being released:
   - **linux/arm64, the reduced suite** under QEMU (`--tier reduced`): the same up to the image
     config, the daemon starting and logging its stamps included.
 
+  The shared make-common image targets restrict the full tier to the host's platform; use
+  `IMAGE_TEST_TIER=reduced` when testing a foreign platform under QEMU.
+
   The daemon against a real Docker, with BPF device rules written and the upgrade and rollback
   against the pinned 1.x image, is `integration.yaml`'s job, not this one: it runs
   `make test-integration` with `SDA_IT_ENFORCE=1` and `SDA_IT_REQUIRE_RELOAD=1` (failing if any
@@ -441,7 +444,7 @@ digests and `rust-toolchain.toml` (the `toolchain` meta-test fails when the Rust
 patch or the copies of a zig pin disagree).
 
 **The binaries are built outside Docker, once.** The release's `rust-release-binaries` gets zig and
-cargo-zigbuild from gh-composite-actions' `setup-zigbuild`, at the versions `.mk/rust-release.mk`
+cargo-zigbuild from gh-composite-actions' `setup-zigbuild`, at the versions the Makefile
 pins and the Dockerfile's build stage copies (`ZIG_VERSION`, `CARGO_ZIGBUILD_VERSION`), and Rust
 from `rust-toolchain.toml` (`rustup toolchain install`), or, on a recovery, the release the tag
 records. The image's `prebuilt` target never runs that build stage: it COPYs the binaries, so
@@ -529,10 +532,10 @@ A bump is therefore one hand-made pull request that moves, together:
 1. the image tag and `ARG RUST_VERSION` in the Dockerfile;
 2. the two `rust-std` sha256s in the Dockerfile (the `.sha256` file published next to each
    archive);
-3. `RUST_RELEASE_RUST_STD_VERSION` and the same two sha256s in `.mk/rust-release.mk`;
+3. `RUST_RELEASE_RUST_STD_VERSION` and the same two sha256s in the Makefile;
 4. `rust-toolchain.toml` and the workspace's `rust-version` in `Cargo.toml`.
 
-zig and cargo-zigbuild follow the same rule between `.mk/rust-release.mk` (the one record of their
+zig and cargo-zigbuild follow the same rule between the Makefile (the one record of their
 versions and archive digests), the Dockerfile and the `setup-zigbuild` steps of `ci.yaml` and
 `release.yaml` (their `zig-version` and `cargo-zigbuild-version` inputs): each version and digest
 is one value, checked by the same meta-test. gh-composite-actions' `setup-zigbuild` checks the
@@ -540,6 +543,9 @@ archives it downloads against its `zig-sha256` and `cargo-zigbuild-sha256` input
 are its default versions' digests, so a version bump passes the new digests to it too. A release
 built after such a bump produces new binary digests, as any toolchain change does; a recovery of an
 older release must run on its own commit, which still names its own toolchain.
+
+The shared `.mk/rust-release.mk` is fetched from make-common; do not edit its defaults locally.
+Repository pins in the Makefile override those defaults before the snippet is included.
 
 ## Commit messages are checked on every pull request
 
