@@ -94,11 +94,21 @@ fn image_gates_refuse_empty_targets() {
             "{output:?}"
         );
     }
+    // The shared guard prints its check for a nonempty image set and lets the dry run pass.
     let output = make()
-        .args(["image-targets-check", "DOCKER_TARGETS=swarm-device-access"])
+        .args([
+            "-n",
+            "image-build-prebuilt",
+            "DOCKER_TARGETS=swarm-device-access",
+        ])
+        .args(["IMAGE_HOST_PLATFORM=linux/amd64"])
         .output()
         .unwrap_or_else(|error| panic!("cannot run make: {error}"));
     assert!(output.status.success(), "a nonempty image set: {output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(r#"test -n "swarm-device-access" ||"#),
+        "the guard is missing: {output:?}"
+    );
 }
 
 const TOOLCHAIN: &str = "rust-toolchain.toml";

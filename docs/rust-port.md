@@ -170,7 +170,7 @@ names its own.
 
 ### Shared release and image snippets
 
-The release-packaging row above now uses make-common v1.14.0's `rust-release.mk` and
+The release-packaging row above now uses make-common v1.14.1's `rust-release.mk` and
 `image.mk`, fetched through `MK_COMMON_FILES`, rather than local adaptations. Their defaults
 retain the release assets, checksums ordering and image coordinates. The Makefile owns the
 toolchain pins, target mappings, checksum coverage and output directory with `:=` assignments
@@ -182,9 +182,9 @@ to the released bounded-input password pipeline.
 
 The image-test script, Docker runner, integration harness, dependency audit and verification
 targets remain local because they encode this daemon's runtime and repository policy.
-`image-policy.mk` rejects image gates with an empty `DOCKER_TARGETS`, rather than reporting
-success without testing anything. The toolchain meta-tests read the Makefile's pins and retain
-their negative controls.
+The shared `image.mk` (make-common v1.14.1) rejects image gates with an empty `DOCKER_TARGETS`,
+rather than reporting success without testing anything. The toolchain meta-tests read the
+Makefile's pins and retain their negative controls.
 
 ### Moved to rust-common
 
