@@ -18,16 +18,16 @@
 
 //! The repository's tooling pins, each one value everywhere it is written: the exact Rust release
 //! (`rust-toolchain.toml`'s channel, the workspace's `rust-version`, the image's dhi.io/rust tag
-//! and `ARG RUST_VERSION`, and the fragment's `rust-std` release); zig and cargo-zigbuild between
-//! the release fragment, the Dockerfile and the setup-zigbuild steps of CI and the release, with
-//! the archive digests between the fragment and the Dockerfile; and one `ShellCheck` between the
+//! and `ARG RUST_VERSION`, and the Makefile's `rust-std` release); zig and cargo-zigbuild between
+//! the Makefile, the Dockerfile and the setup-zigbuild steps of CI and the release, with
+//! the archive digests between the Makefile and the Dockerfile; and one `ShellCheck` between the
 //! hook and CI. Trivy is never pinned. `ci_gates.rs` and `vacuous_flags.rs` check the rest of the
 //! gates.
 //!
-//! `.mk/rust-release.mk` is the one record of the zig, cargo-zigbuild and `rust-std` pins: the
+//! The Makefile is the one record of the zig, cargo-zigbuild and `rust-std` pins: the
 //! Dockerfile's build stage carries copies, and every copy is checked against it. CI and the
 //! release pass the versions to gh-composite-actions' setup-zigbuild, whose default digests are
-//! the fragment's `x86_64` ones; a version moved without its digest fails that action's check. The
+//! Makefile's `x86_64` ones; a version moved without its digest fails that action's check. The
 //! checks are `repo_meta::toolchain::one_value`'s over [`PinSource`]s, and each has a negative
 //! control that runs it on an altered copy of the real files. CI installs the toolchain from
 //! `rust-toolchain.toml`, so no workflow repeats the release.
@@ -35,10 +35,86 @@
 use repo_meta::toolchain::{PinSource, one_value, rust_release, toolchain_targets};
 use repo_meta::{Problem, report};
 
+/// Runs make against the repository without inheriting flags from a parent make or commit hook.
+fn make() -> std::process::Command {
+    let mut command = std::process::Command::new("make");
+    command
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
+        .arg("--no-print-directory")
+        .env_remove("MAKEFLAGS")
+        .env_remove("MFLAGS")
+        .env_remove("MAKEOVERRIDES");
+    command
+}
+
+#[test]
+fn release_pins_ignore_environment_but_keep_command_line_overrides() {
+    let pins = meta::repo().read("Makefile");
+    for line in pins
+        .lines()
+        .filter(|line| line.starts_with("RUST_RELEASE_"))
+    {
+        let Some((name, _)) = line.split_once(" := ") else {
+            continue;
+        };
+        let print = format!("--eval=print-release-pin: ; @printf '%s' '$({name})'");
+        let baseline = make()
+            .arg(&print)
+            .arg("print-release-pin")
+            .output()
+            .unwrap_or_else(|error| panic!("cannot run make: {error}"));
+        assert!(baseline.status.success(), "{name}: {baseline:?}");
+        for (arguments, expected) in [
+            (Vec::new(), baseline.stdout.as_slice()),
+            (vec![format!("{name}=override")], b"override".as_slice()),
+        ] {
+            let output = make()
+                .arg(&print)
+                .arg("print-release-pin")
+                .args(arguments)
+                .env(name, "environment-override")
+                .output()
+                .unwrap_or_else(|error| panic!("cannot run make: {error}"));
+            assert!(output.status.success(), "{name}: {output:?}");
+            assert_eq!(output.stdout, expected, "{name}");
+        }
+    }
+}
+
+#[test]
+fn image_gates_refuse_empty_targets() {
+    for target in ["image-build-prebuilt", "image-test", "image-build-test"] {
+        let output = make()
+            .args([target, "DOCKER_TARGETS="])
+            .output()
+            .unwrap_or_else(|error| panic!("cannot run make: {error}"));
+        assert!(!output.status.success(), "{target} passed on no images");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("DOCKER_TARGETS is empty"),
+            "{output:?}"
+        );
+    }
+    // The shared guard prints its check for a nonempty image set and lets the dry run pass.
+    let output = make()
+        .args([
+            "-n",
+            "image-build-prebuilt",
+            "DOCKER_TARGETS=swarm-device-access",
+        ])
+        .args(["IMAGE_HOST_PLATFORM=linux/amd64"])
+        .output()
+        .unwrap_or_else(|error| panic!("cannot run make: {error}"));
+    assert!(output.status.success(), "a nonempty image set: {output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(r#"test -n "swarm-device-access" ||"#),
+        "the guard is missing: {output:?}"
+    );
+}
+
 const TOOLCHAIN: &str = "rust-toolchain.toml";
 const MANIFEST: &str = "Cargo.toml";
 const DOCKERFILE: &str = "deployments/docker/Dockerfile";
-const FRAGMENT: &str = ".mk/rust-release.mk";
+const RELEASE_PINS: &str = "Makefile";
 const HOOKS: &str = ".pre-commit-config.yaml";
 const CI_WORKFLOW: &str = ".github/workflows/ci.yaml";
 const RELEASE_WORKFLOW: &str = ".github/workflows/release.yaml";
@@ -59,7 +135,7 @@ const SHELLCHECK_ACTION: &str =
 /// `TRIVY_VERSION`, or a setup-trivy step of its own.
 const TRIVY_PIN: &str = r"(?m)trivy-version:|TRIVY_VERSION|aquasecurity/setup-trivy";
 
-/// The cargo-zigbuild archives' build hosts in the fragment and the Dockerfile, with the
+/// The cargo-zigbuild archives' build hosts in the Makefile and the Dockerfile, with the
 /// Dockerfile's `case` arm that names each: (target, arm text before the digest).
 const ZIGBUILD_ARMS: [(&str, &str); 2] = [
     (
@@ -103,11 +179,11 @@ fn source(edit: Edit, file: &str, pattern: &str) -> PinSource {
     PinSource::new(file, &read(edit, file), pattern)
 }
 
-/// A fragment variable's value: `NAME := value`.
-fn fragment_pin(edit: Edit, name: &str) -> PinSource {
+/// A repository-authoritative release pin: `NAME := value`.
+fn release_pin(edit: Edit, name: &str) -> PinSource {
     source(
         edit,
-        FRAGMENT,
+        RELEASE_PINS,
         &format!(r"(?m)^{}\s*:=\s*(\S+)\s*$", name.replace('.', r"\.")),
     )
 }
@@ -124,14 +200,14 @@ fn pin_problems(edit: Edit) -> Vec<Problem> {
             PinSource::rust_version(MANIFEST, &read(edit, MANIFEST)),
             PinSource::rust_image_tag(DOCKERFILE, &dockerfile),
             PinSource::rust_version_arg(DOCKERFILE, &dockerfile),
-            fragment_pin(edit, "RUST_RELEASE_RUST_STD_VERSION"),
+            release_pin(edit, "RUST_RELEASE_RUST_STD_VERSION"),
         ],
         &[],
     );
     problems.extend(one_value(
         "zig",
         &[
-            fragment_pin(edit, "RUST_RELEASE_ZIG_VERSION"),
+            release_pin(edit, "RUST_RELEASE_ZIG_VERSION"),
             source(edit, DOCKERFILE, ZIG_DOCKERFILE),
             source(edit, CI_WORKFLOW, ZIG_ACTION),
             source(edit, RELEASE_WORKFLOW, ZIG_ACTION),
@@ -141,7 +217,7 @@ fn pin_problems(edit: Edit) -> Vec<Problem> {
     problems.extend(one_value(
         "cargo-zigbuild",
         &[
-            fragment_pin(edit, "RUST_RELEASE_CARGO_ZIGBUILD_VERSION"),
+            release_pin(edit, "RUST_RELEASE_CARGO_ZIGBUILD_VERSION"),
             source(edit, DOCKERFILE, ZIGBUILD_DOCKERFILE),
             source(edit, CI_WORKFLOW, ZIGBUILD_ACTION),
             source(edit, RELEASE_WORKFLOW, ZIGBUILD_ACTION),
@@ -152,7 +228,7 @@ fn pin_problems(edit: Edit) -> Vec<Problem> {
         problems.extend(one_value(
             &format!("the zig {arch} digest"),
             &[
-                fragment_pin(edit, &format!("RUST_RELEASE_ZIG_SHA256_{arch}")),
+                release_pin(edit, &format!("RUST_RELEASE_ZIG_SHA256_{arch}")),
                 PinSource::new(
                     DOCKERFILE,
                     &dockerfile,
@@ -166,7 +242,7 @@ fn pin_problems(edit: Edit) -> Vec<Problem> {
         problems.extend(one_value(
             &format!("the cargo-zigbuild digest for {target}"),
             &[
-                fragment_pin(
+                release_pin(
                     edit,
                     &format!("RUST_RELEASE_CARGO_ZIGBUILD_SHA256_{target}"),
                 ),
@@ -179,7 +255,7 @@ fn pin_problems(edit: Edit) -> Vec<Problem> {
         problems.extend(one_value(
             &format!("the rust-std digest for {target}"),
             &[
-                fragment_pin(edit, &format!("RUST_RELEASE_RUST_STD_SHA256_{target}")),
+                release_pin(edit, &format!("RUST_RELEASE_RUST_STD_SHA256_{target}")),
                 PinSource::new(DOCKERFILE, &dockerfile, &format!("{arm}([0-9a-f]{{64}})")),
             ],
             &[],
@@ -211,13 +287,13 @@ fn pins_are_one_value() {
 
 #[test]
 fn every_toolchain_target_has_a_rust_std_digest() {
-    let fragment = meta::repo().read(FRAGMENT);
+    let pins = meta::repo().read(RELEASE_PINS);
     let targets = toolchain_targets(&meta::repo().read(TOOLCHAIN));
     assert!(!targets.is_empty(), "{TOOLCHAIN} names no target");
     for target in targets {
         assert!(
-            fragment.contains(&format!("RUST_RELEASE_RUST_STD_SHA256_{target} :=")),
-            "{FRAGMENT} records no rust-std digest for {target}"
+            pins.contains(&format!("RUST_RELEASE_RUST_STD_SHA256_{target} :=")),
+            "{RELEASE_PINS} records no rust-std digest for {target}"
         );
     }
 }
@@ -294,8 +370,8 @@ fn rust_pin_rules_refuse_each_edit() {
             1,
         ),
         (
-            "the fragment's rust-std of another patch",
-            FRAGMENT,
+            "the Makefile's rust-std of another patch",
+            RELEASE_PINS,
             format!("RUST_RELEASE_RUST_STD_VERSION := {release}"),
             format!("RUST_RELEASE_RUST_STD_VERSION := {line}.99"),
             1,
@@ -331,8 +407,8 @@ fn tool_pin_rules_refuse_each_edit() {
             1,
         ),
         (
-            "cargo-zigbuild in the fragment",
-            FRAGMENT,
+            "cargo-zigbuild in the Makefile",
+            RELEASE_PINS,
             "RUST_RELEASE_CARGO_ZIGBUILD_VERSION := ".to_owned(),
             "RUST_RELEASE_CARGO_ZIGBUILD_VERSION := 9".to_owned(),
             1,
@@ -352,8 +428,8 @@ fn tool_pin_rules_refuse_each_edit() {
             1,
         ),
         (
-            "a rust-std digest in the fragment",
-            FRAGMENT,
+            "a rust-std digest in the Makefile",
+            RELEASE_PINS,
             digest.to_owned(),
             format!("{}0", &digest[..63]),
             1,

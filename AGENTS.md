@@ -72,7 +72,7 @@ release the `shellcheck-py` hook wraps (CI installs it with gh-composite-actions
 `setup-shellcheck`).
 
 The static Rust builds (`make rust-release-binaries`) link with zig through cargo-zigbuild and
-refuse any release on PATH but the ones `.mk/rust-release.mk` pins. That file records the zig,
+refuse any release on PATH but the ones the Makefile pins. That file records the zig,
 cargo-zigbuild and `rust-std` pins; the Dockerfile's build stage carries copies, and CI and the
 release pass the zig and cargo-zigbuild versions to gh-composite-actions' `setup-zigbuild`, all of
 which `meta/tests/toolchain.rs` keeps equal. CI and the release build the binaries with this one
@@ -91,7 +91,8 @@ fragments in the Markdown.
 
 ### Generated or vendored: never hand-edit
 
-- `.mk/{docker,help,password,pre-commit,rust}.mk` and `scripts/bootstrap-mk-common.sh`: fetched from
+- `.mk/{docker,help,password,pre-commit,rust,rust-release,image}.mk` and
+  `scripts/bootstrap-mk-common.sh`: fetched from
   make-common (under its MIT license) and refreshed with `make mk-common-update`; a change is
   ported upstream.
 - `src/cgroup/{api,ebpf,v1,v2}.rs` are not vendored, but keep NVIDIA's copyright header

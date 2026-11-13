@@ -23,10 +23,10 @@ MK_COMMON_VERSION     ?= v1
 MK_COMMON_DIR         := $(REPO_ROOT)/.mk
 
 # Shared snippets coming from make-common
-MK_COMMON_FILES       := docker.mk help.mk password.mk pre-commit.mk rust.mk
+MK_COMMON_FILES       := docker.mk help.mk password.mk pre-commit.mk rust.mk rust-release.mk image.mk
 
 # Repo-local snippets that are NOT in make-common
-MK_LOCAL_FILES        := docker-run.mk integration-test.mk audit-deps.mk rust-release.mk image.mk verify.mk
+MK_LOCAL_FILES        := docker-run.mk integration-test.mk audit-deps.mk verify.mk
 
 MK_COMMON_BOOTSTRAP_SCRIPT := $(REPO_ROOT)/scripts/bootstrap-mk-common.sh
 
@@ -58,6 +58,22 @@ BUILD_DATE ?= $(or $(GIT_COMMIT_DATE),$(shell date -u +"%Y-%m-%dT%H:%M:%SZ"))
 # stamped.
 RUST_BUILD_ENV :=
 
+# Repository-authoritative release pins: environment variables must not change shipped bytes.
+# These settings override the shared snippet's configurable defaults, as the former local pins did.
+RUST_RELEASE_ZIG_VERSION := 0.17.0
+RUST_RELEASE_ZIG_SHA256_x86_64 := 1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026
+RUST_RELEASE_ZIG_SHA256_aarch64 := 9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8
+RUST_RELEASE_CARGO_ZIGBUILD_VERSION := 0.24.0
+RUST_RELEASE_CARGO_ZIGBUILD_SHA256_x86_64-unknown-linux-musl := 52be2cb85ad3875682564a29bac1832b2ab3db68b1c504765c92d5249cc9b96f
+RUST_RELEASE_CARGO_ZIGBUILD_SHA256_aarch64-unknown-linux-gnu := de42626985f428033078dfc12ac8a59ee713f8e5627235ec883b1c899bee895c
+RUST_RELEASE_RUST_STD_VERSION := 1.98.1
+RUST_RELEASE_RUST_STD_SHA256_x86_64-unknown-linux-musl := bd9f35880de21dab0e387e84009c00001ae7836a4ba565cb16823f13f75f325f
+RUST_RELEASE_RUST_STD_SHA256_aarch64-unknown-linux-musl := 7e0ad2e67817f224b7a6331e48d6397303fc050edaccf81784ed786ffddc884a
+RUST_RELEASE_TRIPLE_linux_amd64 := x86_64-unknown-linux-musl
+RUST_RELEASE_TRIPLE_linux_arm64 := aarch64-unknown-linux-musl
+RUST_RELEASE_SHIPPED_PLATFORMS := linux/amd64 linux/arm64
+RUST_RELEASE_DIR := $(REPO_ROOT)/$(DIST_DIR)
+
 # Docker build settings
 DOCKERFILE     ?= deployments/docker/Dockerfile
 DOCKER_CONTEXT ?= .
@@ -65,6 +81,10 @@ DOCKER_CONTEXT ?= .
 IMAGE_NAME   ?= $(BIN_NAME)
 IMAGE_REPO   ?= $(IMAGE_NAME)
 IMAGE_TAG    ?= $(GIT_VERSION)
+
+# Keep the single-image override accepted by CI, scripts and local callers.
+PREBUILT_IMAGE ?= $(IMAGE_REPO):prebuilt-$(subst /,-,$(IMAGE_PLATFORM))
+PREBUILT_IMAGE_$(BIN_NAME) ?= $(PREBUILT_IMAGE)
 
 # -----------------------------------------------------------------------------
 # Include shared make logic (fetched from make-common)
