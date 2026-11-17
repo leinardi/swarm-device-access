@@ -235,6 +235,10 @@ fn required(key: &str) -> Result<String, String> {
 
 /// Runs `binary` with the identity flag as a host process and checks the answer is the Rust
 /// daemon's.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the suite runs the binary under test to check its identity"
+)]
 async fn check_binary_identity(ctx: &Context, binary: &str) -> Result<(), String> {
     let output = ctx
         .with_timeout(SETUP_TIMEOUT)

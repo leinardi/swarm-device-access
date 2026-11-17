@@ -205,6 +205,10 @@ async fn run_step(
 
 /// The device programs attached to the cgroup of `container_id`: this binary, run as root through
 /// `sudo -n` with [`DUMP_FLAG`], reads them for the container's pid.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the upgrade gate reads the BPF programs through sudo"
+)]
 async fn read_programs(test: &TestHandle, container_id: &str) -> Result<ProgramDump, String> {
     let inspected = with_timeout(
         test.ctx(),

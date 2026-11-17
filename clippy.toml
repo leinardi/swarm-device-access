@@ -34,4 +34,8 @@ disallowed-methods = [
     { path = "jiff::Zoned::now", reason = "read the time from the injected Clock" },
     { path = "std::time::SystemTime::now", reason = "read the time from the injected Clock" },
     { path = "std::time::Instant::now", reason = "read the time from the injected Clock" },
+    # The daemon and the launcher spawn no process: the launcher's daemon is a container the
+    # engine creates. Tests and the meta and testenv crates that run a program say why.
+    { path = "std::process::Command::new", reason = "the service spawns no process" },
+    { path = "tokio::process::Command::new", reason = "the service spawns no process", allow-invalid = true },
 ]

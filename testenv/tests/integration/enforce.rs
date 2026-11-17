@@ -300,6 +300,10 @@ fn reload_not_proven(test: &TestHandle, cause: &str) -> Fatal {
 }
 
 /// Go's `daemonReload`: `systemctl daemon-reload` through non-interactive sudo.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the enforcement test reloads systemd through sudo"
+)]
 async fn daemon_reload(ctx: &Context) -> Result<(), String> {
     let output = ctx
         .with_timeout(RELOAD_TIMEOUT)

@@ -36,6 +36,10 @@ use repo_meta::toolchain::{PinSource, one_value, rust_release, toolchain_targets
 use repo_meta::{Problem, report};
 
 /// Runs make against the repository without inheriting flags from a parent make or commit hook.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the meta-test runs make to read the pins it records"
+)]
 fn make() -> std::process::Command {
     let mut command = std::process::Command::new("make");
     command

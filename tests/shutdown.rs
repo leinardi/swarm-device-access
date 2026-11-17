@@ -30,6 +30,10 @@ use swarm_device_access::run::SHUTDOWN_BUDGET;
 /// With every Docker request hanging, `SIGTERM` still ends the daemon with exit 0 within the
 /// shutdown budget, and a `SIGINT` right after it is swallowed rather than killing the process.
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test runs the daemon as a child and signals it with kill"
+)]
 fn shutdown_within_budget_while_docker_blocks() {
     let dir = std::env::temp_dir().join(format!("sda-shutdown-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap_or_else(|error| panic!("create: {error}"));

@@ -165,6 +165,10 @@ const CLI_CASES: &[(&[&str], Kind)] = &[
 ];
 
 /// One case's exit code and output, as recorded.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the parity test runs the Go and the Rust binary"
+)]
 fn cli_outcome(binary: &str, args: &[String]) -> String {
     let output = Command::new(binary)
         .args(args)
@@ -529,6 +533,10 @@ impl Output {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the parity test signals its child with kill"
+)]
 fn signal(child: &Child, name: &str) {
     let sent = Command::new("kill")
         .args([name, &child.id().to_string()])
@@ -601,6 +609,10 @@ const MEMLOCK_ERRORS: [&str; 4] = [
 ];
 
 /// The scenario, run by `binary` (`go` for Go's single-dash flags).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the parity test runs the daemon as a child"
+)]
 fn run_daemon(binary: &str, go: bool) -> Run {
     let dir = temp_dir();
     let socket = dir.join("docker.sock");
