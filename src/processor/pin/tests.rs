@@ -35,6 +35,10 @@ fn pin_refuses_a_pid_that_is_not_a_process() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test pins a child process that exits"
+)]
 fn pinned_process_is_alive_until_it_exits() {
     let pinned = PidfdPinner.pin(i64::from(std::process::id())).unwrap();
     assert_eq!(pinned.alive(), Ok(()));

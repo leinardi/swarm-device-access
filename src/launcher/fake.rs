@@ -43,7 +43,7 @@ use super::engine::{
 use super::spec::{DEFAULT_HOST_DOCKER_SOCKET, DaemonSpec, Options};
 use super::{Console, Launch, LaunchError, Timing};
 use crate::docker::attach::Output;
-use crate::docker::{CallContext, ClientError, Error, stream_failure};
+use crate::docker::{CallContext, ClientError, Error, Framing, stream_failure};
 use crate::test_support::{Logs, capture_logs};
 use tracing::level_filters::LevelFilter;
 
@@ -354,7 +354,7 @@ impl EngineApi for FakeEngine {
         std::future::ready(created)
     }
 
-    async fn attach(&self, _id: &str) -> Result<Attached, Error> {
+    async fn attach(&self, _id: &str, _framing: Framing) -> Result<Attached, Error> {
         self.record("attach".to_owned());
         let (hang, error) = {
             let script = lock(&self.0.script);

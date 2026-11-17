@@ -32,6 +32,7 @@ candidates.
 - [Reuse ledger](#reuse-ledger)
 - [1.x fixtures](#1x-fixtures)
 - [Upstream candidates](#upstream-candidates)
+- [Conventions for later ports](#conventions-for-later-ports)
 
 ## Design decisions
 
@@ -62,7 +63,7 @@ and `Cargo.lock` and checked by `cargo deny`.
 
 | Crate | Where | Reason |
 | --- | --- | --- |
-| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by the release tag `v1.1.0` in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies. |
+| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by the release tag `v2.0.0` in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies. |
 | `clap` 4 (derive, no colour) | daemon | The CLI, as in SSE (Q1). |
 | `tokio` (`net`, `time`, `sync`, `rt`, `io-util`, `io-std`, `macros`) | daemon; testenv (dev-dependency) | The sockets, the timers that follow the paused clock, `spawn_blocking` for the cgroup transaction, the launcher's output pump; in testenv the suite's daemon child processes. The runtime and the signal watches are service-kit's. |
 | `tokio-util` | daemon | `CancellationToken`, Go's context cancellation, and the `TaskTracker` of the blocking transactions. |
@@ -191,7 +192,7 @@ Makefile's pins and retain their negative controls.
 After the port, the components the services share moved to
 [leinardi/rust-common](https://github.com/leinardi/rust-common); the rows above say what this
 daemon passes each crate. They are one git dependency in the root `Cargo.toml`'s
-`[workspace.dependencies]`, pinned by the release tag `v1.1.0`: `clock`, `tracing-setup`, `docker-client`,
+`[workspace.dependencies]`, pinned by the release tag `v2.0.0`: `clock`, `tracing-setup`, `docker-client`,
 `service-kit`, `testenv-core` and `repo-meta`. The earlier `go-compat`, `go-slog`, `go-prom`,
 `go-http` and `docker-engine` crates are no longer used by this repository (README Q6, Q11, Q13,
 Q14, Q16, Q17). The moved code is the same code, and its tests and corpora moved with it.
@@ -241,3 +242,34 @@ in rust-common's crates, which carry this repository's fixed copies.
   `LookupPort` without `/etc/services` (the `dhi.io/static` image has none) resolves the 14 TCP
   names of its built-in table, case-insensitively. Found by running a static Go binary in
   busybox; fixed with Go's table. Landed in rust-common.
+
+## Conventions for later ports
+
+Patterns the later ports settled after this one, recorded here so the next port starts from them.
+This daemon needs neither of the first two: its product is the root package alone.
+
+- **One shipped graph per binary.** When the tests and the harness bring crates the shipped binary
+  must not link, a `deny-shipped-<binary>.toml` lists the banned crates and features (cargo-deny
+  `[bans]`, with `[graph] exclude-dev = true`), and
+  `cargo deny --manifest-path <package>/Cargo.toml --config deny-shipped-<binary>.toml check bans`
+  roots the check at that one package, so the workspace's test crates and dev-dependencies stay
+  out of it. Each `<manifest>:<config>` pair goes in the Makefile's `RUST_DENY_SHIPPED`, and
+  make-common's `rust-deny-shipped` (v1.15.0) runs them all, from a hook and the CI rust job.
+  BitGauge has one pair (`Cargo.toml:deny-shipped.toml`), Runhold one per crate it ships.
+- **A virtual workspace for more than one product crate.** One product package stays at the root
+  (`members = [".", "meta", "testenv"]`, as here and in BitGauge). Two binaries whose dependency
+  graphs must stay disjoint (Runhold's agent links no SQLite or HTTP server, its controller no
+  Docker client) get a virtual root manifest with each crate under `crates/`, so the crate graph
+  enforces the split and each binary gets its own shipped-graph check.
+- **The config loader stays.** rust-common's `config-layer` (from BitGauge) reads the file into an
+  untyped tree, lays an environment overlay over it, types each value through a profile chosen by
+  the caller and collects every problem, sorted by path. This daemon's loader (`src/config/yaml.rs`)
+  is a port of yaml.v3: saphyr-parser's events built into yaml.v3's node tree, its `resolve()` on
+  the node tags, the shape pass and the strict `KnownFields` decode, with Go's texts and no
+  environment. Moving would change which files are accepted and how a refusal reads, both part of
+  the 1.x contract (Q6, Q17), so it stays; nothing here is a candidate for a later move either.
+- **Integration suites.** testenv-core's runner counts skipped tests apart
+  (`TallyStyle::WithSkipped`, `testenv/tests/integration/main.rs`), which this suite already does.
+  testenv-core's keep-aware sweep (`HostSweep::sweep_keeping`) does not apply: the suite has no
+  `*_KEEP_ON_FAILURE` switch, so it keeps nothing, and `assert_nothing_left` fails a run that
+  leaves a container or image behind.

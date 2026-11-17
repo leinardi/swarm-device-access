@@ -348,6 +348,10 @@ fn pump(mut pipe: impl AsyncRead + Unpin + Send + 'static, mut feed: Feed) {
 /// Go's `launchDaemon`: starts the binary under test with JSON debug logging plus `flags`, waits
 /// until it is ready ([`DaemonLog::wait_ready`]) and returns its log. The process is killed when
 /// the test ends.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the suite runs the built daemon as a host process"
+)]
 pub async fn launch_daemon(test: &TestHandle, flags: &[&str]) -> Result<Arc<DaemonLog>, Fatal> {
     let mut child = Command::new(&suite().binary)
         .args(["--log-format=json", "--log-level=debug"])

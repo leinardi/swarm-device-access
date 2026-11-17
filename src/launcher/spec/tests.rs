@@ -20,6 +20,7 @@
 
 use super::super::fake::{TEST_IMAGE_ID, TEST_LAUNCHER_ID};
 use super::{DEFAULT_HOST_DOCKER_SOCKET, Mount, Options, daemon_spec};
+use crate::docker::Framing;
 
 fn bind(source: &str, target: &str) -> Mount {
     Mount {
@@ -244,4 +245,24 @@ fn daemon_spec_body_matches_go() {
         let spec = daemon_spec(&options, TEST_IMAGE_ID, TEST_LAUNCHER_ID);
         assert_eq!(spec.body(), want, "{name}");
     }
+}
+
+/// The daemon has no TTY, so the engine frames its output; a TTY would make the body say so and
+/// the attach read the output raw.
+#[test]
+fn tty_decides_the_body_and_the_framing() {
+    let mut spec = daemon_spec(&base(), TEST_IMAGE_ID, TEST_LAUNCHER_ID);
+    assert!(!spec.tty);
+    assert_eq!(spec.framing(), Framing::Multiplexed);
+    assert!(
+        spec.body()
+            .contains("\"AttachStderr\":false,\"Tty\":false,\"OpenStdin\"")
+    );
+
+    spec.tty = true;
+    assert_eq!(spec.framing(), Framing::Raw);
+    assert!(
+        spec.body()
+            .contains("\"AttachStderr\":false,\"Tty\":true,\"OpenStdin\"")
+    );
 }

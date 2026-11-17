@@ -303,24 +303,71 @@ async fn the_callers_context_ends_a_stalled_call() {
     assert!(error.is_canceled());
 }
 
-/// An engine that is gone is unavailable, which is neither a missing container nor a timeout.
+/// An engine that is gone is unavailable, which is neither a missing container nor a timeout,
+/// and bollard's failed dial is worded as moby's client words it, naming the daemon host.
 #[tokio::test]
 async fn an_engine_that_is_gone_is_unavailable() {
     let engine = FakeEngine::start(&[]).unwrap();
     let docker = client(&engine, CALL);
+    let socket = engine.socket().to_str().unwrap().to_owned();
     drop(engine);
     let error: Error = docker.ping().await.unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Unavailable, "{error}");
     assert_eq!(ClientKind::Unavailable, error.kind());
+    assert_eq!(docker.daemon_host(), format!("unix://{socket}"));
+    // The fake engine removes its directory, socket and all, when dropped.
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "failed to connect to the docker API at unix://{socket}; check if the path is correct \
+             and if the daemon is running: dial unix {socket}: connect: no such file or directory"
+        )
+    );
 }
 
-/// A socket that does not exist is refused when the client is built, with the path in the text.
+/// A socket nobody listens on any more refuses the dial, which moby words as a daemon that is
+/// not running, naming the host.
+#[tokio::test]
+async fn a_refused_dial_names_the_daemon_host() {
+    /// Removes the directory however the test ends.
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    // A short fixed prefix keeps the socket path inside sun_path's 108 bytes whatever TMPDIR is;
+    // a directory a run with the same PID left behind is removed first.
+    let dir = Cleanup(std::path::PathBuf::from(format!(
+        "/tmp/sda-refused-{}",
+        std::process::id()
+    )));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let socket = dir.0.join("docker.sock");
+    drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+    let path = socket.to_str().unwrap();
+    let docker = Client::unix(path, CALL, CALL).unwrap();
+    let error: Error = docker.container_list().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Unavailable, "{error}");
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Cannot connect to the Docker daemon at unix://{path}. Is the docker daemon running?"
+        )
+    );
+}
+
+/// A socket that does not exist is refused when the client is built, with moby's text for the
+/// dial (Go builds the client and fails the first call with it).
 #[test]
 fn a_socket_that_does_not_exist_is_refused_up_front() {
     let error = Client::unix("/nonexistent/docker.sock", CALL, CALL).unwrap_err();
-    assert!(
-        error.to_string().contains("/nonexistent/docker.sock"),
-        "{error}"
+    assert_eq!(
+        error.to_string(),
+        "failed to connect to the docker API at unix:///nonexistent/docker.sock; check if the \
+         path is correct and if the daemon is running: dial unix /nonexistent/docker.sock: \
+         connect: no such file or directory"
     );
 }
 

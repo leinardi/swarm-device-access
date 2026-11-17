@@ -46,6 +46,8 @@ pub use context::{CallContext, ContextError, with_context};
 pub use docker_client::ConnectError;
 /// docker-client's error, which a stream of output carries item by item.
 pub(crate) use docker_client::Error as ClientError;
+/// How an attached container's output is framed, which its `Tty` decides.
+pub(crate) use docker_client::demux::Framing;
 /// The fake engine on a unix socket that the unit tests share.
 #[cfg(test)]
 pub(crate) use docker_client::test_util;
