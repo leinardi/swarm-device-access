@@ -200,7 +200,7 @@ the rust-common crates)**
 `clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v1.1.0"`, with `version = "1.1"`, the tag's `<major>.<minor>`) in the root
+release tag (`tag = "v2.0.0"`, with `version = "2.0"`, the tag's `<major>.<minor>`) in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
 its own features.
 

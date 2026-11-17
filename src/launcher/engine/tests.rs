@@ -26,7 +26,7 @@ use super::{Created, Engine, EngineApi as _, WaitResponse};
 use crate::docker::attach::Output;
 use crate::docker::bollard::models::ContainerCreateBody;
 use crate::docker::test_util::{FakeEngine, Reply, Request};
-use crate::docker::{Client, ErrorKind};
+use crate::docker::{Client, ErrorKind, Framing};
 
 const ID: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 const CALL: Duration = Duration::from_millis(300);
@@ -182,6 +182,23 @@ fn the_daemon_spec_is_a_create_body_that_keeps_what_the_daemon_needs() {
     }
 }
 
+/// With a TTY the engine sends raw bytes, all of them stdout, which the attach reads as they are.
+#[tokio::test]
+async fn attach_reads_a_tty_stream_raw() {
+    let stream = frame(1, "tty line\n");
+    let (_fake, engine) = engine(&[(&format!("/containers/{ID}/attach"), Reply::upgrade(&stream))]);
+
+    let mut attached = engine.attach(ID, Framing::Raw).await.unwrap();
+    let mut bytes = Vec::new();
+    while let Some(piece) = attached.recv().await {
+        match piece.unwrap() {
+            Output::Stdout(chunk) => bytes.extend(chunk),
+            Output::Stderr(chunk) => panic!("a TTY stream is stdout only: {chunk:?}"),
+        }
+    }
+    assert_eq!(bytes, stream, "the header is read as data, not as a frame");
+}
+
 /// The attach's output arrives demultiplexed, stdout and stderr apart, and ends when the daemon's
 /// output does.
 #[tokio::test]
@@ -190,7 +207,10 @@ async fn attach_demultiplexes_the_output() {
     stream.extend(frame(2, "err line\n"));
     let (fake, engine) = engine(&[(&format!("/containers/{ID}/attach"), Reply::upgrade(&stream))]);
 
-    let mut attached = engine.attach(ID).await.unwrap();
+    // The daemon spec has no TTY, so the engine frames its output.
+    let framing = daemon_spec(&options(), "sha256:abc", ID).framing();
+    assert_eq!(framing, Framing::Multiplexed);
+    let mut attached = engine.attach(ID, framing).await.unwrap();
     let mut pieces = Vec::new();
     while let Some(piece) = attached.recv().await {
         pieces.push(piece.unwrap());

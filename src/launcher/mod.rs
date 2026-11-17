@@ -67,7 +67,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 use tokio::task::JoinHandle;
 
 use crate::daemon::DOCKER_CALL_TIMEOUT;
-use crate::docker::{self, CallContext, Client, Error, with_context};
+use crate::docker::{self, CallContext, Client, Error, Framing, with_context};
 use tracing::{error, info, warn};
 
 /// The `component` attribute of every launcher log line.
@@ -232,7 +232,10 @@ impl<E: EngineApi> Runner<E> {
             warn!(component = COMPONENT, warning = %warning.as_str(), "docker warning on daemon create");
         }
 
-        let mut session = match self.prepare(context, &created.id, console).await {
+        let mut session = match self
+            .prepare(context, &created.id, spec.framing(), console)
+            .await
+        {
             Ok(session) => session,
             Err(cause) => return Err(self.abandon(&created.id, cause).await),
         };
@@ -286,11 +289,16 @@ impl<E: EngineApi> Runner<E> {
         &self,
         context: &CallContext,
         container_id: &str,
+        framing: Framing,
         console: Console,
     ) -> Result<Session, LaunchError> {
-        let attached = establish(context, self.timing.call, self.engine.attach(container_id))
-            .await
-            .map_err(LaunchError::Attach)?;
+        let attached = establish(
+            context,
+            self.timing.call,
+            self.engine.attach(container_id, framing),
+        )
+        .await
+        .map_err(LaunchError::Attach)?;
         // Started before the daemon: copying only after the start could block the daemon on a
         // full attach buffer and deadlock the start.
         let pump = Pump::spawn(attached, console);

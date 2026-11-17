@@ -56,7 +56,7 @@ use crate::docker::bollard::query_parameters::{
 };
 use crate::docker::types::Labels;
 use crate::docker::{
-    CancellationToken, Client, ClientError, Error, ErrorKind, Filters, bounded, trim_id,
+    CancellationToken, Client, ClientError, Error, ErrorKind, Filters, Framing, bounded, trim_id,
 };
 
 /// The daemon's output: its stdout and stderr pieces, until its output ends (the channel
@@ -152,8 +152,13 @@ pub trait EngineApi: Send + Sync {
     /// moby's `ContainerCreate` of `spec`, named [`DAEMON_NAME`].
     fn create(&self, spec: &DaemonSpec) -> impl Future<Output = Result<Created, Error>> + Send;
 
-    /// moby's `ContainerAttach` with `Stream`, `Stdout` and `Stderr`: the output, demultiplexed.
-    fn attach(&self, id: &str) -> impl Future<Output = Result<Attached, Error>> + Send;
+    /// moby's `ContainerAttach` with `Stream`, `Stdout` and `Stderr`: the output, read with the
+    /// `framing` of the container's `Tty` ([`DaemonSpec::framing`]).
+    fn attach(
+        &self,
+        id: &str,
+        framing: Framing,
+    ) -> impl Future<Output = Result<Attached, Error>> + Send;
 
     /// moby's `ContainerWait` for the `removed` condition: resolves once the wait is on its way,
     /// with its answer to come. A container the engine no longer has is answered as removed, its
@@ -194,6 +199,7 @@ impl EngineApi for Engine {
         let id = trim_id(id)?;
         let docker = self.client.transport().await;
         let inspected = bounded(
+            self.client.daemon_host(),
             self.call(),
             docker.inspect_container(id, None::<InspectContainerOptions>),
         )
@@ -213,7 +219,12 @@ impl EngineApi for Engine {
             .filters(&filters.to_map())
             .build();
         let docker = self.client.transport().await;
-        let listed = bounded(self.call(), docker.list_containers(Some(options))).await?;
+        let listed = bounded(
+            self.client.daemon_host(),
+            self.call(),
+            docker.list_containers(Some(options)),
+        )
+        .await?;
         Ok(listed
             .into_iter()
             .map(|summary| Summary {
@@ -227,7 +238,12 @@ impl EngineApi for Engine {
         let id = trim_id(id)?;
         let options = RemoveContainerOptionsBuilder::new().force(true).build();
         let docker = self.client.transport().await;
-        bounded(self.call(), docker.remove_container(id, Some(options))).await
+        bounded(
+            self.client.daemon_host(),
+            self.call(),
+            docker.remove_container(id, Some(options)),
+        )
+        .await
     }
 
     async fn create(&self, spec: &DaemonSpec) -> Result<Created, Error> {
@@ -237,20 +253,26 @@ impl EngineApi for Engine {
             .name(DAEMON_NAME)
             .build();
         let docker = self.client.transport().await;
-        let created = bounded(self.call(), docker.create_container(Some(options), body)).await?;
+        let created = bounded(
+            self.client.daemon_host(),
+            self.call(),
+            docker.create_container(Some(options), body),
+        )
+        .await?;
         Ok(Created {
             id: created.id,
             warnings: created.warnings,
         })
     }
 
-    async fn attach(&self, id: &str) -> Result<Attached, Error> {
+    async fn attach(&self, id: &str, framing: Framing) -> Result<Attached, Error> {
         let id = trim_id(id)?;
-        let docker = self.client.transport().await;
+        let config = self.client.streaming().await;
         // The pump ends with the receiver the launcher drops, and the token is never cancelled.
         Ok(attach::attach(
-            &docker,
+            &config,
             id,
+            framing,
             self.call(),
             OUTPUT_BUFFER,
             CancellationToken::new(),
@@ -300,6 +322,7 @@ impl EngineApi for Engine {
         let id = trim_id(id)?;
         let docker = self.client.transport().await;
         bounded(
+            self.client.daemon_host(),
             self.call(),
             docker.start_container(id, None::<StartContainerOptions>),
         )
@@ -314,7 +337,12 @@ impl EngineApi for Engine {
         // The engine answers once the container stopped, up to the seconds it was given.
         let bound =
             self.call() + Duration::from_secs(u64::try_from(timeout_seconds).unwrap_or_default());
-        bounded(bound, docker.stop_container(id, Some(options))).await
+        bounded(
+            self.client.daemon_host(),
+            bound,
+            docker.stop_container(id, Some(options)),
+        )
+        .await
     }
 }
 

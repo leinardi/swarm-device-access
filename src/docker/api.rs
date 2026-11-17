@@ -51,6 +51,8 @@ pub struct Client {
     /// it to the engine's, on the first call that reaches one.
     negotiated: AtomicBool,
     call: Duration,
+    /// moby's `DaemonHost`, `unix://<socket>`, which a failed dial of bollard's calls names.
+    host: String,
 }
 
 /// bollard's client and the config it was connected from, kept together: [`negotiate`] returns
@@ -85,6 +87,7 @@ impl Client {
             .user_agent(format!("swarm-device-access/{}", BUILD.version))
             .response_header_timeout(headers);
         Ok(Self {
+            host: config.daemon_host().to_owned(),
             connection: Mutex::new(Connection {
                 docker: connect(config.clone())?,
                 config,
@@ -97,6 +100,12 @@ impl Client {
     /// The whole-call bound of this client's unary calls.
     pub(crate) fn call_timeout(&self) -> Duration {
         self.call
+    }
+
+    /// moby's `DaemonHost` of this client, `unix://<socket>`: what [`bounded`] names when one of
+    /// bollard's calls cannot dial it.
+    pub(crate) fn daemon_host(&self) -> &str {
+        &self.host
     }
 
     fn snapshot(&self) -> Connection {
@@ -303,13 +312,13 @@ impl DockerApi for Client {
 
     async fn ping(&self) -> Result<(), Error> {
         let docker = self.transport().await;
-        bounded(self.call, docker.ping()).await?;
+        bounded(&self.host, self.call, docker.ping()).await?;
         Ok(())
     }
 
     async fn container_list(&self) -> Result<Vec<ContainerSummary>, Error> {
         let docker = self.transport().await;
-        let listed = bounded(self.call, docker.list_containers(None)).await?;
+        let listed = bounded(&self.host, self.call, docker.list_containers(None)).await?;
         Ok(listed.into_iter().map(Into::into).collect())
     }
 
@@ -317,6 +326,7 @@ impl DockerApi for Client {
         let id = trim_id(id)?;
         let docker = self.transport().await;
         let inspected = bounded(
+            &self.host,
             self.call,
             docker.inspect_container(id, None::<InspectContainerOptions>),
         )
@@ -347,16 +357,23 @@ impl DockerApi for Client {
 
 /// Runs a bollard `call` for at most `timeout`, from the request to the end of the response body
 /// (bollard's own timeout stops at the headers), its failure sorted into docker-client's kinds.
+/// A call that could not dial `host` (moby's `DaemonHost`, [`Client::daemon_host`]) fails with the
+/// text moby's client gives that dial (docker-client's `Error::at_host`).
 /// The call is boxed: bollard's futures are large, and the launcher's supervision holds several.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::Timeout`] when `timeout` passes first, else the call's error.
 pub(crate) fn bounded<'call, T: 'call>(
+    host: &'call str,
     timeout: Duration,
     call: impl Future<Output = Result<T, docker_client::bollard::errors::Error>> + Send + 'call,
 ) -> Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'call>> {
-    Box::pin(async move { Ok(docker_client::bounded(timeout, call).await?) })
+    Box::pin(async move {
+        docker_client::bounded(timeout, call)
+            .await
+            .map_err(|error| Error::from(error.at_host(host)))
+    })
 }
 
 /// moby's refusal of an empty ID: `invalid container name or ID: value is empty`.

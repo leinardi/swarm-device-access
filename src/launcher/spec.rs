@@ -27,6 +27,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::Duration;
 
+use crate::docker::Framing;
+
 /// The name of the daemon container. One name per node is what lets the next launcher find, and
 /// replace, a daemon its predecessor left behind.
 pub const DAEMON_NAME: &str = "swarm-device-access";
@@ -104,6 +106,8 @@ pub struct DaemonSpec {
     pub cmd: Option<Vec<String>>,
     /// `Config.Labels`.
     pub labels: BTreeMap<String, String>,
+    /// `Config.Tty`, which decides how the engine frames the attached output ([`Self::framing`]).
+    pub tty: bool,
     /// `Config.StopTimeout`, in seconds.
     pub stop_timeout: u64,
     /// `HostConfig.Privileged`.
@@ -145,6 +149,7 @@ pub fn daemon_spec(options: &Options, image_id: &str, launcher_id: &str) -> Daem
             (LABEL_ROLE.to_owned(), ROLE_DAEMON.to_owned()),
             (LABEL_LAUNCHER.to_owned(), launcher_id.to_owned()),
         ]),
+        tty: false,
         stop_timeout: STOP_TIMEOUT.as_secs(),
         privileged: true,
         cgroupns_mode: HOST_MODE,
@@ -169,14 +174,26 @@ fn bind(source: &str, target: &str, read_only: bool) -> Mount {
 }
 
 impl DaemonSpec {
+    /// How the engine frames the container's attached output: raw bytes with a TTY, headers and
+    /// payloads without one.
+    #[must_use]
+    pub const fn framing(&self) -> Framing {
+        if self.tty {
+            Framing::Raw
+        } else {
+            Framing::Multiplexed
+        }
+    }
+
     /// The create body: Go's `json.Marshal` of moby's `CreateRequest` for this spec.
     #[must_use]
     pub fn body(&self) -> String {
         let mut out = String::from(
             "{\"Hostname\":\"\",\"Domainname\":\"\",\"User\":\"\",\"AttachStdin\":false,\
-             \"AttachStdout\":false,\"AttachStderr\":false,\"Tty\":false,\"OpenStdin\":false,\
-             \"StdinOnce\":false,\"Env\":null,\"Cmd\":",
+             \"AttachStdout\":false,\"AttachStderr\":false,\"Tty\":",
         );
+        out.push_str(if self.tty { "true" } else { "false" });
+        out.push_str(",\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":null,\"Cmd\":");
         match &self.cmd {
             None => out.push_str("null"),
             Some(args) => push_json_strings(&mut out, args),
