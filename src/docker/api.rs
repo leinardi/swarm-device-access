@@ -27,6 +27,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::future::{Future, poll_fn};
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -38,9 +39,32 @@ use crate::version::BUILD;
 use docker_client::bollard::Docker;
 use docker_client::bollard::query_parameters::{EventsOptionsBuilder, InspectContainerOptions};
 use docker_client::{
-    CancellationToken, Config, ConnectError, ErrorKind, connect, events_established, negotiate,
+    CancellationToken, Config, ConnectError, ErrorKind, Limits, connect, events_established,
+    negotiate,
 };
 use jiff::Timestamp;
+
+/// The most of one whole body docker-client reads for this daemon: the launcher's `attach::wait`
+/// answer (`{"StatusCode":…}`) and the engine's refusals. The lists, the inspects and the pings go
+/// through bollard, which these limits do not bound.
+const RESPONSE_BODY: NonZeroUsize = NonZeroUsize::new(1024 * 1024).unwrap();
+
+/// The most of one `/events` record, every byte before its newline counted. The start, unpause,
+/// die and destroy records the daemon subscribes to are a few KiB, labels included; an oversized
+/// one ends the stream as a decode failure, and the daemon reconnects from now after its backoff.
+const EVENT_RECORD: NonZeroUsize = NonZeroUsize::new(1024 * 1024).unwrap();
+
+/// The most of one frame of the launched daemon container's attach output (always multiplexed:
+/// the launcher attaches with `tty=false`). Generous, because an oversized frame ends the pump and
+/// stops the daemon, which Swarm then restarts.
+const OUTPUT_FRAME: NonZeroUsize = NonZeroUsize::new(16 * 1024 * 1024).unwrap();
+
+/// What docker-client's own calls may buffer from the engine, for every client of this daemon.
+pub(crate) const LIMITS: Limits = Limits {
+    response_body: RESPONSE_BODY,
+    event_record: EVENT_RECORD,
+    output_frame: OUTPUT_FRAME,
+};
 
 /// The daemon's Docker client: docker-client's connection to the unix socket. It shows none of
 /// bollard's calls, so `ping`, `events` and the rest are the trait's, and the launcher's writes go
@@ -83,7 +107,7 @@ impl Client {
     ///
     /// [`ConnectError`] when bollard refuses the socket.
     pub fn unix(socket: &str, call: Duration, headers: Duration) -> Result<Self, ConnectError> {
-        let config = Config::unix(socket)
+        let config = Config::unix(socket, LIMITS)
             .user_agent(format!("swarm-device-access/{}", BUILD.version))
             .response_header_timeout(headers);
         Ok(Self {

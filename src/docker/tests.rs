@@ -387,6 +387,31 @@ async fn an_unknown_event_type_is_a_decode_error() {
     assert_eq!(end.kind(), StreamErrorKind::Decode, "{end}");
 }
 
+/// A record longer than the client's `event_record` limit ends the stream as a decode error, as a
+/// record the models cannot read does, so the event loop skips to now (`src/daemon/events.rs`)
+/// rather than resubscribing from the last event and reading the same record again; the stream
+/// stays over.
+#[tokio::test]
+async fn a_record_over_the_event_record_limit_is_a_decode_error() {
+    let name = "x".repeat(super::api::LIMITS.event_record.get());
+    let oversized = format!(
+        r#"{{"Type":"container","Action":"start","Actor":{{"ID":"{ID}","Attributes":{{"name":"{name}"}}}},"time":1,"timeNano":1000000000}}"#
+    );
+    let engine = FakeEngine::start(&[("/events", Reply::events(&[&oversized]))]).unwrap();
+    let docker = client(&engine, CALL);
+    let mut stream = docker
+        .events(Timestamp::UNIX_EPOCH, &Filters::new())
+        .await
+        .unwrap();
+    let end = stream.next().await.unwrap_err();
+    assert_eq!(end.kind(), StreamErrorKind::Decode, "{end}");
+    assert!(end.to_string().contains("event record exceeds"), "{end}");
+    assert_eq!(
+        stream.next().await.unwrap_err().kind(),
+        StreamErrorKind::Eof
+    );
+}
+
 /// The subscription is established when `events` resolves: an engine that answers the events
 /// headers late leaves the call pending, so the daemon is not ready before it is subscribed, and
 /// the stream it then returns yields the events.
