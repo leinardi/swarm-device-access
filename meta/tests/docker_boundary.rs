@@ -17,10 +17,10 @@
 // Adapted from swarm-scheduler-exporter/meta/tests/docker_boundary.rs at d57dcc220d29,
 // originally MIT-licensed, Copyright (c) 2026 Roberto Leinardi
 
-//! The daemon's Docker client is read-only (`docs/rust-port.md`, the Docker transport): it is
-//! rust-common's `docker-client` on bollard, reached through `src/docker` alone, and the daemon's
-//! trait has the ping, list, inspect and events calls only. This pins it on the manifests and on
-//! the text of the non-test sources under `src/`:
+//! The daemon's Docker client is read-only (`docs/internal/rust-port.md`, the Docker transport): it
+//! is rust-common's `docker-client` on bollard, reached through `src/docker` alone, and the
+//! daemon's trait has the ping, list, inspect and events calls only. This pins it on the manifests
+//! and on the text of the non-test sources under `src/`:
 //!
 //! - `docker-client` is the sanctioned client: only the root package declares it, once in
 //!   `[dependencies]` with `attach` at most (the launcher's output and wait pumps) and in

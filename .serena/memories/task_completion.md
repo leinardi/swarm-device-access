@@ -15,7 +15,7 @@ Also, by what changed (full table: AGENTS.md, Validation matrix):
   `make rust-release-dist`, then `make image-build-test` (zig, `dhi.io` login), and the arm64
   reduced tier under QEMU.
 - `.github/**`: `cargo test --locked -p meta`, `pre-commit run actionlint --all-files`; keep
-  `docs/release.md` true.
+  `docs/internal/release.md` true.
 - Markdown: `pre-commit run lychee --all-files`; prose wraps at 100 columns.
 
 Or run `make check` to run pre-commit on all files (slower but thorough).

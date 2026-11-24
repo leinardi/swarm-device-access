@@ -16,14 +16,14 @@
 
 //! The raw `bpf(2)` commands the cgroup v2 device filter needs (and the one map creation of
 //! cilium's `RLIMIT_MEMLOCK` probe, [`super::rlimit`]), and the only module of the
-//! workspace allowed `unsafe` (`docs/rust-port.md`, eBPF): no safe crate loads a program from raw
-//! instructions, attaches it with `BPF_F_REPLACE` and dumps a foreign program's translated
+//! workspace allowed `unsafe` (`docs/internal/rust-port.md`, eBPF): no safe crate loads a program
+//! from raw instructions, attaches it with `BPF_F_REPLACE` and dumps a foreign program's translated
 //! instructions. Each command fills one `#[repr(C)]` attribute struct, laid out as the kernel's
 //! `union bpf_attr` member and sized as cilium's `internal/sys` structs, which the Go daemon
-//! passed; the tests pin every offset and size. The query is the exception: the Go daemon
-//! declared only its first 32 bytes, but the kernel's member is 64, and since cgroup programs
-//! moved onto mprog (Linux 6.16) the kernel writes `revision`, at offset 56, back whatever size it
-//! is given, so the whole member is declared here, as cilium does.
+//! passed; the tests pin every offset and size. The query is the exception: the Go daemon declared
+//! only its first 32 bytes, but the kernel's member is 64, and since cgroup programs moved onto
+//! mprog (Linux 6.16) the kernel writes `revision`, at offset 56, back whatever size it is given,
+//! so the whole member is declared here, as cilium does.
 //!
 //! Every function here is safe to call: the pointers an attribute carries are taken from buffers
 //! the function borrows for the length of the call, and every descriptor the kernel returns is

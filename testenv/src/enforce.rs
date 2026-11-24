@@ -106,7 +106,7 @@ pub fn reload_unsupported(required: bool, cause: &str) -> Verdict {
 }
 
 /// Which daemon a container runs: the two spell their long flags differently (Q1 in
-/// `docs/rust-port.md`).
+/// `docs/migration.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Build {
     /// The Go daemon, whose flag package takes `-name=value`.

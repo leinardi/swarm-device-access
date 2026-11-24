@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-//! Only the launcher reaches the Docker write calls (`docs/rust-port.md`, the Docker launcher
-//! path; the `trust-boundary` skill): the privileged daemon can create, start, stop or remove
-//! nothing. The write calls are the launcher's engine, `src/launcher/engine.rs`, made on bollard's
-//! client (through rust-common's docker-client, whose `attach` feature only the root package
-//! enables: `docker_boundary.rs`). The daemon's `docker::Client` hands that client out through one
-//! crate-private hook, `Client::transport`. This pins it on the text of the non-test sources under
-//! `src/`:
+//! Only the launcher reaches the Docker write calls (`docs/internal/rust-port.md`, the Docker
+//! launcher path; the `trust-boundary` skill): the privileged daemon can create, start, stop or
+//! remove nothing. The write calls are the launcher's engine, `src/launcher/engine.rs`, made on
+//! bollard's client (through rust-common's docker-client, whose `attach` feature only the root
+//! package enables: `docker_boundary.rs`). The daemon's `docker::Client` hands that client out
+//! through one crate-private hook, `Client::transport`. This pins it on the text of the non-test
+//! sources under `src/`:
 //!
 //! - the hook stays `pub(crate)`, declared once in `src/docker/api.rs`, and only
 //!   `src/launcher/engine.rs` (and the client file, for its own reads) calls it; only the engine

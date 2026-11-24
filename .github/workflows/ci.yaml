@@ -311,7 +311,7 @@ jobs:
   # owner, the image config, the daemon starting in dry-run and logging its stamps). Both check that
   # the image binary is byte for byte the dist/ binary built here. The release builds the same
   # target from the same make target on the same base tag, and runs only the short smoke tier of
-  # the same script (docs/release.md, "What CI proves").
+  # the same script (docs/internal/release.md, "What CI proves").
   #
   # Never skipped on a push or a dispatch: release.yaml gates on ci-result of the exact commit it
   # releases, and only this job on that commit proves its packaging. The prebuilt target never
@@ -359,7 +359,7 @@ jobs:
             echo "::notice::A pull request from a fork gets no DHI_TOKEN, and the image's base (dhi.io/static) cannot be pulled without one: the static binaries are built and checked, the images are not tested here. The push to master after the merge tests them, and the release gates on that run."
             echo "available=false" >>"${GITHUB_OUTPUT}"
           else
-            echo "::error::DHI_TOKEN is not available to this ${EVENT} run, so the image's base (dhi.io/static) cannot be pulled. Add it as an Actions secret (and a Dependabot secret) - docs/release.md."
+            echo "::error::DHI_TOKEN is not available to this ${EVENT} run, so the image's base (dhi.io/static) cannot be pulled. Add it as an Actions secret (and a Dependabot secret) - docs/internal/release.md."
             exit 1
           fi
 

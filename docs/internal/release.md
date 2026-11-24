@@ -2,7 +2,7 @@
 
 How a swarm-device-access release is versioned, built and published, what to do when one fails
 halfway, and what has to be set up by hand for all of it to hold. The pipeline is
-[`.github/workflows/release.yaml`](../.github/workflows/release.yaml), built from the shared
+[`.github/workflows/release.yaml`](../../.github/workflows/release.yaml), built from the shared
 actions of [gh-composite-actions](https://github.com/leinardi/gh-composite-actions)
 (`release-version`, `require-ci-green`, `release-mode`, `toolchain-record`, `toolchain-recover`,
 `check-pinned-bases`, `trivy-gate`, `binary-attestation-status`); this page is why it is shaped that
@@ -14,7 +14,7 @@ way.
   `swarm-device-access-linux-arm64`, cross-compiled for the `x86_64-unknown-linux-musl` and
   `aarch64-unknown-linux-musl` targets by `make rust-release-binaries`
   (`cargo zigbuild --release --locked`) with the exact Rust release of `rust-toolchain.toml` and
-  the zig and cargo-zigbuild [`.mk/rust-release.mk`](../.mk/rust-release.mk) pins, the checkout,
+  the zig and cargo-zigbuild pins of the [`Makefile`](../../Makefile), the checkout,
   the cargo home and the toolchain's sources remapped so no build-host path is compiled in, and the
   version, commit and commit date stamped through `SWARM_DEVICE_ACCESS_VERSION`,
   `SWARM_DEVICE_ACCESS_COMMIT` and `SWARM_DEVICE_ACCESS_DATE`, plus `checksums.txt` over both
@@ -30,7 +30,7 @@ way.
   identity. Before the version was tagged, CI had passed on the commit (the full image suite on
   amd64 and the reduced one on arm64, [What CI proves](#what-ci-proves)), and both platform images
   passed the release's short smoke test and a [Trivy](https://trivy.dev/) scan with no fixable
-  `HIGH` or `CRITICAL` vulnerability outside [`.trivyignore.yaml`](../.trivyignore.yaml).
+  `HIGH` or `CRITICAL` vulnerability outside [`.trivyignore.yaml`](../../.trivyignore.yaml).
 - The moving image tags `:<major>` and `:latest`, and the GitHub "Latest" release marker, when the
   version is the highest released one.
 - A GitHub release whose notes name the Rust toolchain the binaries were built with and the base
@@ -87,7 +87,8 @@ commit waiting to be released leaves the release to a dispatch.
 
 A push that merges a Dependabot pull request takes the same `release` group as a dispatch, so the
 two never publish at once and a lower version never moves `latest` after a higher one. Every other
-push runs in a group of its own and only skips the `dependabot` job. GitHub keeps one pending run
+push runs in a group of its own, and its `dependabot` job decides against a release, so `guard`,
+`audit` and the jobs after them are skipped. GitHub keeps one pending run
 per group: a Dependabot merge that arrives while a release runs and a dispatch waits replaces that
 dispatch, which shows as cancelled; dispatch it again.
 
@@ -95,7 +96,7 @@ dispatch, which shows as cancelled; dispatch it again.
 
 Semantic versioning, derived from
 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) by
-[`svu`](https://github.com/caarlos0/svu), as [AGENTS.md](../AGENTS.md#commit-messages) describes:
+[`svu`](https://github.com/caarlos0/svu), as [AGENTS.md](../../AGENTS.md#commit-messages) describes:
 
 - `feat` is a minor;
 - `fix` is a patch;
@@ -144,7 +145,8 @@ Tags in this repository are immutable. The "Immutable tags" ruleset, managed in
 A failed release cannot delete its tag, so everything that can fail happens before the tag exists,
 and everything after it can be finished by a re-run on the tagged commit.
 
-The run has four jobs:
+The run has five jobs: `dependabot`, which decides whether a push releases on its own (see
+[Dependabot releases](#dependabot-releases)), then these four:
 
 1. **`guard`**: refuse anything but `master`, failing rather than skipping when `github.ref` is not
    `refs/heads/master`; then resolve the version, as in [Versioning](#versioning), and read the
@@ -299,7 +301,7 @@ of scanning at release time.
 The base's findings count the same as the image's own: a fixable finding in `dhi.io/static` fails
 the release too. Its fix is usually dhi.io's next rebuild of the tag, which the next release picks
 up by itself, or a newer tag, which Dependabot proposes; until it ships, a
-reviewed entry in [`.trivyignore.yaml`](../.trivyignore.yaml) is the only way past the gate, scoped
+reviewed entry in [`.trivyignore.yaml`](../../.trivyignore.yaml) is the only way past the gate, scoped
 to the paths or purls it was found in, with a statement saying why and an expiry date Trivy
 enforces. When an entry expires, bump what carries the fix if it is out, otherwise extend the date
 with a fresh reason.
@@ -413,7 +415,7 @@ docker buildx imagetools create -t "$IMAGE:latest" -t "$IMAGE:<major>" "$IMAGE@$
 ## Scheduled scan
 
 A release is scanned once, when it is built, but vulnerabilities keep being published.
-[`.github/workflows/scheduled-scan.yaml`](../.github/workflows/scheduled-scan.yaml) runs every
+[`.github/workflows/scheduled-scan.yaml`](../../.github/workflows/scheduled-scan.yaml) runs every
 Monday, and on demand from the Actions tab. It resolves `:latest` to its index digest once and scans
 the `linux/amd64` and `linux/arm64` images by their own digests with the release's gate
 (`trivy-gate`, the latest Trivy, the same ignore file), and runs `make rust-deny` over `master`'s
@@ -470,30 +472,34 @@ is written only by the warm-up workflow, on `master`.
 
 ### Environment and credentials
 
-The release job runs in the `release` environment. Create and configure it **before the first
-dispatch**, dry runs included: a run that references a missing environment creates it with no
-protection rules.
+The release job runs in the `release` environment. It is managed as code in
+[`leinardi/gh-leinardi-iac`](https://github.com/leinardi/gh-leinardi-iac) (`environments` in the
+`repo_swarm_device_access` module of `stacks/github-repos/repos.tf`); it must exist **before the
+first dispatch**, dry runs included: a run that references a missing environment creates it with
+no protection rules.
 
-1. **Restrict it to `master`** with a deployment branch rule, as a server-side second line of defence
-   behind the `guard` job. Add required reviewers too if a release should wait for a human. Leave
-   the "Immutable tags" ruleset exactly as it is; the release job is written for it.
+1. **It is restricted to `master`** with a deployment branch rule, as a server-side second line
+   of defence behind the `guard` job. Add required reviewers too if a release should wait for a
+   human. Leave the "Immutable tags" ruleset exactly as it is; the release job is written for it.
 2. **The `dhi.io` token.** The image's base, `dhi.io/static`, cannot be pulled without a login (the
-   user name is `leinardi`, written in the workflows), so three places need `DHI_TOKEN`:
+   user name is `leinardi`, written in the workflows), so four places need `DHI_TOKEN`:
    - the **release** job: an Actions secret, best **on the environment**
      (`gh secret set DHI_TOKEN --env release`), so only a job that passed the environment's rules
      reads it;
    - CI's **`image` job**, which runs on pull requests and pushes outside the environment: a
      repository Actions secret (`gh secret set DHI_TOKEN`);
-   - **Dependabot**, which does not see Actions secrets: both to update the base (the `dhi`
-     registry in [`.github/dependabot.yml`](../.github/dependabot.yml)) and for CI's `image` job on
-     its pull requests (`gh secret set DHI_TOKEN -a dependabot`).
+   - **Dependabot**, which does not see Actions secrets: both to update the base (the `dhi` registry
+     in [`.github/dependabot.yml`](../../.github/dependabot.yml)) and for CI's `image` job on its
+     pull requests (`gh secret set DHI_TOKEN -a dependabot`);
+   - the **integration** workflow, which logs in to `dhi.io` to build the image under test: the
+     same repository Actions secret.
 
    The `DHI_USERNAME` variable is no longer read.
 
 ### Required checks
 
 A failing CI job does not block a merge on its own: the `master` ruleset ("Protect default branch")
-needs a required status check for that, and today it has none. The rulesets are managed as code in
+needs a required status check for that; it requires `ci-result`. The rulesets are managed as code in
 [`leinardi/gh-leinardi-iac`](https://github.com/leinardi/gh-leinardi-iac), in the
 `repo_swarm_device_access` module of `stacks/github-repos/repos.tf`, never by hand or with
 `gh api`: a change to them is a pull request there.
@@ -550,10 +556,10 @@ Repository pins in the Makefile override those defaults before the snippet is in
 ## Commit messages are checked on every pull request
 
 Every commit must be a Conventional Commit with a scope (see
-[CONTRIBUTING.md](../CONTRIBUTING.md#commit-messages)). The local `commit-msg` hook only runs where
+[CONTRIBUTING.md](../../CONTRIBUTING.md#commit-messages)). The local `commit-msg` hook only runs where
 somebody ran `make pre-commit-install`, so a commit made without it would otherwise reach `master`
 unchecked. The `conventional-commits` job in
-[`.github/workflows/ci.yaml`](../.github/workflows/ci.yaml) closes that gap: on every pull request
+[`.github/workflows/ci.yaml`](../../.github/workflows/ci.yaml) closes that gap: on every pull request
 it runs the repository's own `conventional-pre-commit` hook, `--force-scope` included, over every
 commit between the pull request's base and head. Merge commits are skipped.
 
@@ -564,6 +570,4 @@ the title becomes the commit subject, and a pull-request title check has to be a
 
 ## Historical notes: the Go releases (1.x)
 
-Releases up to and including `v1.0.4` were built from the Go implementation, which the 2.0 cutover
-replaced ([`docs/rust-port.md`](rust-port.md)). A recovery of a 1.x release runs on that release's
-commit, whose workflows still describe how it was built, so nothing here is needed to run one.
+Moved to [Historical notes: the Go releases (1.x)](history/go-releases.md).

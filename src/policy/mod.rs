@@ -348,7 +348,7 @@ impl Global {
 
 /// `true` or `false`, the only two spellings of a boolean setting or label: Go's `ParseBool` also
 /// read `1`, `t`, `T`, `TRUE`, `True`, `0`, `f`, `F`, `FALSE` and `False`, which are refused now
-/// (README Q17). A label that is not one fails closed: the container is not enabled.
+/// (docs/migration.md, Q17). A label that is not one fails closed: the container is not enabled.
 #[must_use]
 pub fn parse_bool(value: &str) -> Option<bool> {
     match value {

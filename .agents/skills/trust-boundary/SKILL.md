@@ -32,8 +32,8 @@ not widen it in the meantime.
 ## Invariants of the Rust code
 
 Use user-level Rust skills alongside this skill for a `.rs` file. The rules below are the 1.x rules
-(the README's *Migrating from 1.x* lists the only intended differences); the Rust code reaches the
-kernel and the Engine directly, where the 1.x Go libraries hid it, so it adds these:
+(*Migrating from 1.x*, `docs/migration.md`, lists the only intended differences); the Rust code
+reaches the kernel and the Engine directly, where the 1.x Go libraries hid it, so it adds these:
 
 - **No `unsafe` outside `src/cgroup/bpf_sys.rs`.** The workspace denies `unsafe_code`, that one
   module lifts it. Every other
@@ -95,7 +95,7 @@ second document, and validates the enums; any failure makes the daemon exit `1` 
 `config file error: …`. Covered by `policy::tests::global_validate`,
 `policy::tests::validate_globs_cases`, `config::tests::load_file_*` and
 `config::tests::validate_enums_cases`, and `tests/config_loader.rs` and `policy::glob::tests`
-(1.x differences are listed in README Q17).
+(1.x differences are listed in `docs/migration.md`, Q17).
 
 - [ ] A new enum-like key or flag is checked in `Settings::validate` (or an equivalent load-time
       check) with a table test covering an unknown value, and parses into a type whose
@@ -123,8 +123,9 @@ inspect happened to succeed. Treat every label as attacker-controlled.
   checks the global and the container deny and `authorized` the global and the container allow.
   **Deny wins over allow**, and a per-container allow can never re-admit a path the global allow
   excludes.
-- An empty or all-whitespace `device-allow` label means "inherit the global allow set", not
-  "allow nothing" — that is documented in the README label table; keep it that way or change both.
+- An empty or all-whitespace `device-allow` label means "inherit the global allow set", not "allow
+  nothing" — that is documented in the label table of `docs/labels.md`; keep it that way or change
+  both.
 
 Covered by `policy::tests::parse_container`, `policy::tests::device_allowed`,
 `policy::tests::explicitly_allowed`, `reconcile_ignores_service_level_labels` and
@@ -205,7 +206,7 @@ The daemon has to be privileged: it attaches BPF programs to other containers' c
 host device nodes. So the rule is not "unprivileged" but "no more than the documented set".
 
 The single source of truth for that set is `daemon_spec` (`src/launcher/spec.rs`): the Swarm
-service in the README's Docker Compose for Swarm snippet, `deployments/docker/docker-compose.yaml`
+service in the Compose snippet of `docs/getting-started.md`, `deployments/docker/docker-compose.yaml`
 and `examples/**` runs the image as an unprivileged `launch` task with only the Docker socket, and
 the launcher creates the daemon with `Privileged`, host cgroup, PID and user namespaces, network
 `none`, `AutoRemove`, and exactly three bind `Mounts`: the Docker socket at `/var/run/docker.sock`,
@@ -233,8 +234,8 @@ of the build context. `meta/tests/dockerfiles.rs` and `meta/tests/toolchain.rs` 
 with the seven required OCI labels of `droast.toml`.
 
 - [ ] No new capability, namespace flag or host bind mount beyond the documented set, in
-      `daemon_spec`, the Dockerfile, `deployments/**`, `examples/**` or the README — and if one is
-      truly needed, the README and `AGENTS.md` runtime requirements change in the same commit.
+  `daemon_spec`, the Dockerfile, `deployments/**`, `examples/**` or the docs — and if one is truly
+  needed, `docs/deployment.md` and the `AGENTS.md` runtime requirements change in the same commit.
 - [ ] The DBus mount is never made mandatory (`--dbus` stays off by default).
 - [ ] A Dockerfile change is checked with `make docker-build` and
       `cargo test --locked -p meta --test dockerfiles --test toolchain`; no base reference holds a
@@ -288,7 +289,7 @@ re-run until green:
 - [ ] Only device nodes resolved beneath `/dev` become rules; an unknown identity or walk yields the
       empty desired set
 - [ ] SIGHUP reload keeps the previous policy and `dry-run` on any read, parse or validation error
-- [ ] No privilege or mount beyond the README's documented set; DBus mount stays optional
+- [ ] No privilege or mount beyond the documented set (`docs/deployment.md`); DBus mount stays optional
 - [ ] Image inputs pinned: frontend by digest, bases by literal tag, rust on rust-toolchain.toml's
       release
 - [ ] Listeners off by default and bounded by timeouts; no body read without a cap

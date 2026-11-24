@@ -239,8 +239,8 @@ restrictions still apply. The header and trailer are dead stores to `R0` that id
 (`sda_devfilter` in `bpftool`); on the next change the daemon strips its wrapper back to the
 original and wraps it again, so grants replace each other instead of piling up. The new program is
 attached with `BPF_F_ALLOW_MULTI` (or `BPF_F_REPLACE` where supported) before the old one is
-detached. The README's Host Requirements section describes what the runtime filter must look like
-for this to work.
+detached. [Host requirements](host-requirements.md) describes what the runtime filter must look
+like for this to work.
 
 ## Device mount collection
 
@@ -257,8 +257,9 @@ whatever their `Source` says: only a bind mount's source is a host path.
   with a retryable error, since an alias that was not seen might deny a device that was. There is no
   depth cap and no subtree exception.
 
-`/dev` is opened once per pass. Each candidate goes through one evaluation on file descriptors, so
-an entry swapped between enumeration and use is judged by what it is when opened, not by its name:
+`/dev` is opened once per container reconcile. Each candidate goes through one evaluation on file
+descriptors, so an entry swapped between enumeration and use is judged by what it is when opened,
+not by its name:
 
 1. The name must be clean (no `..`, `//` or trailing `/`) and under `/dev`; otherwise `Warn`
    `device path resolves outside /dev` (`reason=outside_dev`) and it is skipped.
@@ -291,7 +292,7 @@ becomes empty with a retryable error until every device resolves. A device witho
 its other names already exclude (e.g. `/dev/pts/*` under an allow list that does not name it) is
 simply not granted.
 
-Each container with at least one `/dev` mount produces one summary line with counts only:
+Each enabled container with at least one `/dev` mount produces one summary line with counts only:
 
 ```
 level=INFO msg="container processed" id=abc pid=1234 devices_granted=12 skipped=87 errors=0 dry_run=false
@@ -366,8 +367,8 @@ allow. Invalid label values cause the container to be skipped (fail-closed).
 
 The daemon **must** run as root with:
 
-- `--privileged` (or equivalent capabilities: `CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_ADMIN`,
-  `CAP_SYS_RESOURCE`)
+- `--privileged` (a smaller capability set is not supported; the privileged tests run with
+  `CAP_BPF`, `CAP_SYS_ADMIN` and `CAP_SYS_RESOURCE`)
 - `--cgroupns=host`, `--pid=host`, `--userns=host`
 - `/sys` bind-mounted at `/host/sys` inside the container
 - `/dev` bind-mounted (device candidates are opened beneath it with `openat2` and identified with
@@ -411,12 +412,12 @@ Metrics exposed:
 
 ### No debug server (`--debug-addr`)
 
-There is no pprof server since 2.0 (Q2 in the README's Migrating from 1.x): `--debug-addr` and the
+There is no pprof server since 2.0 (Q2 in [Migrating from 1.x](migration.md)): `--debug-addr` and the
 `debug-addr` key must be empty, and any other value is refused at startup and on reload.
 
 The metrics server binds its address before the daemon goes on, and a busy or invalid address
-makes the daemon exit with an error. It has a 5 s read-header, 10 s read, 30 s write and 60 s idle
-timeout.
+makes the daemon exit with an error. It allows 5 s to read a request's head (an idle keep-alive wait
+included), closes a connection whose write stalls for 30 s, and drains for at most 5 s at shutdown.
 
 ## Dry-run mode
 
@@ -467,7 +468,7 @@ cannot subscribe: the first failure is logged at `Warn`
 Check the socket path with `--docker-socket`. Default: `/var/run/docker.sock`. On some hosts Docker
 Desktop uses a different path.
 
-The daemon requires Docker Engine 19.03+ (API 1.40). Its Docker client (`src/docker`)
-negotiates the API version once, with `GET /version`, and sends every request under the
-negotiated `/v<major>.<minor>` prefix: an engine older than the client's floor answers an error,
-which the daemon logs (Q16).
+Its Docker client (`src/docker`) negotiates the API version once, with `GET /version`, and sends
+every request under the negotiated `/v<major>.<minor>` prefix. The client sets no minimum version
+of its own: a request an older engine cannot serve answers that engine's error, which the daemon
+logs (Q16).

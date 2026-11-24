@@ -4,7 +4,7 @@ Linux-only daemon that sets cgroup device-allow rules for Docker Swarm container
 that bind-mount `/dev/...` paths. Solves the Docker Swarm gap where `devices:` /
 `device_cgroup_rules:` are silently ignored. Rust since 2.0 (the Go 1.x code was
 removed at the cutover); 1.x behaviour is the contract, except the Q entries in the
-README's "Migrating from 1.x".
+`docs/migration.md`.
 
 ## Source map
 
@@ -46,7 +46,7 @@ meta/                      # repository meta-tests (pins, Dockerfile, CI gates, 
 testenv/                   # integration harness (feature integration), host Docker
 deployments/docker/        # Dockerfile (runtime + prebuilt targets on one base), compose file, example config
 scripts/image-test.sh      # image tests: smoke (release), reduced (CI arm64), full (CI amd64)
-docs/                      # architecture.md, testing.md, release.md, rust-port.md (ledger)
+docs/                      # published pages; internal/ (release.md, rust-port.md ledger)
 ```
 
 ## Key invariants
@@ -54,9 +54,9 @@ docs/                      # architecture.md, testing.md, release.md, rust-port.
 - `src/cgroup/{api,ebpf,v1,v2}.rs` keep NVIDIA's Apache 2.0 header — do not relicense or reformat.
 - `unsafe` and `libc` only in `src/cgroup/bpf_sys.rs`; Docker writes only in `src/launcher/engine.rs`.
 - Every trigger runs `Processor::reconcile`; anything uncertain applies the empty set (fail closed).
-- Log, error, metric and Engine-request text is the 1.x contract; a difference needs a README Q entry.
-- `docs/rust-port.md` is the reuse ledger: check and update it when a reused component changes or
-  an upstream fix is taken.
+- Log, error, metric and Engine-request text is the 1.x contract; a difference needs a Q entry in docs/migration.md.
+- `docs/internal/rust-port.md` is the reuse ledger: check and update it when a reused component
+  changes or an upstream fix is taken.
 - Shared code (logger, Go ports, clock, metrics registry, HTTP server, Engine client, runtime,
   harness and meta-test helpers) is rust-common's crates: a difference is a parameter there, a fix
   lands there first, never a fork here (`AGENTS.md`, Shared crates).

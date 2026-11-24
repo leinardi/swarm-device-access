@@ -17,7 +17,7 @@
 
 Every `.rs`, shell, Dockerfile, Makefile and local `.mk` file has the Apache 2.0 block.
 `src/cgroup/{api,ebpf,v1,v2}.rs` keep NVIDIA's header. Files reused from swarm-scheduler-exporter
-or swarm-rootless-docker add the provenance line from `docs/rust-port.md`, never the MIT block.
+or swarm-rootless-docker add the provenance line from `docs/internal/rust-port.md`, never the MIT block.
 
 ## Makefile
 

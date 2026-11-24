@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-//! The cross-language upgrade and rollback gate of `docs/rust-port.md`, new to the Rust suite:
-//! grants survive the daemon's exit (`test/integration/enforce_test.go`, the reload subtest), so
-//! after an upgrade the Rust daemon finds the Go daemon's wrappers in place, and after a rollback
-//! the Go daemon finds the Rust daemon's. On one surviving container and cgroup, the Go daemon
-//! grants, the Rust daemon under a narrower policy revokes, the Rust daemon grants again, and the
-//! Go daemon under the narrower policy revokes once more.
+//! The cross-language upgrade and rollback gate of `docs/internal/rust-port.md`, new to the Rust
+//! suite: grants survive the daemon's exit (`test/integration/enforce_test.go`, the reload
+//! subtest), so after an upgrade the Rust daemon finds the Go daemon's wrappers in place, and after
+//! a rollback the Go daemon finds the Rust daemon's. On one surviving container and cgroup, the Go
+//! daemon grants, the Rust daemon under a narrower policy revokes, the Rust daemon grants again,
+//! and the Go daemon under the narrower policy revokes once more.
 //!
 //! After each step the device is probed from inside the container, and the programs attached to
 //! its cgroup are read (`testenv::enforce`, through `sudo -n`) and classified with the daemon's
@@ -68,11 +68,11 @@ struct Step<'step> {
 }
 
 /// The cross-language upgrade and rollback gate, named in the Go tests' style; there is no Go
-/// test to port. Required before the cutover (`docs/rust-port.md`, the upgrade and rollback gate):
-/// the Go daemon from `SDA_GO_TEST_IMAGE` grants the device, the Rust daemon started with a
-/// narrower policy revokes the Go-attached wrapper, the Rust daemon with the original policy grants
-/// it again, and the restored Go daemon with the narrower policy revokes the Rust-attached wrapper,
-/// all on one container whose cgroup survives every step.
+/// test to port. Required before the cutover (`docs/internal/rust-port.md`, the upgrade and
+/// rollback gate): the Go daemon from `SDA_GO_TEST_IMAGE` grants the device, the Rust daemon
+/// started with a narrower policy revokes the Go-attached wrapper, the Rust daemon with the
+/// original policy grants it again, and the restored Go daemon with the narrower policy revokes the
+/// Rust-attached wrapper, all on one container whose cgroup survives every step.
 ///
 /// It attaches BPF programs on this host and reads them as root, so it runs only with
 /// `SDA_IT_ENFORCE=1`, as the Go enforcement tests do.

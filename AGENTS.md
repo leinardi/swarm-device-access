@@ -6,16 +6,15 @@ A small **Linux-only** daemon that injects cgroup BPF device-allow rules into co
 bind-mount `/dev/...` paths. Solves the Docker-Swarm gap where `devices:` / `device_cgroup_rules:`
 are silently ignored.
 
-Since 2.0 it is written in Rust (the Go 1.x code was removed at the cutover): a Cargo workspace
-with the root package (the `swarm-device-access` library and binary), `meta` (repository
-meta-tests) and `testenv` (the integration harness). It calls Linux interfaces (`openat2`, pidfds,
-`bpf(2)`, cgroup v1 and v2) with no fallback for other systems, so it builds and its tests run on
-Linux only. The code it shares with the other `leinardi/*` Rust services comes from
+Since 2.0 it is written in Rust (the Go 1.x code was removed at the cutover): a Cargo workspace with
+the root package (the `swarm-device-access` library and binary), `meta` (repository meta-tests) and
+`testenv` (the integration harness). It calls Linux interfaces (`openat2`, pidfds, `bpf(2)`, cgroup
+v1 and v2) with no fallback for other systems, so it builds and its tests run on Linux only. The
+code it shares with the other `leinardi/*` Rust services comes from
 [leinardi/rust-common](https://github.com/leinardi/rust-common) (see *Shared crates*).
-[`docs/rust-port.md`](docs/rust-port.md) is the permanent record of its design, its crates and the
-provenance of every reused component. The 1.x behaviour it keeps, and the numbered differences
-from it (Q1 and later), are listed in the README's
-[Migrating from 1.x](README.md#-migrating-from-1x).
+[`docs/internal/rust-port.md`](docs/internal/rust-port.md) is the permanent record of its design,
+its crates and the provenance of every reused component. The 1.x behaviour it keeps, and the
+numbered differences from it (Q1 and later), are listed in [Migrating from 1.x](docs/migration.md).
 
 ## Common commands
 
@@ -212,10 +211,11 @@ its own features.
   labels and resources (`testenv/src/config.rs`) and runner settings
   (`testenv/tests/integration/main.rs`) to testenv-core, and
   `buildinfo!("SWARM_DEVICE_ACCESS", …)` (service-kit).
-- **A fix to shared code lands in rust-common first**, then reaches this repository in a release,
-  by moving the `tag` (and `version` with it) on every rust-common line, with the ledger in
-  [`docs/rust-port.md`](docs/rust-port.md) updated in the same commit. Refresh the lock with
-  `cargo fetch`, never `cargo update -p`; `git diff Cargo.lock` must touch only rust-common lines.
+- **A fix to shared code lands in rust-common first**, then reaches this repository in a release, by
+  moving the `tag` (and `version` with it) on every rust-common line, with the ledger in
+  [`docs/internal/rust-port.md`](docs/internal/rust-port.md) updated in the same commit. Refresh the
+  lock with `cargo fetch`, never `cargo update -p`; `git diff Cargo.lock` must touch only
+  rust-common lines.
 - **Local iteration on a shared crate** uses an uncommitted
   `[patch."https://github.com/leinardi/rust-common"]` table in the root `Cargo.toml`, one
   `path = "../rust-common/crates/<name>"` line for every rust-common crate the workspace uses,
@@ -259,19 +259,20 @@ symlink.
   stamp stays empty (`EmptyStamp::Kept`).
 - `src/cgroup/{api,ebpf,v1,v2}.rs` retain NVIDIA's original copyright header (Apache 2.0). Don't
   relicense or reformat that block.
-- The README is the source of truth for the user-facing story; keep the flag tables
-  (`src/cli.rs`), the config keys (`src/config`), the label table (`src/policy`) and the
-  docker-compose snippet in sync if you change flags, keys, labels or mounts.
+- The published docs are the source of truth for the user-facing story; keep the flag tables
+  (`src/cli.rs`), the config keys (`src/config`), the label table (`src/policy`, `docs/labels.md`)
+  and the docker-compose snippet in sync if you change flags, keys, labels or mounts.
 - Log messages, attribute keys and levels, error texts, exit codes, metric families and Engine
   requests are the 1.x contract. A difference that cannot be avoided gets a numbered Q entry in the
-  README's Migrating from 1.x table in the same commit; any other difference is a defect.
+  Migrating from 1.x table (`docs/migration.md`) in the same commit; any other difference is a defect.
 - Every Rust and shell source, Dockerfile, the Makefile and the repo-local `.mk` fragments carry the
   Apache-2.0 header (the IntelliJ `Apache-2.0` copyright profile), with the year of the file's first
   commit, after any shebang or Dockerfile parser directive. `scripts/check-license-headers.sh` (the
   `check-license-headers` hook) checks the whole tree; `src/cgroup/{api,ebpf,v1,v2}.rs` keep
   NVIDIA's header, and make-common's files and Rust fixtures under `testdata/` are exempt. A Rust
   file reused from swarm-scheduler-exporter or swarm-rootless-docker adds the provenance comment of
-  [`docs/rust-port.md`](docs/rust-port.md) below the header, complete, and never the MIT block.
+  [`docs/internal/rust-port.md`](docs/internal/rust-port.md) below the header, complete, and never
+  the MIT block.
 - The image's `dhi.io` bases are pinned by tag, not by digest, on purpose (dhi.io rebuilds its
   tags too often; the Dockerfile says why, and each release records the base digest it shipped,
   read from the build's provenance); the BuildKit frontend is pinned by digest, and the rust tag
@@ -286,10 +287,10 @@ Shared by every `leinardi/*` repository.
 - **Workflows:** `ci.yaml` (`pre-commit-all`, `rust`, `image`, `conventional-commits` and the
   `ci-result` aggregator; the reviewdog jobs on pull requests), `integration.yaml` (the testenv
   suite against a real Docker), `release.yaml` (`guard`, `ci-green`, `audit`, `release`;
-  [`docs/release.md`](docs/release.md)), `scheduled-scan.yaml` (weekly: `trivy-gate` on the
-  published `:latest` and cargo-deny on `master`) and `pre-commit-warmup.yaml`. Shared steps come
-  from [gh-composite-actions](https://github.com/leinardi/gh-composite-actions), pinned by SHA.
-  `.trivyignore.yaml` holds the scans' accepted findings.
+  [`docs/internal/release.md`](docs/internal/release.md)), `scheduled-scan.yaml` (weekly:
+  `trivy-gate` on the published `:latest` and cargo-deny on `master`) and `pre-commit-warmup.yaml`.
+  Shared steps come from [gh-composite-actions](https://github.com/leinardi/gh-composite-actions),
+  pinned by SHA. `.trivyignore.yaml` holds the scans' accepted findings.
 - **Jobs:** every job sets `timeout-minutes` (a composite action cannot time out its own steps).
   Every checkout that pushes nothing sets `persist-credentials: false`; the release's checkout
   sets it too, and its tag push passes the token to that one `git push`. Every job that holds a
@@ -340,7 +341,7 @@ after review:
   `deployments/docker/Dockerfile` or anything else under `deployments/**`, or `examples/**`.
 - `adversarial-review` — for any review request ("review my diff", "is this ready to merge").
 
-`adversarial-review` points at [`docs/rust-port.md`](docs/rust-port.md) as
+`adversarial-review` points at [`docs/internal/rust-port.md`](docs/internal/rust-port.md) as
 the reuse ledger, with the crates, the design decisions and the provenance of every component
 reused from swarm-scheduler-exporter or swarm-rootless-docker. Check the ledger, and update its row
 in the same commit, when a reused component changes or an upstream fix is taken.
@@ -348,10 +349,10 @@ in the same commit, when a reused component changes or an upstream fix is taken.
 ## Quality rules not enforced by tooling
 
 - **Reuse before writing.** Check the workspace, the rust-common crates and the reuse ledger in
-  [`docs/rust-port.md`](docs/rust-port.md) for an existing helper or component (the `LogHandle`,
-  `processor::rules::is_mount_source`, the injected `Clock`, the backoff constants, the `Recorder`
-  and its no-op form, `lexpath`, `text`, `test_support`) before adding one. A helper every project would
-  want goes to rust-common, not here.
+  [`docs/internal/rust-port.md`](docs/internal/rust-port.md) for an existing helper or component
+  (the `LogHandle`, `processor::rules::is_mount_source`, the injected `Clock`, the backoff
+  constants, the `Recorder` and its no-op form, `lexpath`, `text`, `test_support`) before adding
+  one. A helper every project would want goes to rust-common, not here.
 - **Fail closed.** An empty, unknown or malformed mode, config value or label denies or skips — it
   never falls back to wider device access.
 - **Deletion smell.** Removing a user-visible surface (flag, key, label, metric, documented
@@ -369,14 +370,14 @@ Run before considering an edit done. `make check` applies to every row.
 | --- | --- |
 | `**/*.rs`, `clippy.toml`, `rustfmt.toml` | `make verify`, then `make check-stage` |
 | `src/{daemon,processor,cgroup,launcher}/**`, `testenv/**` | also `make test-integration` (Docker); `SDA_IT_ENFORCE=1` only on a throwaway host |
-| `tests/testdata/**` (the 1.x captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/rust-port.md, 1.x fixtures): never regenerate one by hand |
+| `tests/testdata/**` (the 1.x captures and fixtures) | `make verify`; they are frozen 1.x captures (docs/internal/rust-port.md, 1.x fixtures): never regenerate one by hand |
 | a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, a rust-common `tag` bump | `make verify`, `make rust-deny`; both need the network (cargo fetches the new git checkout and crates, cargo-deny the advisories). Iterate on a shared crate with the uncommitted `[patch]` table (*Shared crates*), never committed |
 | `deployments/docker/Dockerfile`, `droast.toml`, `.dockerignore` | `cargo test --locked -p meta --test dockerfiles --test toolchain` (droast runs in `make check`); gh-composite-actions' `check-pinned-bases` with `--tag-only dhi.io` on the Dockerfile; `make rust-release-dist`, then `make image-build-test`, and with QEMU `make image-build-test IMAGE_PLATFORM=linux/arm64 IMAGE_TEST_TIER=reduced`; `make docker-build` (all need a `dhi.io` login) |
-| `.mk/rust-release.mk`, `.mk/image.mk`, `scripts/image-test.sh` | `make rust-release-dist`, then `make image-build-test` (pinned zig on PATH) and the arm64 run above, `cargo test --locked -p meta --test toolchain`; keep `docs/release.md#what-ci-proves` true |
+| `.mk/rust-release.mk`, `.mk/image.mk`, `scripts/image-test.sh` | `make rust-release-dist`, then `make image-build-test` (pinned zig on PATH) and the arm64 run above, `cargo test --locked -p meta --test toolchain`; keep `docs/internal/release.md#what-ci-proves` true |
 | `.trivyignore.yaml` | every entry scoped to paths or purls, with a statement and an `expired_at`; scan the prebuilt image with the latest Trivy as `trivy-gate` runs it (`--ignore-unfixed --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml`) |
 | `scripts/check-license-headers.sh` | `pre-commit run check-license-headers --all-files` |
 | `meta/**` | `make verify` |
-| `.github/workflows/**`, `.github/dependabot.yml` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std and ShellCheck pins, Trivy never pinned, vacuous flags, required gates and skipped hooks); reason through each trigger the workflow has (pull request, fork pull request, push, dispatch, schedule); for `release.yaml`, keep `docs/release.md` in step and dispatch a dry run once CI passed on the commit; for `ci.yaml`'s `image` job, keep `docs/release.md#what-ci-proves` true |
+| `.github/workflows/**`, `.github/dependabot.yml` | `pre-commit run actionlint --all-files`, `cargo test --locked -p meta` (Rust release, zig, rust-std and ShellCheck pins, Trivy never pinned, vacuous flags, required gates and skipped hooks); reason through each trigger the workflow has (pull request, fork pull request, push, dispatch, schedule); for `release.yaml`, keep `docs/internal/release.md` in step and dispatch a dry run once CI passed on the commit; for `ci.yaml`'s `image` job, keep `docs/internal/release.md#what-ci-proves` true |
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
 | `README.md`, `docs/**/*.md`, other Markdown | the `lychee` hook (`--offline --include-fragments`); prose wraps at 100 columns (markdownlint in `make check`) |
@@ -413,4 +414,4 @@ is a performance improvement, a refactor or a revert:
 on its own. A `revert` of a shipped `feat` or `fix` is itself a `fix`. `svu` matches `feat`/`fix`
 anywhere in the subject (e.g. `prefix:` counts as `fix:`), so avoid a word ending in `feat` or `fix`
 directly before a colon in other subjects. PRs land as merge commits, so every commit counts, not
-just the PR title. See [`docs/release.md`](docs/release.md).
+just the PR title. See [`docs/internal/release.md`](docs/internal/release.md).

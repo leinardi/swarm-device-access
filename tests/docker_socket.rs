@@ -15,7 +15,7 @@
  */
 
 //! The daemon's `--docker-socket` naming a socket that does not exist: the client is refused when
-//! it is built, and the daemon exits 1 with moby's text for that dial (README, Q16).
+//! it is built, and the daemon exits 1 with moby's text for that dial (docs/migration.md, Q16).
 
 use std::process::Command;
 

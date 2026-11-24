@@ -16,7 +16,7 @@
 
 //! The daemon's metrics on prometheus-client: the [`Recorder`] of its `sda_*` families, with
 //! service-kit's `process_*` collector, exposed as OpenMetrics text. The `go_*` runtime families
-//! have no Rust counterpart and are not served (Q3 in `docs/rust-port.md`), and neither are
+//! have no Rust counterpart and are not served (Q3 in `docs/migration.md`), and neither are
 //! promhttp's own `promhttp_metric_handler_*` families.
 
 mod recorder;

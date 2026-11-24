@@ -21,7 +21,7 @@
 
 # The Dockerfile frontend above is pinned as tag@sha256:<index digest>, so a moved 1.7 tag cannot
 # change how this file is built. Dependabot's docker ecosystem does not update it: bump it by hand
-# (docs/release.md).
+# (docs/internal/release.md).
 #
 # The dhi.io bases are pinned by an explicit tag, deliberately not by digest: dhi.io rebuilds its
 # tags too often (security fixes) for a digest pin to be worth following by hand, and a rebuild

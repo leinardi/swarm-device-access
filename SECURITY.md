@@ -8,8 +8,8 @@
 - Reads `/proc/<pid>/{cgroup,mountinfo}` for every starting container.
 - Writes eBPF `BPF_CGROUP_DEVICE` programs into the host cgroup v2 hierarchy, or writes to
   `devices.allow` and `devices.deny` on cgroup v1 hosts.
-- Requires `privileged: true`, `cgroupns: host`, `pid: host`, `userns: host`, and bind mounts of the
-  host `/sys` and `/dev`.
+- Requires `privileged: true`, `cgroup: host`, `pid: host`, `userns_mode: host`, and bind mounts of
+  the host `/sys` and `/dev`.
 
 The combination of `privileged: true`, host `/dev` bind mount, and host Docker
 socket is functionally equivalent to host-root access on the node. A compromised
@@ -37,7 +37,7 @@ identity cannot be established, or a directory mount that cannot be
 enumerated completely, leaves the container with no grants until a retry
 succeeds. Deny globs also apply to aliases, but only as a best-effort veto at
 evaluation time; the boundary to rely on is a glob on the kernel name (see the
-README's Security section).
+[security page](docs/security.md)).
 
 **Opt-in default.** The daemon defaults to `--policy-mode=opt-in`, processing only
 containers that carry `swarm-device-access.enable: "true"`. This minimises blast
@@ -65,7 +65,7 @@ confirmed issues.
 
 ## Known design constraints
 
-- The daemon must run as root. Dropping to a minimal capability set (`CAP_BPF`, `CAP_PERFMON`,
+- The daemon must run as root. Dropping to a minimal capability set (`CAP_BPF`,
   `CAP_SYS_ADMIN`, `CAP_SYS_RESOURCE`) is theoretically possible but has not been tested across
   kernel versions and is not supported at this time.
 - The daemon uses `privileged: true` in the reference Swarm deployment, where an unprivileged

@@ -19,11 +19,11 @@
 //! be named only under `src/processor/`, by a call, a path or a method reference alike, and there
 //! exactly once.
 //!
-//! Until the processor's reconcile is ported (`docs/rust-port.md`), nothing may name it at all;
-//! from the commit that defines `publish_and_reconcile` under `src/processor/`, exactly one
-//! reference there is required, as in Go, which guards the scan itself. The device discovery
-//! under `src/processor/` lands a phase earlier and publishes nothing. The checks are functions of the text, each also run on input built to
-//! break it.
+//! Until the processor's reconcile is ported (`docs/internal/rust-port.md`), nothing may name it at
+//! all; from the commit that defines `publish_and_reconcile` under `src/processor/`, exactly one
+//! reference there is required, as in Go, which guards the scan itself. The device discovery under
+//! `src/processor/` lands a phase earlier and publishes nothing. The checks are functions of the
+//! text, each also run on input built to break it.
 
 use std::sync::LazyLock;
 

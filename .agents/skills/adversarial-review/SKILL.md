@@ -6,7 +6,7 @@ description: >
   YAML, Dockerfile, Makefile, docs). Uses user-level Rust skills for Rust and loads
   trust-boundary for config, policy, label, launcher and deployment paths, hunts for
   real defects, device-access widening and drift from the 1.x contract, checks the
-  reuse ledger in docs/rust-port.md, then reports ranked findings with a verdict. Use when
+  reuse ledger in docs/internal/rust-port.md, then reports ranked findings with a verdict. Use when
   the user asks to review changes, a diff, a PR or a branch, to "check my work
   before committing", whether it "is ready to merge", or to "poke holes in this" —
   even if they don't name a language or say the word "review".
@@ -44,11 +44,11 @@ green. Load only what the diff touches.
 
 | Changed path | Load skill | It owns |
 | --- | --- | --- |
-| any `**/*.rs`, `Cargo.toml` (any member), `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | user-level Rust skills, `AGENTS.md`, and `docs/rust-port.md` (decisions, crates, reuse ledger) | the lint set, `#[expect]`, the single unsafe module, error and log text as the 1.x contract, the Docker read/write split, the blocking transaction, Go test provenance, the reuse ledger |
+| any `**/*.rs`, `Cargo.toml` (any member), `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml` | user-level Rust skills, `AGENTS.md`, and `docs/internal/rust-port.md` (decisions, crates, reuse ledger) | the lint set, `#[expect]`, the single unsafe module, error and log text as the 1.x contract, the Docker read/write split, the blocking transaction, Go test provenance, the reuse ledger |
 | `src/config/**`, `src/policy/**`, `src/processor/**` (label handling, rule collection), the CLI and `SIGHUP` reload path (`src/cli.rs`, `src/cli/settings.rs`, `src/run.rs`), `src/launcher/**`, the HTTP server (`src/server.rs`, `src/server/**`), `deployments/**` (including `deployments/docker/Dockerfile`), `examples/**` | `trust-boundary` | fail-closed config and mode, label parsing, `/dev`-only rules, reload safety, image privilege, listeners |
 | `src/cgroup/**` | user-level Rust skills, `AGENTS.md` + the note below | NVIDIA-derived BPF/cgroup code; `src/cgroup/bpf_sys.rs` is the one audited `unsafe` module |
 | `meta/**`, `testenv/**` | `AGENTS.md`; the comment heading each test | a meta-test that can skip or pass on nothing is a finding; the integration harness's image identity check |
-| `tests/testdata/**` | `docs/rust-port.md` (1.x fixtures) | frozen 1.x captures: an edited or regenerated one is a finding unless it comes from running the 1.x code |
+| `tests/testdata/**` | `docs/internal/rust-port.md` (1.x fixtures) | frozen 1.x captures: an edited or regenerated one is a finding unless it comes from running the 1.x code |
 | `scripts/check-*.sh` | the script's header comment | the check still fails on what it exists to stop |
 | `.pre-commit-config.yaml`, `droast.toml`, `[workspace.lints]`, `clippy.toml` | `AGENTS.md` (coding rules); `meta/tests/toolchain.rs`, `meta/tests/vacuous_flags.rs`, `meta/tests/ci_gates.rs`, `meta/tests/dockerfiles.rs`, `meta/tests/workspace_lints.rs` | no lint disabled or narrowed, no hook dropped; *A new suppression has to show its work* below |
 
@@ -95,8 +95,8 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   `src/daemon/mod.rs`) — re-apply every running container, because `systemctl daemon-reload` can
   wipe the programs. Routing a pass through that map would leave already-seen containers without
   device access after a reload — a finding.
-- **The README is the user-facing source of truth.** The flag tables, the config keys, the
-  container-label table and the docker-compose snippet in `README.md` must stay in sync with
+- **The published docs are the user-facing source of truth.** The flag tables, the config keys, the
+  container-label table and the docker-compose snippet in `docs/` must stay in sync with
   `src/cli.rs`, `src/config/mod.rs` (`FileSchema`), `src/policy/mod.rs` and the documented mounts.
 - **Release bump.** `svu` derives the release version from the commit types, so check that
   every commit's type matches whether the change should ship (AGENTS.md, Commit messages).
@@ -108,7 +108,7 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   in the range counts, not just the PR title.
 - **Parity with 1.x.** Any behaviour difference from 1.x (the Go daemon the Rust code replaced, as
   its frozen captures under `tests/testdata` and the published v1.0.3 image record it) that is not
-  a numbered Q entry in the README's *Migrating from 1.x* table is a defect: a log message,
+  a numbered Q entry in the *Migrating from 1.x* table (`docs/migration.md`) is a defect: a log message,
   attribute or level, an error text (including Go's `%w` chain and `errors.Join` newlines), an
   exit code, a metric family or label, an Engine API request, a default. A new difference that
   cannot be avoided adds its Q entry in the same commit. A ported test that lost its `Go:`
@@ -123,10 +123,11 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   only in `src/launcher/engine.rs`, and only `src/launcher/**` may name it. A write verb reachable
   from the daemon, a second request builder, or bollard outside `testenv` is a **critical**
   finding.
-- **No new capability, path or listener.** The daemon and launcher get exactly the privileges,
-  host paths, mounts and listeners 1.x had (`daemon_spec` in `src/launcher/spec.rs`, the README's
-  runtime requirements). One that appears without the README and `AGENTS.md` changing in the same
-  commit is a finding; `--debug-addr` with a non-empty value is refused (Q2), never served.
+- **No new capability, path or listener.** The daemon and launcher get exactly the privileges, host
+  paths, mounts and listeners 1.x had (`daemon_spec` in `src/launcher/spec.rs`,
+  `docs/deployment.md`'s runtime requirements). One that appears without `docs/deployment.md` and
+  `AGENTS.md` changing in the same commit is a finding; `--debug-addr` with a non-empty value is
+  refused (Q2), never served.
 - **Byte-identical BPF wrapper encoding.** Ownership is decided by regenerating the wrapper and
   comparing bytes, so an encoding that differs from cilium asm by one byte turns every wrapper a
   1.x daemon attached into an owned-block conflict after an upgrade, and breaks a rollback to 1.x.
@@ -139,13 +140,13 @@ These are the ways this codebase breaks that generic reviewers miss. Read
   `spawn_blocking` transaction that owns the processor lock and its descriptors; its join handle
   is awaited to completion even after a timeout or cancellation, and the container's reservation
   is released only then. A mutation a dropped future can interrupt is a **critical** finding.
-- **One implementation per feature, with its provenance.** `docs/rust-port.md` is the reuse
+- **One implementation per feature, with its provenance.** `docs/internal/rust-port.md` is the reuse
   ledger to check and update when a reused component changes or an upstream fix is taken. A
   component the ledger maps to SSE or SRD code is adapted from that code at the pinned commit, not
   rewritten independently; a change to it, or an upstream commit taken into it, updates its ledger
   row in the same commit, and a fix worth sending back goes on the ledger's upstream-candidates
   list. No equivalent feature is implemented twice without a technical reason recorded in
-  `docs/rust-port.md`. A reused file carries this project's Apache-2.0 header followed by the
+  `docs/internal/rust-port.md`. A reused file carries this project's Apache-2.0 header followed by the
   provenance line (`Adapted from <repo>/<path> at <commit>, originally MIT-licensed, Copyright (c)
   <year> Roberto Leinardi`); a pasted MIT block, a missing provenance line, a reused component
   changed without its ledger row, or a missing row is a finding.
@@ -176,12 +177,12 @@ source that becomes a major/minor pair? If it does, the checklist applies there 
 
 ### (b) Deletion smell
 
-A diff that removes a user-visible surface — a flag, a config key, a label, a metric, a log
-line operators rely on, a documented behavior — and in the same breath rewrites that surface's
-test to assert it is *absent* must cite the specification line that retired it. The
-specification here is `README.md` (flags, labels, compose snippet, security notes) and `docs/**`
-(`docs/architecture.md`, `docs/testing.md`). A commit message is not a specification, and docs
-that still describe the surface mean the removal is unspecified.
+A diff that removes a user-visible surface — a flag, a config key, a label, a metric, a log line
+operators rely on, a documented behavior — and in the same breath rewrites that surface's test to
+assert it is *absent* must cite the specification line that retired it. The specification here is
+the published pages under `docs/` (flags, labels, compose snippet, security notes) and `docs/**`
+(`docs/architecture.md`, `docs/testing.md`). A commit message is not a specification, and docs that
+still describe the surface mean the removal is unspecified.
 
 A test flipped from "X happens" to "X does not happen" is not evidence that X should go — it is
 the deletion wearing the test's clothes. Ask, in order: which spec line retires this surface, and
@@ -203,19 +204,19 @@ in this repo (copied from another project) is a finding too.
 ### (d) Cross-file duplication
 
 Before accepting a new helper, search for the one that already exists in the workspace (`src/**`,
-`meta/**`, `testenv/**`) and in the rust-common crates it depends on, by *behavior*, not by the
-name the author chose. Shared code is changed in rust-common, never forked here. Check the logger, the
-`/dev` mount check, the injected clock, backoff, the metrics recorder and its no-op form, test
-waits and the in-tree `text` and `lexpath` helpers. The reuse ledger in `docs/rust-port.md` lists
-the SSE and SRD code a component must start from. Two implementations of the same rule drift
-apart, and the one the reviewer did not read is the one that keeps the bug.
+`meta/**`, `testenv/**`) and in the rust-common crates it depends on, by *behavior*, not by the name
+the author chose. Shared code is changed in rust-common, never forked here. Check the logger, the
+`/dev` mount check, the injected clock, backoff, the metrics recorder and its no-op form, test waits
+and the in-tree `text` and `lexpath` helpers. The reuse ledger in `docs/internal/rust-port.md` lists
+the SSE and SRD code a component must start from. Two implementations of the same rule drift apart,
+and the one the reviewer did not read is the one that keeps the bug.
 
 ### (e) Docs drift for config and flags
 
 The configuration contract is written down more than once and can disagree silently. A new or
 changed flag in `src/cli.rs`, key in `src/config/mod.rs` (`FileSchema`) or label in
-`src/policy/mod.rs` needs its row in the matching `README.md` table (the flag table under "⚙️
-Configuration", and "Container Labels"), any affected prose in `docs/architecture.md` (Policy model,
+`src/policy/mod.rs` needs its row in the matching table in `docs/` (the flag table of `docs/configuration.md`
+and `docs/labels.md`), any affected prose in `docs/architecture.md` (Policy model,
 Runtime contract), and validation that rejects bad values by name at load.
 
 A surface the code has and the docs do not mention is a finding; so is a documented one nothing
@@ -250,8 +251,8 @@ Facts the evidence has to be read against:
 - Which gates a changed path owes is `AGENTS.md`'s *Validation matrix*: a changed path with none
   of its rows in the evidence is missing evidence. A gate that was impractical (no Docker, no
   privileges for the integration suite, no network for cargo-deny) is unverified, not passed.
-- A change to `release.yaml` or `ci.yaml`'s `image` job must leave `docs/release.md` ("What CI
-  proves") still true.
+- A change to `release.yaml` or `ci.yaml`'s `image` job must leave `docs/internal/release.md` ("What
+  CI proves") still true.
 
 ## Report
 

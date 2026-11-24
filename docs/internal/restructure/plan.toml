@@ -1,0 +1,669 @@
+# Restructure 1: docs/ becomes published pages plus docs/internal/; the README's reference
+# material becomes published pages. Format: repo-docs references/restructure.md. Rationale: report.md.
+
+[meta]
+schema = 1
+base_commit = "2f1f26a2deaf6611a24b637aed2a280ecfcb0b76"
+docs_dir = "docs"
+blocks = "docs/internal/restructure/blocks.json"
+
+[meta.sources]
+".agents/skills/adversarial-review/SKILL.md" = "d1ce3c8808416b854ae387453f174a51401f34c663238865fdf88878fcb8ee89"
+".agents/skills/trust-boundary/SKILL.md" = "a9da656adc610676dfd93f75b2c778b20b3dc5414e1ffbc85b1d27cc5a56496d"
+".github/dependabot.yml" = "806dd49af4ac413303167230ad134de2e0ba776300ee3a1270de176d35d7b1a4"
+".github/workflows/ci.yaml" = "e066ea555df7b84cb65df6de6cc7d87e2fcd7922ac541b8b0bcefa16933a6778"
+".github/workflows/release.yaml" = "a5850c4fe02a71f4412d6a4283c265ccc0111166802fbbb08025069deb1baa85"
+".serena/memories/conventions.md" = "d0d308266499f90780a8c3f1adda39eb2af10d1bf77313147657f8c0fce8dca4"
+".serena/memories/core.md" = "5e18d5a72a665b9ddfb36136d5a60782c5f39529219169bd0b6a908affaae85f"
+".serena/memories/task_completion.md" = "5007886d4e9233f00c30714d3498fe7d7699d74d54509f8ad4442a6f70059d74"
+"AGENTS.md" = "18b1e1216984c2909b84b6f5814b03feb550aabcace7098cfc7e710f88fb66d1"
+"CONTRIBUTING.md" = "052bd177b978c8a531623280d88ebcdd54eaeb8f645cc8a3ebbb29351926a551"
+"Cargo.toml" = "e039d760aac361da1af97628386fa94f6aa3f9fa082b3872e204d0a10eb66be1"
+"README.md" = "34bd0c4b7b37bceb074943a3655c3b08907473cb477dce19a48cb3223552d491"
+"SECURITY.md" = "4952425c200fc4c69aac8642736f14cab97111fab50ae981b51177db2e12576f"
+"deployments/docker/Dockerfile" = "b6fbed86be023541a9f9cec76289faeda87690bef9836096265fc4c26402f63d"
+"deployments/docker/config.yaml" = "b466a2ca9082b86d8fa12622db322dc2b04391e9ce11a3a021d25f7eb8806b9b"
+"docs/internal/restructure/blocks.json" = "301d39549ece3ec1a16c3e6921b6a86b6efe84461ec88aae18c6484f378ad053"
+"docs/release.md" = "828955fb470d859e5af33e1934eeeead739c35304d3c9637cdea520fd19c9738"
+"docs/rust-port.md" = "e18d99ec70dbb19129a524b74034c2e0fad029841bf020b5b3c253a8c32ed0f5"
+"docs/testing.md" = "375caf772cfdebd3321919cd3225ab285a3f65d9205645532dce87a8f3364355"
+"meta/tests/docker_boundary.rs" = "339e08cae530b137dcfbfe657594be3573fce511d139ae519fe01aaf3812484d"
+"meta/tests/dockerfiles.rs" = "56465e3b51ae23963b761be13bed9fb35e9a328b421725cb0793bd45d069af03"
+"meta/tests/launcher_boundary.rs" = "4e4a48679f07cd028195cc27f005daac4fe1c7c660341fa3fdd16f5f6aa0d390"
+"meta/tests/libc_boundary.rs" = "280334d8b72df205a4133c0bc409882efa2e7df2988092304c56d4128cdd399e"
+"meta/tests/single_publisher.rs" = "a72b55f272d521a50684d46e5119aabba92d08562edb0538eabc6edb29427a07"
+"scripts/field-test.sh" = "a9af2ba52b6d92a1cfe415fd1a5cce6036703b9eb62dc4a92d064af8044ce23f"
+"src/cgroup/bpf_sys.rs" = "c30845f2dce7addc08bfccbef76b6f0dacd20714237037d216d8d61d2754fcd2"
+"src/cli.rs" = "a04ba6f37274958c86d3303a81a129783ca9c9819d7904e8d2d88110526b12d0"
+"src/cli/tests.rs" = "ac021c916b1e68d2f989411f1c9fb4ab4d3a6fac65e40b248c0fa101f34bbb07"
+"src/config/resolve.rs" = "d3692766d869db9ac912d980811bd7a1cbbabeb202640c3a26c70d7a13f01db5"
+"src/lib.rs" = "bd672a7b539cb3bc6bf8f345c837e5a826c5be84dd1b26fd6fb33f76ece0176b"
+"src/metrics/mod.rs" = "b2ca09794f4a186f0d53347a2c30fafe7b33f17264128e3c910316e8834998a2"
+"src/policy/mod.rs" = "7a6a3b0d40ada797f010b25dda91a46f895e90d1ec1f254db842a924a875f934"
+"testenv/src/enforce.rs" = "2236edadfe8d23a4f36a8dd09856afd41d1f7235620307c68c4d68bb9589dea7"
+"testenv/src/identity.rs" = "1295bdddec8b30de5aaa482194bdfbae6abb40eeab9971dec62858d2a231d98e"
+"testenv/tests/integration/upgrade.rs" = "a9baf65a9e49529b69620dc7d5e6489a465ace978d9da7af5aa0f290b44995f8"
+"tests/config_loader.rs" = "41bdb8e7d8037a13298b0e59af51243b01fa7bf95cb6adae86158c267f3fca31"
+"tests/docker_socket.rs" = "239b43103e7ee375f86c0b372ee2be6c4d897e1de7e3adfbffbd7c32f7941637"
+"tests/testdata/devfilter/README.md" = "6497e98987d1ae7e78cbcd5d6a22ef763d6f7ef36cb4e2549a75e4ac43d1a525"
+"tests/testdata/parity/README.md" = "df41a1b8e165a5fb553bfe3a977c23d5de2b974f6f0f8937f9a46634d7cf0135"
+
+# The Go 1.x notes are a historical record inside a living runbook.
+[[split]]
+from = "docs/release.md"
+heading = "Historical notes: the Go releases (1.x)"
+to = "docs/internal/history/go-releases.md"
+status = "Historical: the Go 1.x release notes, split from the release runbook in November 2026. The current process is in docs/internal/release.md."
+
+# A maintainer runbook (d2).
+[[move]]
+from = "docs/release.md"
+to = "docs/internal/release.md"
+
+# The port's design and provenance record (d1).
+[[move]]
+from = "docs/rust-port.md"
+to = "docs/internal/rust-port.md"
+
+# The one-time Go-to-Rust field test and its dated results (d4).
+[[split]]
+from = "docs/testing.md"
+heading = "Field test"
+to = "docs/internal/qa/field-test.md"
+status = "Historical: the one-time Go-to-Rust hand-over test, run on 2026-10-27 before the 2.0 cutover, split from docs/testing.md in November 2026. The current test levels are in docs/testing.md."
+
+[[keep]]
+paths = ["docs/architecture.md", "docs/testing.md", "docs/internal/"]
+
+[[reference]]
+file = ".github/dependabot.yml"
+line = 46
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/dependabot.yml"
+line = 63
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/ci.yaml"
+line = 314
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/ci.yaml"
+line = 362
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 18
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 97
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 188
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 260
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 357
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 732
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 770
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 934
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 1048
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".github/workflows/release.yaml"
+line = 1118
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = "deployments/docker/Dockerfile"
+line = 24
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = "meta/tests/dockerfiles.rs"
+line = 66
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = "Cargo.toml"
+line = 17
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "meta/tests/libc_boundary.rs"
+line = 18
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "meta/tests/launcher_boundary.rs"
+line = 17
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "meta/tests/docker_boundary.rs"
+line = 20
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "meta/tests/single_publisher.rs"
+line = 22
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "src/lib.rs"
+line = 21
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "src/lib.rs"
+line = 22
+old = "the README's Migrating from 1.x"
+new = "`docs/migration.md`"
+
+[[reference]]
+file = "src/cgroup/bpf_sys.rs"
+line = 19
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "testenv/tests/integration/upgrade.rs"
+line = 17
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "testenv/tests/integration/upgrade.rs"
+line = 71
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "testenv/src/identity.rs"
+line = 20
+old = "(Q1 in `docs/rust-port.md`)"
+new = "(Q1 in `docs/migration.md`)"
+
+[[reference]]
+file = "testenv/src/enforce.rs"
+line = 109
+old = "`docs/rust-port.md`"
+new = "`docs/migration.md`"
+
+[[reference]]
+file = "src/metrics/mod.rs"
+line = 19
+old = "(Q3 in `docs/rust-port.md`)"
+new = "(Q3 in `docs/migration.md`)"
+
+[[reference]]
+file = "src/policy/mod.rs"
+line = 351
+old = "(README Q17)"
+new = "(docs/migration.md, Q17)"
+
+[[reference]]
+file = "src/config/resolve.rs"
+line = 24
+old = "(README Q17)"
+new = "(docs/migration.md, Q17)"
+
+[[reference]]
+file = "tests/config_loader.rs"
+line = 25
+old = "(README Q1, Q6, Q13 and Q17:"
+new = "(docs/migration.md, Q1, Q6, Q13 and Q17:"
+
+[[reference]]
+file = "tests/docker_socket.rs"
+line = 18
+old = "(README, Q16)"
+new = "(docs/migration.md, Q16)"
+
+[[reference]]
+file = "scripts/field-test.sh"
+line = 18
+old = "docs/testing.md"
+new = "docs/internal/qa/field-test.md"
+
+[[reference]]
+file = "scripts/field-test.sh"
+line = 66
+old = "see docs/testing.md"
+new = "see docs/internal/qa/field-test.md"
+
+[[reference]]
+file = "scripts/field-test.sh"
+line = 246
+old = "(README, Migrating from 1.x)"
+new = "(docs/migration.md)"
+
+[[reference]]
+file = "src/cli.rs"
+line = 27
+old = "`--dry-run=false` and every `strconv.ParseBool` spelling,"
+new = "`--dry-run=false`,"
+
+[[reference]]
+file = "src/cli/tests.rs"
+line = 118
+old = "with every `strconv.ParseBool` spelling,"
+new = "(`true` or `false` only, Q17),"
+
+[[reference]]
+file = "deployments/docker/config.yaml"
+line = 7
+old = "# text | json | plain"
+new = "# text | json"
+
+[[reference]]
+file = "deployments/docker/config.yaml"
+line = 12
+old = "# pprof endpoints [restart required]"
+new = "# removed in 2.0: must be empty"
+
+[[reference]]
+file = "AGENTS.md"
+line = 15
+old = "[`docs/rust-port.md`]"
+new = "[`docs/internal/rust-port.md`]"
+
+[[reference]]
+file = "AGENTS.md"
+line = 17
+old = "are listed in the README's"
+new = "are listed in"
+
+[[reference]]
+file = "AGENTS.md"
+line = 18
+old = "(README.md#-migrating-from-1x)"
+new = "(docs/migration.md)"
+
+[[reference]]
+file = "AGENTS.md"
+line = 217
+old = "[`docs/rust-port.md`]"
+new = "[`docs/internal/rust-port.md`]"
+
+[[reference]]
+file = "AGENTS.md"
+line = 262
+old = "- The README is the source of truth for the user-facing story; keep the flag tables"
+new = "- The published docs are the source of truth for the user-facing story; keep the flag tables"
+
+[[reference]]
+file = "AGENTS.md"
+line = 263
+old = "the label table (`src/policy`)"
+new = "the label table (`src/policy`, `docs/labels.md`)"
+
+[[reference]]
+file = "AGENTS.md"
+line = 267
+old = "README's Migrating from 1.x table"
+new = "Migrating from 1.x table (`docs/migration.md`)"
+
+[[reference]]
+file = "AGENTS.md"
+line = 274
+old = "[`docs/rust-port.md`]"
+new = "[`docs/internal/rust-port.md`]"
+
+[[reference]]
+file = "AGENTS.md"
+line = 289
+old = "[`docs/release.md`]"
+new = "[`docs/internal/release.md`]"
+
+[[reference]]
+file = "AGENTS.md"
+line = 343
+old = "[`docs/rust-port.md`]"
+new = "[`docs/internal/rust-port.md`]"
+
+[[reference]]
+file = "AGENTS.md"
+line = 351
+old = "[`docs/rust-port.md`]"
+new = "[`docs/internal/rust-port.md`]"
+
+[[reference]]
+file = "AGENTS.md"
+line = 372
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "AGENTS.md"
+line = 375
+old = "`docs/release.md#what-ci-proves`"
+new = "`docs/internal/release.md#what-ci-proves`"
+
+[[reference]]
+file = "AGENTS.md"
+line = 379
+old = "keep `docs/release.md` in step"
+new = "keep `docs/internal/release.md` in step"
+
+[[reference]]
+file = "AGENTS.md"
+line = 379
+old = "`docs/release.md#what-ci-proves`"
+new = "`docs/internal/release.md#what-ci-proves`"
+
+[[reference]]
+file = "AGENTS.md"
+line = 416
+old = "[`docs/release.md`]"
+new = "[`docs/internal/release.md`]"
+
+[[reference]]
+file = "CONTRIBUTING.md"
+line = 66
+old = "[`docs/rust-port.md`]"
+new = "[`docs/internal/rust-port.md`]"
+
+[[reference]]
+file = "CONTRIBUTING.md"
+line = 71
+old = "to the README's"
+new = "to the"
+
+[[reference]]
+file = "CONTRIBUTING.md"
+line = 72
+old = "(README.md#-migrating-from-1x)"
+new = "(docs/migration.md)"
+
+[[reference]]
+file = "CONTRIBUTING.md"
+line = 99
+old = "[`docs/release.md`]"
+new = "[`docs/internal/release.md`]"
+
+[[reference]]
+file = "SECURITY.md"
+line = 40
+old = "README's Security section)"
+new = "[security page](docs/security.md))"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 9
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 47
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 51
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 98
+old = "**The README is the user-facing source of truth.**"
+new = "**The published docs are the user-facing source of truth.**"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 99
+old = "docker-compose snippet in `README.md` must"
+new = "docker-compose snippet in `docs/` must"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 111
+old = "the README's *Migrating from 1.x* table"
+new = "the *Migrating from 1.x* table (`docs/migration.md`)"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 127
+old = "the README's"
+new = "`docs/deployment.md`'s"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 128
+old = "without the README and"
+new = "without `docs/deployment.md` and"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 142
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 148
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 182
+old = "`README.md` (flags, labels, compose snippet, security notes)"
+new = "the published pages under `docs/` (flags, labels, compose snippet, security notes)"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 209
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 217
+old = "matching `README.md` table (the flag table under \"⚙️"
+new = "matching table in `docs/` (the flag table of `docs/configuration.md`"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 218
+old = "Configuration\", and \"Container Labels\")"
+new = "and `docs/labels.md`)"
+
+[[reference]]
+file = ".agents/skills/adversarial-review/SKILL.md"
+line = 253
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".agents/skills/trust-boundary/SKILL.md"
+line = 35
+old = "(the README's *Migrating from 1.x* lists"
+new = "(*Migrating from 1.x*, `docs/migration.md`, lists"
+
+[[reference]]
+file = ".agents/skills/trust-boundary/SKILL.md"
+line = 98
+old = "README Q17"
+new = "`docs/migration.md`, Q17"
+
+[[reference]]
+file = ".agents/skills/trust-boundary/SKILL.md"
+line = 127
+old = "the README label table"
+new = "the label table of `docs/labels.md`"
+
+[[reference]]
+file = ".agents/skills/trust-boundary/SKILL.md"
+line = 208
+old = "the README's Docker Compose for Swarm snippet"
+new = "the Compose snippet of `docs/getting-started.md`"
+
+[[reference]]
+file = ".agents/skills/trust-boundary/SKILL.md"
+line = 236
+old = "or the README"
+new = "or the docs"
+
+[[reference]]
+file = ".agents/skills/trust-boundary/SKILL.md"
+line = 237
+old = "the README and `AGENTS.md`"
+new = "`docs/deployment.md` and the `AGENTS.md`"
+
+[[reference]]
+file = ".agents/skills/trust-boundary/SKILL.md"
+line = 291
+old = "the README's documented set"
+new = "the documented set (`docs/deployment.md`)"
+
+[[reference]]
+file = ".serena/memories/core.md"
+line = 7
+old = "README's \"Migrating from 1.x\"."
+new = "`docs/migration.md`."
+
+[[reference]]
+file = ".serena/memories/core.md"
+line = 49
+old = "architecture.md, testing.md, release.md, rust-port.md (ledger)"
+new = "published pages; internal/ (release.md, rust-port.md ledger)"
+
+[[reference]]
+file = ".serena/memories/core.md"
+line = 57
+old = "a README Q entry"
+new = "a Q entry in docs/migration.md"
+
+[[reference]]
+file = ".serena/memories/core.md"
+line = 58
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = ".serena/memories/task_completion.md"
+line = 18
+old = "docs/release.md"
+new = "docs/internal/release.md"
+
+[[reference]]
+file = ".serena/memories/conventions.md"
+line = 20
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "tests/testdata/devfilter/README.md"
+line = 4
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "tests/testdata/parity/README.md"
+line = 4
+old = "docs/rust-port.md"
+new = "docs/internal/rust-port.md"
+
+[[reference]]
+file = "README.md"
+line = 485
+old = "[`docs/rust-port.md`]"
+new = "[`docs/internal/rust-port.md`]"
+
+[[decision]]
+id = "d1"
+question = "Where does docs/rust-port.md live? (G3, G10)"
+answer = "Moved to docs/internal/rust-port.md, every citation updated. Owner, 2026-11-24."
+
+[[decision]]
+id = "d2"
+question = "Where does docs/release.md live, and is there a user-facing release page? (G3, G8, G10)"
+answer = "As in swarm-scheduler-exporter: moved to docs/internal/release.md, the Go 1.x notes split to docs/internal/history/go-releases.md, every citation updated, and a published verifying-releases.md added. Owner, 2026-11-24."
+
+[[decision]]
+id = "d3"
+question = "Does the README reference material move into published pages in this stage? (G8, R4, G10)"
+answer = "Yes: getting-started, deployment, host-requirements, configuration, labels, migration, tips, security and alternatives, with every README citation repointed. Owner, 2026-11-24."
+
+[[decision]]
+id = "d4"
+question = "Where does the Field test section of docs/testing.md go? (G2, G10)"
+answer = "Split to docs/internal/qa/field-test.md with a status line; field-test.sh citations updated. Owner, 2026-11-24."
+
+[[decision]]
+id = "d5"
+question = "When are the claims the code contradicts corrected?"
+answer = "In this stage, docs only, each rewording recorded in mappings.toml and listed in report.md. Owner, 2026-11-24."
+
+[[decision]]
+id = "d6"
+question = "Are the stale code comments and example-config comments fixed here? (G10)"
+answer = "Yes, as reference line edits; comments only, no behaviour change. Owner, 2026-11-24."
+
+[[decision]]
+id = "d7"
+question = "What do the docs say about the minimum Docker Engine?"
+answer = "Drop the claim that the client refuses older engines; keep that it negotiates the API version; the minimum stays a TODO(verify) in report.md. Owner, 2026-11-24."
+
+[approval]
+plan_sha256 = "a2c67ee573b4ea0f683deb889e828f936dde12de77bde8d19ec6c5727d3461cd"
+decisions_sha256 = "ff1610a28e1cf015b6f1720694c93c9c6eb210a7a9106423f43a065de8e0c0fc"
+approved_by = "Roberto Leinardi"
+date = "2026-11-24"
