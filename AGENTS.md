@@ -200,15 +200,15 @@ the rust-common crates)**
 `clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v2.0.0"`, with `version = "2.0"`, the tag's `<major>.<minor>`) in the root
+release tag (`tag = "v3.0.0"`, with `version = "3.0"`, the tag's `<major>.<minor>`) in the root
 `Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
 its own features.
 
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
   this daemon passes `Options` with no target and no span fields (tracing-setup),
-  a `swarm-device-access/<version>` `User-Agent` and a response-header timeout with only the
-  `attach` feature (docker-client), its envid,
+  a `swarm-device-access/<version>` `User-Agent`, a response-header timeout and the read
+  `Limits` (`src/docker/api.rs`) with only the `attach` feature (docker-client), its envid,
   labels and resources (`testenv/src/config.rs`) and runner settings
   (`testenv/tests/integration/main.rs`) to testenv-core, and
   `buildinfo!("SWARM_DEVICE_ACCESS", …)` (service-kit).

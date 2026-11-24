@@ -24,7 +24,7 @@
 //! - [`Client::unix`] takes the socket the daemon is configured with (`--docker-socket`), with
 //!   docker-client's defaults: the unix socket only (its `tcp` and `tls` are off, and no `DOCKER_*`
 //!   variable is read), a `swarm-device-access/<version>` `User-Agent` and a response-header
-//!   timeout the caller sets.
+//!   timeout the caller sets, and the read limits of `api::LIMITS`.
 //! - Every call is bounded as a whole, the body included: by the caller ([`with_context`], Go's
 //!   `context`) and by the client's own `bounded` call timeout, because bollard's timeout stops
 //!   at the response headers.
