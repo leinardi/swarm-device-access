@@ -16,7 +16,8 @@ sda_reload_reapplies_total 1
 sda_docker_reconnects_total 2
 # HELP sda_apply_duration_seconds Time spent applying device rules per container.
 # TYPE sda_apply_duration_seconds histogram
-sda_apply_duration_seconds_bucket{le="+Inf"} 9
+sda_apply_duration_seconds_sum 16.264499999999999
+sda_apply_duration_seconds_count 9
 sda_apply_duration_seconds_bucket{le="0.005"} 4
 sda_apply_duration_seconds_bucket{le="0.01"} 5
 sda_apply_duration_seconds_bucket{le="0.025"} 5
@@ -25,11 +26,10 @@ sda_apply_duration_seconds_bucket{le="0.1"} 5
 sda_apply_duration_seconds_bucket{le="0.25"} 6
 sda_apply_duration_seconds_bucket{le="0.5"} 6
 sda_apply_duration_seconds_bucket{le="1.0"} 7
-sda_apply_duration_seconds_bucket{le="10.0"} 8
 sda_apply_duration_seconds_bucket{le="2.5"} 7
 sda_apply_duration_seconds_bucket{le="5.0"} 8
-sda_apply_duration_seconds_count 9
-sda_apply_duration_seconds_sum 16.264499999999999
+sda_apply_duration_seconds_bucket{le="10.0"} 8
+sda_apply_duration_seconds_bucket{le="+Inf"} 9
 # HELP sda_containers_scanned Containers that passed policy and entered the device-rule pipeline.
 # TYPE sda_containers_scanned counter
 sda_containers_scanned_total 2
@@ -60,4 +60,22 @@ sda_reconcile_pending_containers 2
 # HELP sda_reload_incomplete 1 until a reconciliation pass for the latest config and trigger has visited every running container, else 0.
 # TYPE sda_reload_incomplete gauge
 sda_reload_incomplete 0
+# HELP process_cpu_seconds Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds counter
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+# HELP process_network_receive_bytes Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes counter
+# HELP process_network_transmit_bytes Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes counter
 # EOF

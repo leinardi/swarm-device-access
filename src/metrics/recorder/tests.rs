@@ -569,44 +569,51 @@ fn label_values_are_escaped() {
     );
 }
 
-/// The exposition as the scrape golden holds it: the `process_*` families (read from /proc)
-/// dropped, and each family's sample lines sorted, since a `Family` keeps its series in a hash
-/// map; every line is otherwise byte for byte what a scrape answers.
+/// The exposition as the scrape golden holds it. A label-keyed family keeps its series in a hash
+/// map, so its series are put in the order of their labels (`le` aside); within a series (a
+/// histogram's buckets, `_count` and `_sum`) and in a family without labels, the lines keep the
+/// encoder's order. The `process_*` families (read from /proc) keep their HELP and TYPE
+/// lines only. Every line is otherwise byte for byte what a scrape answers.
 fn canonical_scrape(body: &str) -> String {
-    fn flush<'line>(
-        headers: &mut Vec<&'line str>,
-        samples: &mut Vec<&'line str>,
-        out: &mut String,
-    ) {
-        let process = headers.first().is_some_and(|line| {
-            line.starts_with("# HELP process_") || line.starts_with("# TYPE process_")
-        });
-        if !process {
-            samples.sort_unstable();
-            for line in headers.iter().chain(samples.iter()) {
-                out.push_str(line);
-                out.push('\n');
-            }
+    /// The labels of a sample line, without the `le` a histogram bucket adds last.
+    fn series_key(line: &str) -> &str {
+        let labels = match (line.find('{'), line.rfind('}')) {
+            (Some(open), Some(close)) if open < close => &line[open + 1..close],
+            _ => "",
+        };
+        if labels.starts_with("le=\"") {
+            ""
+        } else if let Some(at) = labels.rfind(",le=\"") {
+            &labels[..at]
+        } else {
+            labels
         }
-        headers.clear();
-        samples.clear();
+    }
+    fn flush(series: &mut Vec<(&str, Vec<&str>)>, out: &mut String) {
+        series.sort_by(|left, right| left.0.cmp(right.0));
+        for line in series.drain(..).flat_map(|(_, lines)| lines) {
+            out.push_str(line);
+            out.push('\n');
+        }
     }
     let mut out = String::new();
-    let mut headers: Vec<&str> = Vec::new();
-    let mut samples: Vec<&str> = Vec::new();
+    let mut series: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut process = false;
     for line in body.lines() {
-        if line == "# EOF" {
-            flush(&mut headers, &mut samples, &mut out);
-            out.push_str("# EOF\n");
-        } else if line.starts_with('#') {
-            if !samples.is_empty() {
-                flush(&mut headers, &mut samples, &mut out);
+        if line.starts_with('#') {
+            flush(&mut series, &mut out);
+            process = line.starts_with("# HELP process_") || line.starts_with("# TYPE process_");
+            out.push_str(line);
+            out.push('\n');
+        } else if !process {
+            let key = series_key(line);
+            match series.iter_mut().find(|(known, _)| *known == key) {
+                Some((_, lines)) => lines.push(line),
+                None => series.push((key, vec![line])),
             }
-            headers.push(line);
-        } else {
-            samples.push(line);
         }
     }
+    flush(&mut series, &mut out);
     out
 }
 
