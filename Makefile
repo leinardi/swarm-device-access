@@ -45,6 +45,11 @@ MK_COMMON_BOOTSTRAP := $(shell "$(MK_COMMON_BOOTSTRAP_SCRIPT)" \
 # Project-specific config
 # -----------------------------------------------------------------------------
 BIN_NAME     ?= swarm-device-access
+
+# rust-pin-bump (rust.mk): the rust-common pins it moves, and the doc whose current-pin line it
+# moves with them.
+RUST_PIN_URL  := https://github.com/leinardi/rust-common
+RUST_PIN_DOCS := AGENTS.md
 DIST_DIR     ?= dist
 
 # rust.mk stamps the binary's compile-time version: src/version.rs reads

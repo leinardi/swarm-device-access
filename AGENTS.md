@@ -201,9 +201,12 @@ the rust-common crates)**
 `clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v3.0.0"`, with `version = "3.0"`, the tag's `<major>.<minor>`) in the root
-`Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
-its own features.
+release tag (`tag`, with `version` the tag's `<major>.<minor>`) in the root `Cargo.toml`'s
+`[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and its own
+features. `make rust-pin-bump TAG=vX.Y.Z` moves the pin, and the line below, and checks that only
+rust-common moved in `Cargo.lock`.
+
+The current pin is `v3.0.0`. <!-- rust-pin-current -->
 
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
