@@ -568,3 +568,56 @@ fn label_values_are_escaped() {
         "the value reads back",
     );
 }
+
+/// The exposition as the scrape golden holds it: the `process_*` families (read from /proc)
+/// dropped, and each family's sample lines sorted, since a `Family` keeps its series in a hash
+/// map; every line is otherwise byte for byte what a scrape answers.
+fn canonical_scrape(body: &str) -> String {
+    fn flush<'line>(
+        headers: &mut Vec<&'line str>,
+        samples: &mut Vec<&'line str>,
+        out: &mut String,
+    ) {
+        let process = headers.first().is_some_and(|line| {
+            line.starts_with("# HELP process_") || line.starts_with("# TYPE process_")
+        });
+        if !process {
+            samples.sort_unstable();
+            for line in headers.iter().chain(samples.iter()) {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        headers.clear();
+        samples.clear();
+    }
+    let mut out = String::new();
+    let mut headers: Vec<&str> = Vec::new();
+    let mut samples: Vec<&str> = Vec::new();
+    for line in body.lines() {
+        if line == "# EOF" {
+            flush(&mut headers, &mut samples, &mut out);
+            out.push_str("# EOF\n");
+        } else if line.starts_with('#') {
+            if !samples.is_empty() {
+                flush(&mut headers, &mut samples, &mut out);
+            }
+            headers.push(line);
+        } else {
+            samples.push(line);
+        }
+    }
+    out
+}
+
+/// A scrape after Go's `recorderSequence` is byte for byte the committed golden (in the
+/// canonical form above), taken before the move to rust-common v4.0.0 and prometheus-client 0.26:
+/// the names, help texts, label escaping, value formatting and `# EOF` do not move with them.
+#[test]
+fn the_scrape_is_the_golden_byte_for_byte() {
+    let recorder = Recorder::new();
+    recorder_sequence(&recorder);
+    let body = String::from_utf8(recorder.exposition().body).expect("text");
+    let want = String::from_utf8(testdata("scrape.golden")).expect("golden");
+    assert_eq!(canonical_scrape(&body), want);
+}
