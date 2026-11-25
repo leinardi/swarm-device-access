@@ -69,6 +69,13 @@ services:
 
 The daemon compose file is also available at
 [`deployments/docker/docker-compose.yaml`](https://github.com/leinardi/swarm-device-access/blob/master/deployments/docker/docker-compose.yaml).
+To deploy it as a stack from a manager node:
+
+```bash
+git clone https://github.com/leinardi/swarm-device-access.git
+cd swarm-device-access/deployments/docker
+docker stack deploy -c docker-compose.yaml swarm-device-access
+```
 
 ## Verifying device passthrough
 
