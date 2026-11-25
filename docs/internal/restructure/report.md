@@ -187,7 +187,9 @@ hand in `.mk/*.mk`; the leads it raised were triaged:
   (`shipped_example_loads`) compares the file byte for byte with the frozen 1.x corpus, so the two
   comment fixes failed `make verify` and were reverted. The file still lists a `plain` log format
   (Q13) and calls `debug-addr` "pprof endpoints" (Q2). Fixing them means changing the corpus, which
-  AGENTS.md forbids by hand: an owner decision.
+  AGENTS.md forbids by hand: an owner decision. Status (2026-11-25): resolved without touching the
+  corpus. The test now compares only the lines that are not comments, and the file's comments
+  describe 2.x (owner).
 - **G6, settled by the owner:** the README and its license note linked "NVIDIA's container
   toolkit" to `NVIDIA/k8s-device-plugin`; CONTRIBUTING.md and SECURITY.md named
   `NVIDIA/libnvidia-container`. The code names no upstream repository, but
@@ -196,7 +198,7 @@ hand in `.mk/*.mk`; the leads it raised were triaged:
   name libnvidia-container (owner, 2026-11-24).
 - Found while editing, not fixed (outside the plan): `.github/workflows/release.yaml:258-260`
   says the `release` environment is created on first run and its branch rule is configured by
-  hand, but gh-leinardi-iac manages it (row 21).
+  hand, but gh-leinardi-iac manages it (row 21). Status (2026-11-25): the comment now says so.
 - `drift --scope docs --paths` still reports about 150 paths in `internal/rust-port.md`: Go files,
   removed modules and earlier test names in the ledger's history rows. The ledger records them on
   purpose (G7); its current-state sentences were corrected (rows 24 to 28). Published pages have

@@ -1,0 +1,8 @@
+{#- The apple-touch icon, the web manifest and theme-color from the brand kit; every other block
+    stays the theme's (repo-docs-toolkit zensical-site, references/config.md). -#}
+{% extends "base.html" %}
+{% block extrahead %}
+  <link rel="apple-touch-icon" href="{{ 'assets/apple-touch-icon.png' | url }}">
+  <link rel="manifest" href="{{ 'assets/site.webmanifest' | url }}">
+  <meta name="theme-color" content="#10141a">
+{% endblock %}

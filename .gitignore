@@ -46,3 +46,7 @@ vendor/
 
 # --- Rust build outputs ---
 /target/
+
+# Zensical docs site: build output and the uv environment of tools/docs
+/site/
+tools/docs/.venv/

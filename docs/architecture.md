@@ -14,51 +14,43 @@ cgroup v1 through `devices.allow` and `devices.deny`.
 
 ## High-level flow
 
-```
-Docker daemon
-    |
-    | container start / unpause / die / destroy events (Unix socket)
-    v
-+---------------------------------------------------------------+
-| src/main.rs, src/run.rs                                        |
-|   flags + config file → config::Store; SIGHUP → Reloader       |
-|   processor::Processor; daemon::run                            |
-+---------------------------------------------------------------+
-    |
-    v
-+---------------------------------------------------------------+
-| src/daemon                                                     |
-|   run                                                          |
-|    ├─ subscribe (events, since=now)       ← before the listing |
-|    ├─ Coordinator::run                    ← one task           |
-|    │    passes: list running containers, reconcile each        |
-|    │    (startup, SIGHUP via publish_and_reconcile, systemd    |
-|    │    reload), retries with backoff, lifecycle sweep         |
-|    ├─ systemd::supervise (D-Bus)          ← own task,          |
-|    │    requests a pass per subscription and per reload        |
-|    └─ listen_events → consume_events      ← reconnect loop     |
-|         └─ Coordinator::handle_event                           |
-|              start/unpause → reconcile_container → process_one |
-|              die/destroy   → terminate_container               |
-+---------------------------------------------------------------+
-    |
-    v
-+---------------------------------------------------------------+
-| src/processor: Processor::reconcile(id)                        |
-|   container_inspect → labels, State, Mounts                    |
-|   compute_desired: Global::enabled, collect_mount_rules per    |
-|     /dev mount (openat2 beneath /dev → fstat → sysfs DEVNAME → |
-|     deny/allow on every name), aggregate per device            |
-|   apply_pinned: pidfd → /proc/<pid>/cgroup → CgroupHandle →    |
-|     re-verify → cgroup::Interface::set_device_rules            |
-+---------------------------------------------------------------+
-    |                          |
-    | cgroup v1                | cgroup v2
-    v                          v
-devices.allow / devices.deny   owned wrapper around the runtime's
-(v1.rs, v1set.rs, ledger.rs)   BPF_CGROUP_DEVICE filter (v2.rs,
-                               v2plan.rs, v2ops.rs, owned.rs,
-                               ebpf.rs, asm.rs, bpf_sys.rs)
+```mermaid
+flowchart TD
+    docker[("Docker daemon")]
+
+    entry["<b>src/main.rs, src/run.rs</b><br>flags + config file → config::Store<br>SIGHUP → Reloader<br>processor::Processor, daemon::run"]
+
+    subgraph daemon["src/daemon: run"]
+        subscribe["subscribe (events, since=now)<br>before the listing"]
+        coord["<b>Coordinator::run</b> (one task)<br>passes: list running containers, reconcile each<br>(startup, SIGHUP via publish_and_reconcile, systemd reload)<br>retries with backoff, lifecycle sweep"]
+        systemd["<b>systemd::supervise</b> (D-Bus, own task)<br>requests a pass per subscription and per reload"]
+        listen["listen_events → consume_events<br>(reconnect loop)"]
+        handle["Coordinator::handle_event"]
+        subscribe --> listen --> handle
+        systemd -. pass request .-> coord
+    end
+
+    subgraph processor["src/processor"]
+        inspect["<b>Processor::reconcile(id)</b><br>container_inspect: labels, State, Mounts"]
+        desired["<b>compute_desired</b><br>Global::enabled, collect_mount_rules per /dev mount<br>(openat2 beneath /dev → fstat → sysfs DEVNAME →<br>deny/allow on every name), aggregate per device"]
+        apply["<b>apply_pinned</b><br>pidfd → /proc/#lt;pid#gt;/cgroup → CgroupHandle →<br>re-verify → cgroup::Interface::set_device_rules"]
+        terminate["<b>Processor::terminate</b><br>revoke in the cgroup last verified"]
+        inspect --> desired --> apply
+    end
+
+    subgraph cgroup["src/cgroup: Interface::set_device_rules"]
+        direction LR
+        v1["<b>cgroup v1</b><br>devices.allow / devices.deny<br>(v1.rs, v1set.rs, ledger.rs)"]
+        v2["<b>cgroup v2</b><br>owned wrapper around the runtime's BPF_CGROUP_DEVICE filter<br>(v2.rs, v2plan.rs, v2ops.rs, owned.rs, ebpf.rs, asm.rs, bpf_sys.rs)"]
+    end
+
+    docker -- "start / unpause / die / destroy events (Unix socket)" --> subscribe
+    entry --> daemon
+    coord -- reconcile each --> inspect
+    handle -- "start / unpause: reconcile_container → process_one" --> inspect
+    handle -- "die / destroy: terminate_container" --> terminate
+    apply --> cgroup
+    terminate --> cgroup
 ```
 
 ### Reconciliation

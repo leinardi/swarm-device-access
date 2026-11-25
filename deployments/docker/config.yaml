@@ -4,14 +4,14 @@
 # Settings marked [restart required] take effect only at startup.
 
 # log-level: info        # debug | info | warn | error
-# log-format: text       # text | json | plain
-# log-time: false        # include timestamps in log lines
+# log-format: text       # text | json
+# log-time: false        # include timestamps in log lines [restart required]
 
 # docker-socket: /var/run/docker.sock   # [restart required]
 # metrics-addr: ":9090"                 # Prometheus /metrics + /healthz + /readyz [restart required]
-# debug-addr: ""                        # pprof endpoints [restart required]
+# debug-addr: ""                        # must stay empty: there is no pprof server since 2.0
 
-# dry-run: false         # log rules without writing to cgroup
+# dry-run: false         # log rules without writing to cgroup; a reload can turn it off, not on
 
 # Policy mode: opt-in (default) or all.
 # opt-in: process only containers with label swarm-device-access.enable=true

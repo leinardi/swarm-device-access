@@ -255,9 +255,8 @@ jobs:
       # What dtolnay/rust-toolchain exported to every later step of the job.
       CARGO_INCREMENTAL: "0"
       CARGO_TERM_COLOR: always
-    # Created on first run with no protection rules, which changes nothing by itself. Add a
-    # deployment branch rule limiting it to `master`, and required reviewers if a release should need
-    # a second pair of eyes - docs/internal/release.md.
+    # Managed in leinardi/gh-leinardi-iac with a deployment branch rule: only `master` may deploy
+    # to it, and no required reviewers - docs/internal/release.md.
     environment: release
     permissions:
       contents: write # push the tag, create the release, upload assets

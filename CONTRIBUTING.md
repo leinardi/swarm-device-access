@@ -5,14 +5,52 @@
 - Linux host: the daemon is Linux-only, and its tests run on a Linux kernel
 - Rust through `rustup` (`rust-toolchain.toml` pins the exact release and its components)
 - Docker, logged in to `dhi.io` (`docker login dhi.io`), for building the container image and
-  running the integration suite
+  running the integration suite: the image builds from Docker Hardened Images
 - [`pre-commit`](https://pre-commit.com/) — install hooks once with `make pre-commit-install`
+- `cargo-deny`, [droast](https://github.com/immanuwell/dockerfile-roast), `markdownlint-cli2`,
+  `yamllint`, `shellcheck`, `actionlint` and `checkmake`. The pre-commit hooks install most of
+  these when needed; droast is built from source, which needs `cargo`
+- A local `shellcheck` at the release the `shellcheck-py` hook in `.pre-commit-config.yaml` wraps:
+  droast's required ShellCheck bridge runs the one on PATH
+- For the static release binaries only (`make rust-release-dist`): the zig and cargo-zigbuild
+  releases the Makefile pins, on PATH; QEMU (binfmt) to run the arm64 image tests on another
+  architecture
+- For the documentation site only: [uv](https://docs.astral.sh/uv/), which runs the Zensical
+  pinned in `tools/docs/uv.lock`
+
+The Makefile pulls shared logic from [`leinardi/make-common`](https://github.com/leinardi/make-common),
+pinned by `.mk/.mk-common-version`. On the first `make` run, the bootstrap script downloads the
+snippets into `.mk/`; `make help` lists every target.
 
 ## Building
 
 ```bash
-make rust-build      # builds the workspace (target/debug/swarm-device-access)
-make docker-build    # builds the container image for the host's architecture (single-arch)
+make rust-build        # builds the workspace (target/debug/swarm-device-access)
+make docker-build      # the container image's default target, which compiles the binary (host arch)
+make rust-release-dist # the static release binaries, then checksums.txt, into dist/
+make image-build-test  # the prebuilt image from those binaries, then its tests
+```
+
+A multi-arch image build of the default target:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -f deployments/docker/Dockerfile \
+  --build-arg VERSION=dev \
+  --build-arg COMMIT=$(git rev-parse --short HEAD) \
+  --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t ghcr.io/leinardi/swarm-device-access:dev .
+```
+
+## Documentation
+
+The published pages are in `docs/` (`docs/internal/` is never published), built with Zensical
+into the site at <https://leinardi.github.io/swarm-device-access/>:
+
+```bash
+make docs-serve        # preview the site with live reload
+make docs-build        # the strict build CI runs on every pull request
 ```
 
 ## Testing

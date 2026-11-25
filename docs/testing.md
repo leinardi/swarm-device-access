@@ -186,4 +186,6 @@ or deployment behavior:
 
 ## Field test
 
-Moved to [Field test](internal/qa/field-test.md).
+Moved to
+[Field test](https://github.com/leinardi/swarm-device-access/blob/master/docs/internal/qa/field-test.md),
+a maintainer page that the site does not publish.

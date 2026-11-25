@@ -43,6 +43,8 @@ make pre-commit-install  # install the pre-commit and commit-msg hooks
 make docker-build  # the image's default target, which compiles the binary itself (needs a docker login dhi.io)
 make docker-run    # runs image locally with required host bind mounts
 make help          # every target with its one-line description
+make docs-build    # the documentation site, strict, with Zensical from tools/docs/uv.lock (uv)
+make docs-serve    # preview the site locally (DOCS_ADDR=IP:PORT to change the address)
 ```
 
 Integration tests (need a live Docker daemon and a `docker login dhi.io`; see
@@ -90,7 +92,7 @@ fragments in the Markdown.
 
 ### Generated or vendored: never hand-edit
 
-- `.mk/{docker,help,password,pre-commit,rust,rust-release,image}.mk` and
+- `.mk/{docker,help,password,pre-commit,rust,rust-release,image,zensical}.mk` and
   `scripts/bootstrap-mk-common.sh`: fetched from
   make-common (under its MIT license) and refreshed with `make mk-common-update`; a change is
   ported upstream.
@@ -99,7 +101,7 @@ fragments in the Markdown.
 
 ## Architecture
 
-See [`docs/architecture.md`](docs/architecture.md) for the sequence diagram, BPF program structure,
+See [`docs/architecture.md`](docs/architecture.md) for the flow diagram, BPF program structure,
 module layout, and troubleshooting guide.
 
 Four layers, all under `src/`:
@@ -288,13 +290,16 @@ Shared by every `leinardi/*` repository.
   `ci-result` aggregator; the reviewdog jobs on pull requests), `integration.yaml` (the testenv
   suite against a real Docker), `release.yaml` (`guard`, `ci-green`, `audit`, `release`;
   [`docs/internal/release.md`](docs/internal/release.md)), `scheduled-scan.yaml` (weekly:
-  `trivy-gate` on the published `:latest` and cargo-deny on `master`) and `pre-commit-warmup.yaml`.
+  `trivy-gate` on the published `:latest` and cargo-deny on `master`), `pre-commit-warmup.yaml` and
+  `docs.yaml` (the documentation site: a strict build on pull requests, the Pages deploy from
+  `master`).
   Shared steps come from [gh-composite-actions](https://github.com/leinardi/gh-composite-actions),
   pinned by SHA. `.trivyignore.yaml` holds the scans' accepted findings.
 - **Jobs:** every job sets `timeout-minutes` (a composite action cannot time out its own steps).
   Every checkout that pushes nothing sets `persist-credentials: false`; the release's checkout
   sets it too, and its tag push passes the token to that one `git push`. Every job that holds a
-  write permission or `id-token` runs in the `release` environment.
+  write permission or `id-token` runs in the `release` environment, except the Pages deploy
+  (`docs.yaml`), which runs in `github-pages`, held to `master` the same way.
 - **Concurrency:** CI (and `integration.yaml`) groups a pull request's runs by
   `${{ github.workflow }} @ <head label>` and cancels the older one; every other run (a push to
   the default branch, a dispatch) gets its own group, `${{ github.run_id }}`, because GitHub keeps
@@ -381,6 +386,7 @@ Run before considering an edit done. `make check` applies to every row.
 | `.pre-commit-config.yaml`, `Makefile`, `.mk/**` | `make check`, `cargo test --locked -p meta`, `make help` |
 | `scripts/hooks/rustfmt-on-edit.sh` | shellcheck (in `make check`); no test package: run it once by editing a `.rs` file in Claude Code |
 | `README.md`, `docs/**/*.md`, other Markdown | the `lychee` hook (`--offline --include-fragments`); prose wraps at 100 columns (markdownlint in `make check`) |
+| `docs/**` (published pages), `zensical.toml`, `overrides/**`, `tools/docs/**` | also `make docs-build` (strict); `docs/internal/` is never published (`exclude_docs`) |
 | `.agents/skills/**` | the Markdown row |
 
 ## Commit messages

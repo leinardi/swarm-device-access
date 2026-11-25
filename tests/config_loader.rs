@@ -49,6 +49,14 @@ fn text(json: &Json) -> &str {
         .unwrap_or_else(|| panic!("not a string: {json}"))
 }
 
+/// The lines of a YAML file that are neither blank nor a comment, trimmed.
+fn significant_lines(file: &str) -> Vec<&str> {
+    file.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect()
+}
+
 fn list(json: &Json) -> Option<Vec<String>> {
     json.as_array()
         .map(|items| items.iter().map(|item| text(item).to_owned()).collect())
@@ -141,7 +149,14 @@ fn shipped_example_loads() {
     let case = &corpus()["shippedExample"];
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(text(&case["name"]));
     let file = fs::read_to_string(&path).unwrap();
-    assert_eq!(file, text(&case["input"]), "the corpus is out of date");
+    // The shipped example's comments describe 2.x (no `plain` format, no pprof server) while the
+    // frozen 1.x corpus keeps 1.x's; every line that is not a comment must still be the corpus's,
+    // so the corpus's verdict below is the shipped file's.
+    assert_eq!(
+        significant_lines(&file),
+        significant_lines(text(&case["input"])),
+        "the corpus is out of date"
+    );
     check(
         "shipped example",
         case,
