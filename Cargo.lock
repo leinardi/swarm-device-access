@@ -226,7 +226,7 @@ name = "clock"
 version = "3.0.0"
 source = "git+https://github.com/leinardi/rust-common?tag=v3.0.0#3a2f44a5b1b90d825020ae9ed19b11b1e7bbc262"
 dependencies = [
- "jiff",
+ "jiff 0.2.46",
  "tokio",
 ]
 
@@ -713,8 +713,22 @@ version = "0.2.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "175dc66334db3b9ab9985bf8b61cfed50dc16d20964bb47f9e479adcae984a7f"
 dependencies = [
- "jiff-core",
- "jiff-static",
+ "jiff-core 0.1.8",
+ "jiff-static 0.2.46",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+]
+
+[[package]]
+name = "jiff"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5d126d72eb017f10b302e73bdeca446bea405ee449af4d9e7866d6b082d83e"
+dependencies = [
+ "jiff-core 1.0.2",
+ "jiff-static 1.0.1",
  "log",
  "portable-atomic",
  "portable-atomic-util",
@@ -731,15 +745,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "jiff-core"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d44c923edf2bf456a982253f1a9ee1f6e89e421dffd0065d9b9a581da0def58f"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "jiff-static"
 version = "0.2.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7b1af7547d47354bc438d797e3854601bde8f8d185780c5ba4ab27afa54f1ba"
 dependencies = [
- "jiff-core",
+ "jiff-core 0.1.8",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0127e9bde3c6130d6169e7d8d68676e4be69c4bf7573c308b6f960a5089c428"
+dependencies = [
+ "jiff-core 1.0.2",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1257,7 +1292,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "jiff",
+ "jiff 1.0.1",
  "libc",
  "prometheus-client",
  "rustix",
@@ -1348,7 +1383,7 @@ version = "3.0.0"
 source = "git+https://github.com/leinardi/rust-common?tag=v3.0.0#3a2f44a5b1b90d825020ae9ed19b11b1e7bbc262"
 dependencies = [
  "bollard",
- "jiff",
+ "jiff 0.2.46",
  "regex",
  "rustix",
  "tempfile",
