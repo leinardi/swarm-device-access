@@ -26,8 +26,8 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
+use service_kit::tokio_util::sync::CancellationToken;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use super::Parsed;
 use crate::config::{self, FileSchema, LoadError, Runtime};

@@ -27,17 +27,17 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::time::Duration;
 
-use bollard::Docker;
-use bollard::container::LogOutput;
-use bollard::errors::Error as DockerError;
-use bollard::models::ContainerCreateBody;
-use bollard::query_parameters::{
-    CreateContainerOptions, InspectContainerOptions, LogsOptions, StartContainerOptions,
-    WaitContainerOptions,
-};
 use clock::{Clock as _, SystemClock};
 use futures_util::StreamExt as _;
 use testenv_core::Error;
+use testenv_core::bollard::Docker;
+use testenv_core::bollard::container::LogOutput;
+use testenv_core::bollard::errors::Error as DockerError;
+use testenv_core::bollard::models::ContainerCreateBody;
+use testenv_core::bollard::query_parameters::{
+    CreateContainerOptions, InspectContainerOptions, LogsOptions, StartContainerOptions,
+    WaitContainerOptions,
+};
 use testenv_core::context::Context;
 use testenv_core::host::{HostSweep, sweep_rules};
 pub use testenv_core::host::{OP_TIMEOUT, OpError, with_timeout};

@@ -79,7 +79,7 @@ fn recorder_sequence(recorder: &Recorder) {
     let cet = TimeZone::fixed(Offset::constant(1));
     let event_time = date(2026, 10, 25)
         .at(14, 3, 4, 567_891_234)
-        .to_zoned(cet)
+        .to_zoned_datetime(cet)
         .expect("event time")
         .timestamp();
     recorder.set_last_event(event_time);

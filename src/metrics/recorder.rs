@@ -26,13 +26,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Timestamp;
-use prometheus_client::encoding::EncodeLabelSet;
-use prometheus_client::metrics::counter::Counter;
-use prometheus_client::metrics::family::Family;
-use prometheus_client::metrics::gauge::Gauge;
-use prometheus_client::metrics::histogram::Histogram;
-use prometheus_client::registry::{Metric, Registry};
 use service_kit::process::ProcessCollector;
+use service_kit::prometheus_client::encoding::{EncodeLabelSet, LabelSetEncoder};
+use service_kit::prometheus_client::metrics::counter::Counter;
+use service_kit::prometheus_client::metrics::family::Family;
+use service_kit::prometheus_client::metrics::gauge::Gauge;
+use service_kit::prometheus_client::metrics::histogram::Histogram;
+use service_kit::prometheus_client::registry::{Metric, Registry};
 
 use super::{CONTENT_TYPE, DEF_BUCKETS, Exposition};
 
@@ -41,22 +41,44 @@ const RESULT_OK: &str = "ok";
 /// The label value of a container-level failure.
 const RESULT_ERROR: &str = "error";
 
+// The label sets are encoded by hand rather than derived: prometheus-client's derive expands to
+// `::prometheus_client` paths, and the crate comes through `service_kit::prometheus_client`, the
+// copy service-kit's collector is built on. Each writes its one label as the derive did.
+
 /// `sda_events_total`'s labels.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, EncodeLabelSet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct EventLabels {
     event: String,
 }
 
+impl EncodeLabelSet for EventLabels {
+    fn encode(&self, encoder: &mut LabelSetEncoder) -> Result<(), std::fmt::Error> {
+        [("event", self.event.as_str())].encode(encoder)
+    }
+}
+
 /// `sda_rules_applied_total`'s labels.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, EncodeLabelSet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ResultLabels {
     result: &'static str,
 }
 
+impl EncodeLabelSet for ResultLabels {
+    fn encode(&self, encoder: &mut LabelSetEncoder) -> Result<(), std::fmt::Error> {
+        [("result", self.result)].encode(encoder)
+    }
+}
+
 /// The labels of the two skip counters.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, EncodeLabelSet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ReasonLabels {
     reason: String,
+}
+
+impl EncodeLabelSet for ReasonLabels {
+    fn encode(&self, encoder: &mut LabelSetEncoder) -> Result<(), std::fmt::Error> {
+        [("reason", self.reason.as_str())].encode(encoder)
+    }
 }
 
 /// The daemon's metrics, cheap to clone: every clone records into the same families.
@@ -199,10 +221,11 @@ impl Recorder {
         let mut body = String::new();
         // Writing to a String cannot fail.
         let _ = match &self.families {
-            Some(families) => {
-                prometheus_client::encoding::text::encode(&mut body, &families.registry)
-            }
-            None => prometheus_client::encoding::text::encode_eof(&mut body),
+            Some(families) => service_kit::prometheus_client::encoding::text::encode(
+                &mut body,
+                &families.registry,
+            ),
+            None => service_kit::prometheus_client::encoding::text::encode_eof(&mut body),
         };
         Exposition {
             content_type: CONTENT_TYPE,

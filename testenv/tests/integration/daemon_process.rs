@@ -32,10 +32,10 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use bollard::container::LogOutput;
-use bollard::query_parameters::LogsOptions;
 use futures_util::StreamExt as _;
 use serde_json::{Map, Value};
+use testenv_core::bollard::container::LogOutput;
+use testenv_core::bollard::query_parameters::LogsOptions;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::process::Command;
 use tokio::sync::watch;

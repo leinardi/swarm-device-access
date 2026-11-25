@@ -20,16 +20,16 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use bollard::errors::Error as DockerError;
-use bollard::models::{ContainerCreateBody, ContainerSummary, HostConfig};
-use bollard::query_parameters::{
-    InspectContainerOptions, KillContainerOptions, ListContainersOptions, StopContainerOptions,
-    WaitContainerOptions,
-};
 use futures_util::StreamExt as _;
 use swarm_device_access::launcher::spec::{DAEMON_NAME, LABEL_LAUNCHER, LABEL_ROLE, ROLE_DAEMON};
 use testenv::enforce::ENV_ENFORCE;
 use testenv::host::{OP_TIMEOUT, with_timeout};
+use testenv_core::bollard::errors::Error as DockerError;
+use testenv_core::bollard::models::{ContainerCreateBody, ContainerSummary, HostConfig};
+use testenv_core::bollard::query_parameters::{
+    InspectContainerOptions, KillContainerOptions, ListContainersOptions, StopContainerOptions,
+    WaitContainerOptions,
+};
 use testenv_core::context::Context;
 
 use crate::daemon_process::follow_logs;

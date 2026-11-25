@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use bollard::Docker;
+use testenv_core::bollard::Docker;
 use testenv_core::context::Context;
 use testenv_core::testing;
 pub use testenv_core::testing::{Fatal, OrFatal, TestHandle, TestResult};

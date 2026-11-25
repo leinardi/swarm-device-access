@@ -41,8 +41,8 @@ use axum::http::StatusCode;
 use axum::http::header::CONTENT_TYPE;
 use axum::routing::any;
 use service_kit::http::{Lifecycle, Outcome, ServerConfig};
+use service_kit::tokio_util::sync::CancellationToken;
 use tokio::net::TcpListener;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::daemon::Readiness;

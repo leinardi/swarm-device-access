@@ -63,7 +63,7 @@ and `Cargo.lock` and checked by `cargo deny`.
 
 | Crate | Where | Reason |
 | --- | --- | --- |
-| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by the release tag `v3.0.0` in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies. |
+| rust-common's `clock`, `tracing-setup`, `docker-client` (`attach`), `service-kit` (`runtime`, `process-metrics`, `http`), `testenv-core` (`async`, `bollard`, `redact` with `integration`), `repo-meta` | daemon, testenv, meta, each where it is used | The code shared with the other Rust services, one git dependency pinned by the release tag AGENTS.md names, in `[workspace.dependencies]`; see [Moved to rust-common](#moved-to-rust-common). Each brings its own dependencies. |
 | `clap` 4 (derive, no colour) | daemon | The CLI, as in SSE (Q1). |
 | `tokio` (`net`, `time`, `sync`, `rt`, `io-util`, `io-std`, `macros`) | daemon; testenv (dev-dependency) | The sockets, the timers that follow the paused clock, `spawn_blocking` for the cgroup transaction, the launcher's output pump; in testenv the suite's daemon child processes. The runtime and the signal watches are service-kit's. |
 | `tokio-util` | daemon | `CancellationToken`, Go's context cancellation, and the `TaskTracker` of the blocking transactions. |
@@ -192,8 +192,12 @@ Makefile's pins and retain their negative controls.
 After the port, the components the services share moved to
 [leinardi/rust-common](https://github.com/leinardi/rust-common); the rows above say what this
 daemon passes each crate. They are one git dependency in the root `Cargo.toml`'s
-`[workspace.dependencies]`, pinned by the release tag `v3.0.0`: `clock`, `tracing-setup`, `docker-client`,
-`service-kit`, `testenv-core` and `repo-meta`. The earlier `go-compat`, `go-slog`, `go-prom`,
+`[workspace.dependencies]`, pinned by the release tag AGENTS.md names ("Shared crates"):
+`clock`, `tracing-setup`, `docker-client`, `service-kit`, `testenv-core` and `repo-meta`. From
+v4.0.0 the crates whose types cross rust-common's API come through it (prometheus-client as
+`service_kit::prometheus_client`, tokio-util as `service_kit::tokio_util`, bollard as
+`testenv_core::bollard`), and `meta/tests/rust_common_boundary.rs` holds each such crate to one
+package. The earlier `go-compat`, `go-slog`, `go-prom`,
 `go-http` and `docker-engine` crates are no longer used by this repository (README Q6, Q11, Q13,
 Q14, Q16, Q17). The moved code is the same code, and its tests and corpora moved with it.
 

@@ -27,8 +27,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use jiff::{SignedDuration, Timestamp};
+use service_kit::tokio_util::sync::CancellationToken;
 use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
 
 use super::testing::{
     FakeError, FakeReconciler, Gate, Harness, WITHIN, assert_failure_reported, base, event,

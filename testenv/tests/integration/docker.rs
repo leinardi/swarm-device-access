@@ -20,12 +20,12 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use bollard::models::{ContainerCreateBody, HostConfig};
-use bollard::query_parameters::{
-    CreateContainerOptions, CreateImageOptions, StartContainerOptions,
-};
 use futures_util::StreamExt as _;
 use testenv::host::{HOST_SWEEP, OP_TIMEOUT, with_timeout};
+use testenv_core::bollard::models::{ContainerCreateBody, HostConfig};
+use testenv_core::bollard::query_parameters::{
+    CreateContainerOptions, CreateImageOptions, StartContainerOptions,
+};
 
 use crate::testing::{Fatal, TestHandle, docker, suite};
 

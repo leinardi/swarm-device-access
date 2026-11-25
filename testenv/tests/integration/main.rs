@@ -54,7 +54,6 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use bollard::query_parameters::ListContainersOptions;
 use clock::{Clock as _, SystemClock};
 use testenv::cleanup_command;
 use testenv::config::{ENV_IDS, LABELS};
@@ -63,6 +62,7 @@ use testenv::host::{
     HOST_SWEEP, check_image_identity, default_sweep_rules, host_client, with_timeout,
 };
 use testenv::identity::check_identity;
+use testenv_core::bollard::query_parameters::ListContainersOptions;
 use testenv_core::context::Context;
 use testenv_core::identity::{IDENTITY_FLAG, is_static_elf};
 use testenv_core::redact::Logger;
