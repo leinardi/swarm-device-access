@@ -22,10 +22,10 @@
 //! shipped `deployments/docker/config.yaml`; and `validate_enums` for both sources.
 //!
 //! The corpus started as the 1.x loader's golden. Each expectation here is what this loader does:
-//! where it reads differently from 1.x (README Q1, Q6, Q13 and Q17: `plain` is no log format, the
-//! parser's wording, `0x1F90` and `1_0.5` are strings, the operating system's text for a missing
-//! file) the file says so. A syntax error is compared up to and including `yaml: `, since the rest
-//! is saphyr-parser's wording.
+//! where it reads differently from 1.x (docs/migration.md, Q1, Q6, Q13 and Q17: `plain` is no log
+//! format, the parser's wording, `0x1F90` and `1_0.5` are strings, the operating system's text for
+//! a missing file) the file says so. A syntax error is compared up to and including `yaml: `, since
+//! the rest is saphyr-parser's wording.
 #![expect(
     clippy::unwrap_used,
     reason = "the corpus readers are test helpers outside #[test] functions; a malformed corpus \

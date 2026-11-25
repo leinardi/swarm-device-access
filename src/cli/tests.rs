@@ -115,7 +115,7 @@ fn values_and_positionals() {
     );
 }
 
-/// Bools take `=value` with every `strconv.ParseBool` spelling, and nothing after a space; the
+/// Bools take `=value` (`true` or `false` only, Q17), and nothing after a space; the
 /// last value wins.
 #[test]
 fn bools_are_true_or_false_only() {

@@ -15,9 +15,9 @@
  */
 
 //! Only `src/cgroup/bpf_sys.rs`, the audited module of raw `bpf(2)` calls the cgroup v2 device
-//! filter needs (`docs/rust-port.md`, eBPF), may call `libc`: a `libc::` call elsewhere would be a
-//! way around the audited module even without `unsafe` (a safe `libc` function still reaches the
-//! kernel unchecked). The check is also run on input built to break it.
+//! filter needs (`docs/internal/rust-port.md`, eBPF), may call `libc`: a `libc::` call elsewhere
+//! would be a way around the audited module even without `unsafe` (a safe `libc` function still
+//! reaches the kernel unchecked). The check is also run on input built to break it.
 
 use std::sync::LazyLock;
 

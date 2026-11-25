@@ -17,7 +17,7 @@
 //! The identity rule the suite applies before any test: the image (and the binary) under test
 //! must be the Rust daemon, never a Go build standing in for it. Go's `flag` package takes
 //! `-help`, prints its usage to stderr and exits 0; the Rust daemon refuses every single-dash long
-//! flag with exit 2 and a refusal naming the `--` spelling (Q1 in `docs/rust-port.md`). So the
+//! flag with exit 2 and a refusal naming the `--` spelling (Q1 in `docs/migration.md`). So the
 //! answer to `-help` tells the two apart, and anything but the Rust answer fails the run: a
 //! mismatch is never a skip.
 //!

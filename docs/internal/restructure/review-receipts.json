@@ -1,0 +1,1739 @@
+{
+ "receipts": [
+  {
+   "baseline": [
+    "d0d6a008a4624d6f"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "49ddf9fcfc07aa70",
+    "87f5f06a4a40c1ab",
+    "1a8394feb0f2ac4a",
+    "9baf0833a1c01594",
+    "df752d6178c31858",
+    "3f7e11d5288c8ad6",
+    "09216453ef13e90e"
+   ],
+   "entry_sha256": "a942d3f875ed70d9f4c0403ae542c75772d23f04d7b752c98d7ae4e9c8657bd9",
+   "id": "m1",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "fe2437f3f3ee16f3"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "75564d7e35791b55",
+    "88578e036dffceef",
+    "7f6f5ce1f84363d2"
+   ],
+   "entry_sha256": "713077e113d859ccba82dbdf85a544bcd2f9eb5769358a6f94744e9c19acd422",
+   "id": "m2",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "68944150f24fa30d"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "b031b45fca795776",
+    "7086cf9d6c26ed4f",
+    "6bdd2a96e3c6376c",
+    "a1a96ab9a25d5501",
+    "ed2a929837c404ee",
+    "e299026b7a447b92",
+    "cae26014971cb52f",
+    "24e9b739f37496d0",
+    "ffbc33d492a61a86",
+    "b07c4eba13752de9",
+    "a3291e4b808740a6",
+    "d57b79fd1a270ebb",
+    "ae655aee83920a53",
+    "168ef10382a39fdd",
+    "2d48fbdc6b2ef5db",
+    "aca44a35ab97a2ab",
+    "6883e79554a2fd55",
+    "1bba856c346fbd43",
+    "7213a1ad76beac7d",
+    "590b82e143d1f044",
+    "1d02da023dafbcc2",
+    "9105a51f379c0c05",
+    "03803a2b2f68cafd",
+    "068ea300aef9031d",
+    "2bdf996b400e764e",
+    "ede41cce78a56c51",
+    "2fbe536448968a9e",
+    "bd521105e4625957",
+    "da8600385d0c3d75",
+    "84500e37cc1cfd20"
+   ],
+   "entry_sha256": "6d6e0d10899be9ab70c926f3996f8eb2788420967526f2e16a164a92b14ea32c",
+   "id": "m3",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "61786462a16218a7"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "3068e4cc556f8886",
+    "c6f106fd04d1fa66",
+    "1fbf069c5c9794f9",
+    "d9a8d9561e3662ea",
+    "ec63f174c386274e",
+    "91363489f8922738",
+    "b85449a0448b21f2",
+    "f88ff97cf9d52bc6",
+    "598228071ae147b2",
+    "870851c46fc4fbe3",
+    "0ac8a318bfe7bb2d",
+    "cf6527a96dc1dbca",
+    "37314fcf5a631050"
+   ],
+   "entry_sha256": "f051461699e890142cfe17e3f1f2805a52df60d2a4bda86a000edd8856dbff1f",
+   "id": "m4",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "2fb6be59007511db"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "44c0898e53149f23",
+    "dffde70b7312ed7e",
+    "3f59162ebd99a11f",
+    "4ea69f9af9701fc6",
+    "28d056dbbca9cbf2",
+    "632e8356dad76b89",
+    "5d6ecbd77fc10f04",
+    "bd62d041970dc8e2",
+    "15655a8a13d078ed",
+    "2052e5c665ffe71a"
+   ],
+   "entry_sha256": "e4179c9ca0f06d579d2a034944a1cf4d28af92c919ea833d53390fb467c9dba3",
+   "id": "m5",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "6a06409831d8c715"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "44c0898e53149f23",
+    "dffde70b7312ed7e",
+    "3f59162ebd99a11f",
+    "4ea69f9af9701fc6",
+    "28d056dbbca9cbf2",
+    "632e8356dad76b89",
+    "5d6ecbd77fc10f04",
+    "bd62d041970dc8e2",
+    "15655a8a13d078ed",
+    "2052e5c665ffe71a"
+   ],
+   "entry_sha256": "720898cd9bbfea765ce089c868f4e1e5ab9f7ccd7f17d3d03f2aef7b6de7dae5",
+   "id": "m6",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "7e7650fe82b16ad7"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "80244588756c5a12",
+    "035bea6df63e6c4e",
+    "a969e53906c6e5d5",
+    "74062ec2c5f84f88",
+    "85323947b8467b4d",
+    "172e13eba0cd231d",
+    "3fa67b49e7009eba",
+    "e3cfd26ccf4ee16d",
+    "fb6ddb35dffa6b8f",
+    "835d281049287405",
+    "8f44bf1910127e5a",
+    "4edd4dddb0cbbe5c",
+    "402ca9b3acf36bf5",
+    "c61ed808563c9341"
+   ],
+   "entry_sha256": "9103f287d263b907a62c0d3aecf9d8b986823b5d965d6c61ea0ef851f9a9f9f7",
+   "id": "m7",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "ec957f27ce8e930d"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "dc390542c4277abd",
+    "c727bd59c5862a61",
+    "0de51278599f6297",
+    "22a3168a63dd631b",
+    "7e3388663351cf2c",
+    "1c2fb9a909d34433",
+    "90aabef54d1a907b",
+    "27abbe24d212d00c",
+    "42d5bf16960ef412",
+    "b79595a5acc36fd1",
+    "433c6bac8b639a21",
+    "b867c115bd199a98",
+    "3f9e2be78ba7d0f6",
+    "07b487e6ef280e63",
+    "00086b840c3783a1",
+    "42fca2efbc36607e",
+    "3bc84fb00fb129ce",
+    "2a8c5ca817c86ee5",
+    "3691e81b97ae3f58",
+    "52d94579318f8d16",
+    "ad4f9132f6ade4c5",
+    "7ef936109d908dc3",
+    "ef93d4ea616898a9",
+    "8219122b8a586629",
+    "7be4159573ac97a0",
+    "ded783cd507a4ddf",
+    "9e9ddb663522bb6a"
+   ],
+   "entry_sha256": "0eea9a59d0992daf6756c8e75109310806e8aec7661272a6ad840011b760495f",
+   "id": "m8",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "bb4f9a98cf6255bb"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "dc390542c4277abd",
+    "c727bd59c5862a61",
+    "0de51278599f6297",
+    "22a3168a63dd631b",
+    "7e3388663351cf2c",
+    "1c2fb9a909d34433",
+    "90aabef54d1a907b",
+    "27abbe24d212d00c",
+    "42d5bf16960ef412",
+    "b79595a5acc36fd1",
+    "433c6bac8b639a21",
+    "b867c115bd199a98",
+    "3f9e2be78ba7d0f6",
+    "07b487e6ef280e63",
+    "00086b840c3783a1",
+    "42fca2efbc36607e",
+    "3bc84fb00fb129ce",
+    "2a8c5ca817c86ee5",
+    "3691e81b97ae3f58",
+    "52d94579318f8d16",
+    "ad4f9132f6ade4c5",
+    "7ef936109d908dc3",
+    "ef93d4ea616898a9",
+    "8219122b8a586629",
+    "7be4159573ac97a0",
+    "ded783cd507a4ddf",
+    "9e9ddb663522bb6a"
+   ],
+   "entry_sha256": "99c46ba6dd92355964cadfb31c3b6d9d211daf4b536d127a2b9e9a9b4aa01f80",
+   "id": "m9",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "1eccd00056480bf4"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "b85449a0448b21f2",
+    "f88ff97cf9d52bc6",
+    "598228071ae147b2",
+    "870851c46fc4fbe3",
+    "0ac8a318bfe7bb2d",
+    "cf6527a96dc1dbca",
+    "37314fcf5a631050"
+   ],
+   "entry_sha256": "bb282f853f8f40d8690e48d8d3d5c42956a7c8b120835398162eed453b73a1e6",
+   "id": "m10",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "050ea9e1ed9a9d4e"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "590b82e143d1f044",
+    "1d02da023dafbcc2",
+    "9105a51f379c0c05",
+    "03803a2b2f68cafd",
+    "068ea300aef9031d",
+    "2bdf996b400e764e"
+   ],
+   "entry_sha256": "d8f7bdfc70c1b9af4458e28a03ef7c28fc126df7838851acd4543bfbdf33465a",
+   "id": "m11",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "956ec736ab5c3e98"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "84500e37cc1cfd20"
+   ],
+   "entry_sha256": "fb9bd6b8947c33c6d60b02a8d489b3ebf3a5b1662d28bb5837b762a569d08b2c",
+   "id": "m12",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "c6d03a136a6dd712"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "c96485faa8f60b4a",
+    "72c87c00fc04ef02",
+    "5b9406e1f9236d9d",
+    "10af735d93d355cb",
+    "b8f549f4f3c885f4",
+    "2d82d0c58c822a1b",
+    "c839b25d25b11d53",
+    "3a9e205bc9da6d36",
+    "9c1d72deab7df648",
+    "037ff6dc4f5a0be7"
+   ],
+   "entry_sha256": "ddeae3eb324c9c7e5d6c0ccee330617d6a762949a46c3662548a7c4a254cf933",
+   "id": "m13",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "0263088c9df16433"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "71a594774013e6cc",
+    "f05a21be17243c56",
+    "26fa483b77b51833",
+    "65a8ab10dd75ffbf",
+    "0a1f780296b42cfe"
+   ],
+   "entry_sha256": "213f64e114db647da227074b92ee6453ffd2725aa5d6303ede7caca5ec2241ce",
+   "id": "m14",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "9f756656d90273e8"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "0bb7ec1f3b894274",
+    "822666aebffe27e2",
+    "1473fdfe63347aa5",
+    "8a02481a341aec22",
+    "a1240002895f508f",
+    "d1e324372b7177ef",
+    "5438b4df91f3bbb8",
+    "44036e40411c710d"
+   ],
+   "entry_sha256": "26af155b3b930814f041099b9b4d5742f29b4daac9cb3b87153a03a14db96598",
+   "id": "m15",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "635c09f69c15c2ff"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "15fda53589956a16",
+    "c904afda053ad0d4",
+    "b7852fb6c5f160ff",
+    "23129da87d5de4cf",
+    "4a3f86e0da6e66f5",
+    "6a0612b54439a502",
+    "aa2003d7172ee06b",
+    "b0e0a806c5a8b751",
+    "860d59a14178aac0",
+    "01bd02029c93c6d7",
+    "05e17b61ef7d202f",
+    "7f99e9bec97d3763",
+    "f7898613daa6f19a",
+    "e165ca87c5389fbb"
+   ],
+   "entry_sha256": "896992f14eac62906f9283e6a037f43fae1972492ad9767a9aa633495beb8f33",
+   "id": "m16",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "378574a3ee0367c9"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "15fda53589956a16",
+    "c904afda053ad0d4",
+    "b7852fb6c5f160ff",
+    "23129da87d5de4cf",
+    "4a3f86e0da6e66f5",
+    "6a0612b54439a502",
+    "aa2003d7172ee06b",
+    "b0e0a806c5a8b751",
+    "860d59a14178aac0",
+    "01bd02029c93c6d7",
+    "05e17b61ef7d202f",
+    "7f99e9bec97d3763",
+    "f7898613daa6f19a",
+    "e165ca87c5389fbb"
+   ],
+   "entry_sha256": "3b2785cadb82f8c7837726f0a1dacb7fda6455fcfc467c4c158367fdbb09cc80",
+   "id": "m17",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "77f6bdab252e5747"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "a3f5d4f117ea266f",
+    "116681f4b1e3c579",
+    "07ec97e1367470b0",
+    "5c10829ad7eb938c",
+    "0bb3f0985e79f99e",
+    "ba6c3c96e27fb431",
+    "bc0d0fb814990203"
+   ],
+   "entry_sha256": "023d5d16536c9344fca21a86b0ca11e61bb700c6a428d7b868d5002caa7e6567",
+   "id": "m18",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "fa3586a9258eb856"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "2aab5db57bc4f45b",
+    "0614b6eba9840d12"
+   ],
+   "entry_sha256": "e25fdb7b92bac99cb671a79c27402910c4294d73274ca7f3b2461ad6a239a048",
+   "id": "m19",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "c49a37ed7fcbac89"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "2aab5db57bc4f45b",
+    "0614b6eba9840d12"
+   ],
+   "entry_sha256": "bcfa16155b919f189dd23a7b6af4eeaf66e963bec6034c178328e26e1a5596b7",
+   "id": "m20",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "48c18470d33e9325"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "be8a82a476b8410a",
+    "8ac4169081161442"
+   ],
+   "entry_sha256": "7e5aa238ef9bc81e16df1b99a9ffb22897d91012116087043001ed045649da39",
+   "id": "m21",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "677d579ce834381a"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "880be6ccefa1e153",
+    "e79d76cf152bff98",
+    "c1abdef02a61fc0a",
+    "6905bef6004381e7",
+    "0d2ca2b6f5c7f578",
+    "3ece354f787184b1",
+    "36a9ed0d84f1011c"
+   ],
+   "entry_sha256": "6a8946853ef7b0232331e73231e4b77255f01bc621a7371722628be4b9a90b0e",
+   "id": "m22",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "baa125c154d46db8"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "7948aaced231c03d",
+    "6e504169ded62f5d"
+   ],
+   "entry_sha256": "8c5de42f3c615649e308884c0c8d30df65aaa923d1f047aed83279a9a3652594",
+   "id": "m23",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "7cd993df0f4a7454"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "82305f1cccaf92a6",
+    "02bcca703b3f6683",
+    "9fd2c75a7a3afbc3",
+    "d5a50e4647dff707",
+    "a210536bf1e5677b",
+    "126e7d7732b222ab",
+    "e55fb677feb0e803",
+    "4cf6e9a771ff3556",
+    "e8f10e91c6d91ee9",
+    "eeae2452bb6cf21b",
+    "6fd76241cfeb6692",
+    "b0e35ffb408741c5",
+    "208dffa586f73ad3",
+    "d7a08035c817d1c2",
+    "3708f8706c688492",
+    "939cf02484ff2f71",
+    "40244039aaf4a67a",
+    "3b6b18e287e3cca1",
+    "3f07d90b910ac9d0",
+    "5e26732ff9eb7bb0",
+    "ea749f73696e0ae1",
+    "fded34aedd12aec2",
+    "25696afb53a0f484",
+    "aa7d4297f06fb2b5",
+    "df8cfeead16a150f",
+    "e6a53fa2bf62b26d",
+    "7dc01cdb02894167",
+    "b281ea0ec2fa6619"
+   ],
+   "entry_sha256": "3ad492ca28f8b8fafad0391c26f4370e7d3a4833938fb843a7e74229c9242f3f",
+   "id": "m24",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "6a9f92d9655adc92"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bb90ba6f2c5a965b",
+    "f0699a40cab85644",
+    "53abb514652f2c54",
+    "148fc1ad3e29bf50",
+    "be7a54df9486e453",
+    "f306709cca8b1c98",
+    "7d5013aa953e66c2",
+    "5c0507adc6da335d"
+   ],
+   "entry_sha256": "d2b9f9033d40c5fbc79908d115eff66b0ad406e2f206119a198c6aed4a2f5e0d",
+   "id": "m25",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "a5d523e70b710579"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bb90ba6f2c5a965b",
+    "f0699a40cab85644",
+    "53abb514652f2c54",
+    "148fc1ad3e29bf50",
+    "be7a54df9486e453",
+    "f306709cca8b1c98",
+    "7d5013aa953e66c2",
+    "5c0507adc6da335d"
+   ],
+   "entry_sha256": "61260aa3d8f1848a68a2da015be43c7388b018a65c5a3711a0062413a81740a6",
+   "id": "m26",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "846cc91dd67a2248"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bb90ba6f2c5a965b",
+    "f0699a40cab85644",
+    "53abb514652f2c54",
+    "148fc1ad3e29bf50",
+    "be7a54df9486e453",
+    "f306709cca8b1c98",
+    "7d5013aa953e66c2",
+    "5c0507adc6da335d"
+   ],
+   "entry_sha256": "1faf9d17e80bd13f25efcc4e9935a8919ccfda2edf050efc0280e82b6523ad65",
+   "id": "m27",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "737da2074815c59a"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bb90ba6f2c5a965b",
+    "f0699a40cab85644",
+    "53abb514652f2c54",
+    "148fc1ad3e29bf50",
+    "be7a54df9486e453",
+    "f306709cca8b1c98",
+    "7d5013aa953e66c2",
+    "5c0507adc6da335d"
+   ],
+   "entry_sha256": "e7765097ae36af5ccb0dcdc15b98ee74223ca2959b8272345421941c25dcf775",
+   "id": "m28",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "c9aca51a4a940948"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "77a088a2c8604104",
+    "331d08690ccd9e1b",
+    "f4a562e8dd4e2005",
+    "21d8c862ca37674e",
+    "8015ac334ae360ee"
+   ],
+   "entry_sha256": "10e34c8ee3d95b0e0afe9cce8a49b5a73e1e192217ca4fcf8e0923c5c55b68fa",
+   "id": "m29",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "e829fc463d5ca638"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "648244f5562d62cc",
+    "77f68127319d4bc2"
+   ],
+   "entry_sha256": "bf1e122cb2c11941dd18c67671bfa3d49cb1e30be8b61f93b814e02fc42f6605",
+   "id": "m30",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "5a45522e32e76986"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "14b7030b0fa6e361",
+    "d90dcda04efd1aee",
+    "b1a44b2768c38eea",
+    "6db9e80ee60f1f61",
+    "21393ac6c5fb4507",
+    "f6597a92a89b35d5",
+    "6184cc2a18113bb3",
+    "5f4f87e52b8ce195",
+    "e9fb18f65d739ee5",
+    "d22e9622673360fb",
+    "f3c89176912ee066",
+    "05dc36b282b67778",
+    "078489c800340912",
+    "97ae993ae5c692ae",
+    "0ba67ebc085f2eff",
+    "442d7972d514b273",
+    "45627769dd11e53f",
+    "67b6aa55089bd8e3",
+    "e566722be175302f",
+    "5affee248e1f36a0",
+    "c3f099cac365ffa2",
+    "3d3deaf7e1c5fa37",
+    "e6a1acce3c73e133",
+    "160b73115d4a39db",
+    "abd444dfbe9eaca3",
+    "a0c91fc63fef9673",
+    "5f2416dc8e63ebc4",
+    "4c0394ab685d3504",
+    "b583fde8aea0a44b",
+    "46cbda503d9e6d71",
+    "07ce9c4153cbe9a2",
+    "429998b7442ca241",
+    "1e6f7eadd416803d",
+    "eb893717d621905f",
+    "92df2f0e897e3c2d",
+    "d631d49e5034443c",
+    "8ab74002bc37a2d7",
+    "cc57da78754b6227",
+    "3ac6860a95a19d84",
+    "7dcfb29b5a6c631b",
+    "9d6f77f1d4bf2551",
+    "ce3f7b72626e3fbe",
+    "b684630930c4a1d6",
+    "ba0297238b48577a",
+    "85e0597af2468d5f",
+    "88c069fdd37342fa",
+    "14397f2d55c0402d",
+    "d40914c3a0e514c4",
+    "fd639e4b31dc1ed5",
+    "18d9386df721392f",
+    "b91efcba5bf1fc4a",
+    "ee7261dd6c4348a6",
+    "1618e41e27c48657",
+    "586a6bab0979a21f",
+    "85159378d745dcf3",
+    "589b0519ea98b05e",
+    "9b9a17bcd66e8202",
+    "9ab9e3d54fb0c8b0",
+    "32ef143afec3cdb0",
+    "fd9cc8ce5cfcfc18",
+    "c76f57bd382568af",
+    "6310c96426c1e0e6",
+    "cfcda29aed438221",
+    "4e1a47baf696caf6",
+    "4d16e9f2638ec670",
+    "ea92cc6a3ef03d78",
+    "86387c1e7e003282",
+    "b6eb5b97a9ca3ca9",
+    "62eed93ff23fc405",
+    "98eb864f35ef149c",
+    "6806e39b6a0351d7",
+    "28d8f7bc2c02ae83",
+    "e874b4ce8a334f29",
+    "2926e9c701b53549",
+    "e5cc15c598ba7336",
+    "8d363cc8ba2145b4",
+    "74e04e0b52f446dc",
+    "4634f9ff617fac6b",
+    "b599b86dcd10d716",
+    "d2ae102a03ca5342",
+    "7434a69cc5833afe",
+    "474e7193529658b5",
+    "775511235dce569d",
+    "22347c17a2137405",
+    "761f3b60fa31a601",
+    "0fd35f4c7d08b975",
+    "86fd4bec8bb3873d",
+    "87d0042caefe0f56",
+    "13bf752b8b19f4cd",
+    "e1c1249d64781d69",
+    "be9463d91e1e0381",
+    "4f942c25ba1442b2",
+    "86eb71461fad870c",
+    "e7cedfc1565aeba6",
+    "1d482357e549b45d",
+    "4f15ff57a7d31bb0",
+    "a30125e38f3df09e",
+    "7cb310b4e0603d16",
+    "755a98c4f63cae58",
+    "3b31e19673b2ef93",
+    "d8a3f199c3f4b1f5",
+    "1689ebda164b8368",
+    "989751737aebc2a5",
+    "bb9e5fb831af6561",
+    "3812d28005cd354c",
+    "6c26fdcabb78d1c8",
+    "d4ca645fbdb4f239",
+    "0ca4624712f33b0c",
+    "6aeaffa66a573ab1",
+    "989f467d961a64c5",
+    "dc5de5442f7a0c9e",
+    "94dad54080f6fd06",
+    "efc5f5f319e7f26f",
+    "c5528b0410ce7f29"
+   ],
+   "entry_sha256": "57f0ce597a92a609e9cd92cb51eddaf166e7fcb6a99447eb1384dc04146b4acb",
+   "id": "m31",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "90f0fb1a90a4df48"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "078489c800340912",
+    "97ae993ae5c692ae",
+    "0ba67ebc085f2eff",
+    "442d7972d514b273",
+    "45627769dd11e53f",
+    "67b6aa55089bd8e3",
+    "e566722be175302f",
+    "5affee248e1f36a0",
+    "c3f099cac365ffa2",
+    "3d3deaf7e1c5fa37",
+    "e6a1acce3c73e133",
+    "160b73115d4a39db",
+    "abd444dfbe9eaca3",
+    "a0c91fc63fef9673",
+    "5f2416dc8e63ebc4",
+    "4c0394ab685d3504",
+    "b583fde8aea0a44b",
+    "46cbda503d9e6d71"
+   ],
+   "entry_sha256": "1676eeed0a52d55b55a7eb88a6e7a4a12408b8da9069046e55cfb2c53acc6021",
+   "id": "m32",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "e252005e991d195b"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "078489c800340912",
+    "97ae993ae5c692ae",
+    "0ba67ebc085f2eff",
+    "442d7972d514b273",
+    "45627769dd11e53f",
+    "67b6aa55089bd8e3",
+    "e566722be175302f",
+    "5affee248e1f36a0",
+    "c3f099cac365ffa2",
+    "3d3deaf7e1c5fa37",
+    "e6a1acce3c73e133",
+    "160b73115d4a39db",
+    "abd444dfbe9eaca3",
+    "a0c91fc63fef9673",
+    "5f2416dc8e63ebc4",
+    "4c0394ab685d3504",
+    "b583fde8aea0a44b",
+    "46cbda503d9e6d71"
+   ],
+   "entry_sha256": "be959ef323ec26c842777ddee58bc5a4d395789750700bb43adc7f6831fb73c3",
+   "id": "m33",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "068fd76894280d81"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "078489c800340912",
+    "97ae993ae5c692ae",
+    "0ba67ebc085f2eff",
+    "442d7972d514b273",
+    "45627769dd11e53f",
+    "67b6aa55089bd8e3",
+    "e566722be175302f",
+    "5affee248e1f36a0",
+    "c3f099cac365ffa2",
+    "3d3deaf7e1c5fa37",
+    "e6a1acce3c73e133",
+    "160b73115d4a39db",
+    "abd444dfbe9eaca3",
+    "a0c91fc63fef9673",
+    "5f2416dc8e63ebc4",
+    "4c0394ab685d3504",
+    "b583fde8aea0a44b",
+    "46cbda503d9e6d71"
+   ],
+   "entry_sha256": "e63e86d9b27ca6bf6f99cf2122dd81b047b29ba7189002fc9f38a86f93922a31",
+   "id": "m34",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "b3fa63969069057c"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "589b0519ea98b05e"
+   ],
+   "entry_sha256": "e9cdc5a821deb1c28fcaea8f26245c31616568f35998f10bca52977ba66e276c",
+   "id": "m35",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "a8664477d35567a8"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "4d16e9f2638ec670",
+    "ea92cc6a3ef03d78",
+    "86387c1e7e003282",
+    "b6eb5b97a9ca3ca9",
+    "62eed93ff23fc405",
+    "98eb864f35ef149c",
+    "6806e39b6a0351d7",
+    "28d8f7bc2c02ae83",
+    "e874b4ce8a334f29",
+    "2926e9c701b53549",
+    "e5cc15c598ba7336",
+    "8d363cc8ba2145b4",
+    "74e04e0b52f446dc",
+    "4634f9ff617fac6b",
+    "b599b86dcd10d716",
+    "d2ae102a03ca5342",
+    "7434a69cc5833afe",
+    "474e7193529658b5",
+    "775511235dce569d",
+    "22347c17a2137405",
+    "761f3b60fa31a601",
+    "0fd35f4c7d08b975",
+    "86fd4bec8bb3873d",
+    "87d0042caefe0f56",
+    "13bf752b8b19f4cd",
+    "e1c1249d64781d69",
+    "be9463d91e1e0381",
+    "4f942c25ba1442b2",
+    "86eb71461fad870c",
+    "e7cedfc1565aeba6",
+    "1d482357e549b45d",
+    "4f15ff57a7d31bb0",
+    "a30125e38f3df09e",
+    "7cb310b4e0603d16"
+   ],
+   "entry_sha256": "6769ea5918273c51b457ede499c71b1cfde65828acf9cbcbf12161820c6961a8",
+   "id": "m36",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "9d7bb38af0215faa"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "86fd4bec8bb3873d",
+    "87d0042caefe0f56",
+    "13bf752b8b19f4cd",
+    "e1c1249d64781d69",
+    "be9463d91e1e0381",
+    "4f942c25ba1442b2",
+    "86eb71461fad870c",
+    "e7cedfc1565aeba6",
+    "1d482357e549b45d"
+   ],
+   "entry_sha256": "9112ead77fcb8bf87f68d0486280d3a50d5c7095845f901a1897b53fc398f1cc",
+   "id": "m37",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "eba7fc6c38977ad5"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "86fd4bec8bb3873d",
+    "87d0042caefe0f56",
+    "13bf752b8b19f4cd",
+    "e1c1249d64781d69",
+    "be9463d91e1e0381",
+    "4f942c25ba1442b2",
+    "86eb71461fad870c",
+    "e7cedfc1565aeba6",
+    "1d482357e549b45d"
+   ],
+   "entry_sha256": "4c4e5debe96bb039c3d761ed72333d366232596d7ce5f705289416db29f1b61c",
+   "id": "m38",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "f57d31877ad27aff"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "86fd4bec8bb3873d",
+    "87d0042caefe0f56",
+    "13bf752b8b19f4cd",
+    "e1c1249d64781d69",
+    "be9463d91e1e0381",
+    "4f942c25ba1442b2",
+    "86eb71461fad870c",
+    "e7cedfc1565aeba6",
+    "1d482357e549b45d"
+   ],
+   "entry_sha256": "ee112e06f6ce435981fc5014f7eaa4884af4f38350b07ef92b76228d36c8a0a5",
+   "id": "m39",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "6554527c28f8953f"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "c86fab7d7892390b",
+    "8cc4941321970d7f",
+    "35d841f9a31462c7",
+    "2711ff0baefc8a50",
+    "716964b96fca4bb2",
+    "1816569fcf8d5b46",
+    "722b169c163f4b1b",
+    "93b0c0706df5d6ea",
+    "435b392429e22be8",
+    "dd27e20c69392f5f",
+    "c624bada711357c6",
+    "d7f4a3d3a5ec8de1",
+    "851ddd9891885ff0",
+    "a603caf4c5328bcf",
+    "b4f75c50d2abc2b7",
+    "c3c74cdb9f0024cd",
+    "bb4328bd116c673f",
+    "fdc498f59c2babe4",
+    "2b070e4fa795284d",
+    "c4682bf9448b5b57",
+    "6e325ae57c922eb5",
+    "09e924a5dd2c9cbf",
+    "880ae44a838f226f",
+    "5ca890979ccc64cd",
+    "a1f9eb803db2d85f",
+    "5041f1f621721fff",
+    "6dc03b6f18be0f34",
+    "a97aa247d4395359",
+    "6278b4b423db0171",
+    "745a0a37f24d422e",
+    "a83268332551176e",
+    "0cd471e1890f6e5d",
+    "4d3eeb82c6252081",
+    "2204235d18809e9d",
+    "b9e3dbdff2ecfd07",
+    "262e543255ab644c",
+    "da5cb3815e967831",
+    "af72a3cedbe98904",
+    "dbcc2c1f90e484ef",
+    "935596e2dbf3eb40",
+    "5f10f96af2609183",
+    "f4b8a390517d749f",
+    "ff74fac3643d0fc8",
+    "d6e20482ec20b2ff",
+    "723e8cc063b0c9e6",
+    "8d222641116aa810",
+    "2c609012768ef05b",
+    "c69b434dc3cb9f28"
+   ],
+   "entry_sha256": "a94c2e786ce443782a9358e8c781db067a643bb1b627876881fe2c4482ea8b75",
+   "id": "m40",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "a23231647954ec56"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "c86fab7d7892390b",
+    "8cc4941321970d7f",
+    "35d841f9a31462c7",
+    "2711ff0baefc8a50",
+    "716964b96fca4bb2",
+    "1816569fcf8d5b46",
+    "722b169c163f4b1b",
+    "93b0c0706df5d6ea",
+    "435b392429e22be8",
+    "dd27e20c69392f5f",
+    "c624bada711357c6",
+    "d7f4a3d3a5ec8de1",
+    "851ddd9891885ff0",
+    "a603caf4c5328bcf",
+    "b4f75c50d2abc2b7",
+    "c3c74cdb9f0024cd",
+    "bb4328bd116c673f",
+    "fdc498f59c2babe4",
+    "2b070e4fa795284d",
+    "c4682bf9448b5b57",
+    "6e325ae57c922eb5",
+    "09e924a5dd2c9cbf",
+    "880ae44a838f226f",
+    "5ca890979ccc64cd",
+    "a1f9eb803db2d85f",
+    "5041f1f621721fff",
+    "6dc03b6f18be0f34",
+    "a97aa247d4395359",
+    "6278b4b423db0171",
+    "745a0a37f24d422e",
+    "a83268332551176e",
+    "0cd471e1890f6e5d",
+    "4d3eeb82c6252081",
+    "2204235d18809e9d",
+    "b9e3dbdff2ecfd07",
+    "262e543255ab644c",
+    "da5cb3815e967831",
+    "af72a3cedbe98904",
+    "dbcc2c1f90e484ef",
+    "935596e2dbf3eb40",
+    "5f10f96af2609183",
+    "f4b8a390517d749f",
+    "ff74fac3643d0fc8",
+    "d6e20482ec20b2ff",
+    "723e8cc063b0c9e6",
+    "8d222641116aa810",
+    "2c609012768ef05b",
+    "c69b434dc3cb9f28"
+   ],
+   "entry_sha256": "c7b8c896f119d30492e4e464d5bf257c0e31e94044aa97a6553a5fc3935b43ef",
+   "id": "m41",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "b792d4269cc1a093"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "c86fab7d7892390b",
+    "8cc4941321970d7f",
+    "35d841f9a31462c7",
+    "2711ff0baefc8a50",
+    "716964b96fca4bb2",
+    "1816569fcf8d5b46",
+    "722b169c163f4b1b",
+    "93b0c0706df5d6ea",
+    "435b392429e22be8",
+    "dd27e20c69392f5f",
+    "c624bada711357c6",
+    "d7f4a3d3a5ec8de1",
+    "851ddd9891885ff0",
+    "a603caf4c5328bcf",
+    "b4f75c50d2abc2b7",
+    "c3c74cdb9f0024cd",
+    "bb4328bd116c673f",
+    "fdc498f59c2babe4",
+    "2b070e4fa795284d",
+    "c4682bf9448b5b57",
+    "6e325ae57c922eb5",
+    "09e924a5dd2c9cbf",
+    "880ae44a838f226f",
+    "5ca890979ccc64cd",
+    "a1f9eb803db2d85f",
+    "5041f1f621721fff",
+    "6dc03b6f18be0f34",
+    "a97aa247d4395359",
+    "6278b4b423db0171",
+    "745a0a37f24d422e",
+    "a83268332551176e",
+    "0cd471e1890f6e5d",
+    "4d3eeb82c6252081",
+    "2204235d18809e9d",
+    "b9e3dbdff2ecfd07",
+    "262e543255ab644c",
+    "da5cb3815e967831",
+    "af72a3cedbe98904",
+    "dbcc2c1f90e484ef",
+    "935596e2dbf3eb40",
+    "5f10f96af2609183",
+    "f4b8a390517d749f",
+    "ff74fac3643d0fc8",
+    "d6e20482ec20b2ff",
+    "723e8cc063b0c9e6",
+    "8d222641116aa810",
+    "2c609012768ef05b",
+    "c69b434dc3cb9f28"
+   ],
+   "entry_sha256": "fe3132c7d7e1502214b596b48b9c2099ee58ae8f7ccb89922896ca9e2ddfb075",
+   "id": "m42",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "6816824d82330aa7"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "c86fab7d7892390b",
+    "8cc4941321970d7f",
+    "35d841f9a31462c7",
+    "2711ff0baefc8a50",
+    "716964b96fca4bb2",
+    "1816569fcf8d5b46",
+    "722b169c163f4b1b",
+    "93b0c0706df5d6ea",
+    "435b392429e22be8",
+    "dd27e20c69392f5f",
+    "c624bada711357c6",
+    "d7f4a3d3a5ec8de1",
+    "851ddd9891885ff0",
+    "a603caf4c5328bcf",
+    "b4f75c50d2abc2b7",
+    "c3c74cdb9f0024cd",
+    "bb4328bd116c673f",
+    "fdc498f59c2babe4",
+    "2b070e4fa795284d",
+    "c4682bf9448b5b57",
+    "6e325ae57c922eb5",
+    "09e924a5dd2c9cbf",
+    "880ae44a838f226f",
+    "5ca890979ccc64cd",
+    "a1f9eb803db2d85f",
+    "5041f1f621721fff",
+    "6dc03b6f18be0f34",
+    "a97aa247d4395359",
+    "6278b4b423db0171",
+    "745a0a37f24d422e",
+    "a83268332551176e",
+    "0cd471e1890f6e5d",
+    "4d3eeb82c6252081",
+    "2204235d18809e9d",
+    "b9e3dbdff2ecfd07",
+    "262e543255ab644c",
+    "da5cb3815e967831",
+    "af72a3cedbe98904",
+    "dbcc2c1f90e484ef",
+    "935596e2dbf3eb40",
+    "5f10f96af2609183",
+    "f4b8a390517d749f",
+    "ff74fac3643d0fc8",
+    "d6e20482ec20b2ff",
+    "723e8cc063b0c9e6",
+    "8d222641116aa810",
+    "2c609012768ef05b",
+    "c69b434dc3cb9f28"
+   ],
+   "entry_sha256": "be5846061b60a961c00f96bcbab8b3a7964782b1974753c10a17c99106c707e2",
+   "id": "m43",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "942f564facb84b96"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "5041f1f621721fff",
+    "6dc03b6f18be0f34",
+    "a97aa247d4395359",
+    "6278b4b423db0171",
+    "745a0a37f24d422e",
+    "a83268332551176e",
+    "0cd471e1890f6e5d",
+    "4d3eeb82c6252081"
+   ],
+   "entry_sha256": "d763857bcd8fc3d380100245bc7959f987762a6db34cb86f9e12d1a57c8f778e",
+   "id": "m44",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "57ba31549a05a7df"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "262e543255ab644c",
+    "da5cb3815e967831",
+    "af72a3cedbe98904",
+    "dbcc2c1f90e484ef",
+    "935596e2dbf3eb40",
+    "5f10f96af2609183",
+    "f4b8a390517d749f",
+    "ff74fac3643d0fc8",
+    "d6e20482ec20b2ff",
+    "723e8cc063b0c9e6",
+    "8d222641116aa810",
+    "2c609012768ef05b"
+   ],
+   "entry_sha256": "852bfd7da1c3c4d9668efed1c4310647bb9d45d9dd29efff0421b0f9f4795fa5",
+   "id": "m46",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "2796426b59c3bdef"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "d7d76e52e56a8800",
+    "2d5feb62ca09e30f",
+    "4f201c24cedf2c04",
+    "5f53175ef4d14d14",
+    "084cb9f42b13c8c3",
+    "b88ce579416e7c66",
+    "9de9824fc91fa3f7",
+    "3aafe18baa766e15",
+    "f45d92934ce9d34a",
+    "78f4af93fea5b65e",
+    "fa5f2c74c3080d76",
+    "023bc7d74384b6c1",
+    "7071fcbbfe36a22d",
+    "50faa48c2b50b753",
+    "96fb0254eec7c313",
+    "a4575ed3dd4eac73",
+    "adfa8490420f33d2",
+    "5c1357e79eb903c8",
+    "1ef0a75e1000cab3",
+    "be00d4432ffe7663",
+    "7b17769216f7773f",
+    "428f41361880e6ee",
+    "3764746bf4c36fea",
+    "5b2bfcfaba4851b0",
+    "57133adfc7b924cd",
+    "daac915d5836ad51",
+    "a122d6e61c771460",
+    "42c69ba9a3511f4a",
+    "9e4ffea78dfb8ba4",
+    "79ef9451f566750c",
+    "15b321d426428711",
+    "cb5e308886afa2f7",
+    "b1f240b011577cd4",
+    "ecc87ffd3c803c57"
+   ],
+   "entry_sha256": "e28d3689f9e03692a5432281ac05b1d57db580cc9a0c2f615c189375672a42a2",
+   "id": "m47",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "f093bf60780dbe8f"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "7071fcbbfe36a22d",
+    "50faa48c2b50b753",
+    "96fb0254eec7c313",
+    "a4575ed3dd4eac73",
+    "adfa8490420f33d2",
+    "5c1357e79eb903c8",
+    "1ef0a75e1000cab3",
+    "be00d4432ffe7663",
+    "7b17769216f7773f",
+    "428f41361880e6ee",
+    "3764746bf4c36fea",
+    "5b2bfcfaba4851b0",
+    "57133adfc7b924cd",
+    "daac915d5836ad51",
+    "a122d6e61c771460",
+    "42c69ba9a3511f4a",
+    "9e4ffea78dfb8ba4",
+    "79ef9451f566750c",
+    "15b321d426428711",
+    "cb5e308886afa2f7",
+    "b1f240b011577cd4",
+    "ecc87ffd3c803c57"
+   ],
+   "entry_sha256": "d87d6a05dd3a2ee11a01d33dcf19e4f6efa6ad076ebdb9afb7b6b99ec9cfca1b",
+   "id": "m48",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "6581db15ff0ca79e"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "c07a9e0d875d2cbd",
+    "0df7df4507255324",
+    "10c6bbb11f1f9a9d",
+    "77b7fd0fd9fe2506",
+    "8e9366736017fdfc",
+    "ae3d64596f02c413",
+    "e4a02bb7d34efbaa",
+    "c6512ecab7669834",
+    "05d371048f37494b",
+    "3da9315e64baa571",
+    "9cc0eb6351d639f3",
+    "05356999ed517bd2",
+    "419b7294146ca443",
+    "9c2bf523666f8e03",
+    "6581db15ff0ca79e",
+    "44c0898e53149f23",
+    "dffde70b7312ed7e",
+    "3f59162ebd99a11f",
+    "4ea69f9af9701fc6",
+    "28d056dbbca9cbf2",
+    "632e8356dad76b89",
+    "5d6ecbd77fc10f04",
+    "bd62d041970dc8e2",
+    "15655a8a13d078ed",
+    "2052e5c665ffe71a"
+   ],
+   "entry_sha256": "e83591d3c700d4e97b3f7655a952f7b473e63dda49b094f2ba1a252c7f618974",
+   "id": "m53",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "632e8356dad76b89"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "44c0898e53149f23",
+    "dffde70b7312ed7e",
+    "3f59162ebd99a11f",
+    "4ea69f9af9701fc6",
+    "28d056dbbca9cbf2",
+    "632e8356dad76b89",
+    "5d6ecbd77fc10f04",
+    "bd62d041970dc8e2",
+    "15655a8a13d078ed",
+    "2052e5c665ffe71a"
+   ],
+   "entry_sha256": "5273b6c018996f864d63ab48963029106053d8b1891764b7428e38646d4e64ee",
+   "id": "m54",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "2052e5c665ffe71a"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "44c0898e53149f23",
+    "dffde70b7312ed7e",
+    "3f59162ebd99a11f",
+    "4ea69f9af9701fc6",
+    "28d056dbbca9cbf2",
+    "632e8356dad76b89",
+    "5d6ecbd77fc10f04",
+    "bd62d041970dc8e2",
+    "15655a8a13d078ed",
+    "2052e5c665ffe71a"
+   ],
+   "entry_sha256": "b184635060a758c14c5bfd08916d73a4278243913c8af476b1ce6886982e01b9",
+   "id": "m55",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "df316a431bce88a5"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "2a97a4a3d47cf2d2",
+    "73cf68bfdfef45f1",
+    "7ef135b40fba73b9",
+    "2f8f713c60395017",
+    "e0bbf148040699fc",
+    "5f0e01e488e636fc",
+    "bd26ddedb77c5425",
+    "2fcc250a2d6dc162",
+    "89caf7c27fa05950",
+    "444adeaa8eac0712",
+    "bb27bbb229143b5a",
+    "1da923c1a5efc58a",
+    "a5bc3acaf6b0869d",
+    "84a5195008027d2e",
+    "df316a431bce88a5"
+   ],
+   "entry_sha256": "ef43a2b473e9fe99a7f179ca7053c631dd8602f11061a069e8e554b6d5d0a4ff",
+   "id": "m56",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "b51fe0b91be7a3cd"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "d4cb0a8189b69345d1efddadf50c9d1711b3c8afb9ada36ec9bad9fa4bbc840f",
+   "id": "m57",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "e1b06ccd9db8e0ed"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "a0d66c24da628ef638033097a373fba57c0e8a935b85fdb4576ce60c6ccd87c0",
+   "id": "m58",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "3d713a0088f3710d"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "98cfc4e79c10486dd39515ae3bb97abd076476aad3854ee3a0dd45fb9510cdac",
+   "id": "m59",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "6b96fefcab526431"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "4209d5f023e4eae7ec8adba2c2e74aa903111dba02cacbcb6ed8b10638f93df8",
+   "id": "m60",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "795e0ef210297198"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "a739aac33d38d8584d091cfd371f833c07562d5318622a8b106eabe9360e16ae",
+   "id": "m61",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "943e461ceb5e1e76"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "d1ce1e8459d0a3ebf6c4452c0d44377f723ca7701a6c32b328ded910033d2e88",
+   "id": "m62",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "6e8ae5613d1c430d"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "aa6100b01758da4515dbbdf435a35b53d866b684673d80160b872f79b6a86f56",
+   "id": "m63",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "3930cc8c13e9eb36"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "bbb021acc3cd6b61",
+    "b51fe0b91be7a3cd",
+    "e50c1221dbe26e3d",
+    "ef3a036274e2c522",
+    "e1b06ccd9db8e0ed",
+    "d81cffca55859c0a",
+    "3d713a0088f3710d",
+    "6b96fefcab526431",
+    "1260ab6abac5084c",
+    "795e0ef210297198",
+    "943e461ceb5e1e76",
+    "8f7d3ba2dc0f5f4c",
+    "6e8ae5613d1c430d",
+    "3930cc8c13e9eb36"
+   ],
+   "entry_sha256": "88623964e75dba47430d0f2c951ea66ddad6ea607529cb818db5a2f5c77eb925",
+   "id": "m64",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "4edd4dddb0cbbe5c"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "80244588756c5a12",
+    "035bea6df63e6c4e",
+    "a969e53906c6e5d5",
+    "74062ec2c5f84f88",
+    "85323947b8467b4d",
+    "172e13eba0cd231d",
+    "3fa67b49e7009eba",
+    "e3cfd26ccf4ee16d",
+    "fb6ddb35dffa6b8f",
+    "835d281049287405",
+    "8f44bf1910127e5a",
+    "4edd4dddb0cbbe5c",
+    "402ca9b3acf36bf5",
+    "c61ed808563c9341"
+   ],
+   "entry_sha256": "f080631e18efdb69811f9d26c65ce84ed9bbee96c3559fcdf4d0718a30d73097",
+   "id": "m65",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "0de51278599f6297"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "dc390542c4277abd",
+    "c727bd59c5862a61",
+    "0de51278599f6297",
+    "22a3168a63dd631b",
+    "7e3388663351cf2c",
+    "1c2fb9a909d34433",
+    "90aabef54d1a907b",
+    "27abbe24d212d00c",
+    "42d5bf16960ef412",
+    "b79595a5acc36fd1",
+    "433c6bac8b639a21",
+    "b867c115bd199a98",
+    "3f9e2be78ba7d0f6",
+    "07b487e6ef280e63",
+    "00086b840c3783a1",
+    "42fca2efbc36607e",
+    "3bc84fb00fb129ce",
+    "2a8c5ca817c86ee5",
+    "3691e81b97ae3f58",
+    "52d94579318f8d16",
+    "ad4f9132f6ade4c5",
+    "7ef936109d908dc3",
+    "ef93d4ea616898a9",
+    "8219122b8a586629",
+    "7be4159573ac97a0",
+    "ded783cd507a4ddf",
+    "9e9ddb663522bb6a"
+   ],
+   "entry_sha256": "df2d71344151a98468341627792517bdef49029cb5e96f8baeda86050001f86e",
+   "id": "m66",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "3b3fc194d4dfb8c0"
+   ],
+   "date": "2026-11-24",
+   "destination": [
+    "c6e6a70efb11ef2d",
+    "578819b5b33364b5",
+    "7ac53173c89b7951",
+    "3b3fc194d4dfb8c0",
+    "5de9012479c873fd"
+   ],
+   "entry_sha256": "e9851b572843282bfe42fabcdbbae93854d6fe05233ff1d70edb88cd78276f76",
+   "id": "m67",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [
+    "5249916e43ed6e81"
+   ],
+   "date": "2026-11-24",
+   "destination": [],
+   "entry_sha256": "24acf85819dc98ece8dfd2b5665dcaa36c1c986e96405815baf31f8e499d7f31",
+   "id": "m45",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [],
+   "date": "2026-11-24",
+   "destination": [],
+   "entry_sha256": "48715e3d2f902296f3a55b1dce4b03e756f81372ed92c6a1e0a1a02d45bfad15",
+   "id": "m49",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [],
+   "date": "2026-11-24",
+   "destination": [],
+   "entry_sha256": "227834ca1861753926540c5fb4395b4ed28199b7d82b44f6673e486ecf071aa6",
+   "id": "m50",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [],
+   "date": "2026-11-24",
+   "destination": [],
+   "entry_sha256": "987fbc664f0e29c4c5de16cd4e4bdf997d07369a46be2dad288a02f7fe373ef5",
+   "id": "m51",
+   "reviewer": "Roberto Leinardi"
+  },
+  {
+   "baseline": [],
+   "date": "2026-11-24",
+   "destination": [],
+   "entry_sha256": "adbe711e5f55f8553e204ea9782a610ec7be9210ebc903761047d880f91c9493",
+   "id": "m52",
+   "reviewer": "Roberto Leinardi"
+  }
+ ]
+}

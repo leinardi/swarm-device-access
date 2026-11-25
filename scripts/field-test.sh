@@ -15,9 +15,9 @@
 # limitations under the License.
 #
 # Field test: hands one Swarm node from the deployed 1.x (Go) daemon to the Rust daemon and back,
-# with real device access checked from inside Swarm tasks at every step. docs/testing.md
-# ("Field test") is the procedure; this script is its root part, run on the node through
-# systemd-run so an ssh drop does not end it halfway.
+# with real device access checked from inside Swarm tasks at every step.
+# docs/internal/qa/field-test.md ("Field test") is the procedure; this script is its root part, run
+# on the node through systemd-run so an ssh drop does not end it halfway.
 #
 # The deployed Go service is only ever kept off this node, with a placement constraint on its node
 # ID, never changed otherwise, so other nodes keep running it. Both daemons under test run as
@@ -63,7 +63,7 @@ die() {
 }
 
 require() {
-  [[ ${EUID} -eq 0 ]] || die "run as root (through sudo systemd-run, see docs/testing.md)"
+  [[ ${EUID} -eq 0 ]] || die "run as root (through sudo systemd-run, see docs/internal/qa/field-test.md)"
   [[ -n ${SDA_FIELD_RUST_IMAGE:-} ]] || die "SDA_FIELD_RUST_IMAGE is not set"
   command -v jq >/dev/null || die "jq is required"
   docker image inspect "${SDA_FIELD_RUST_IMAGE}" >/dev/null || die "load ${SDA_FIELD_RUST_IMAGE} first"
@@ -243,7 +243,7 @@ main() {
   mapfile -t MOUNT_ARGS < <(jq -r '.[0].Spec.TaskTemplate.ContainerSpec.Mounts // [] | .[] |
     "--mount", "type=\(.Type),source=\(.Source),target=\(.Target),readonly=\(.ReadOnly // false)"' \
     <<<"${spec}")
-  # Rust spells every long flag with two dashes (README, Migrating from 1.x). Its daemons under test
+  # Rust spells every long flag with two dashes (docs/migration.md). Its daemons under test
   # log at debug, appended last so it overrides the deployed level as the last flag does: the
   # revocation after die and destroy is a debug line.
   local rust_args=() arg

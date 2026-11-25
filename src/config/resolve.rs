@@ -21,7 +21,7 @@
 //! succeeds matters here, never the value. They are the standard library's parsers, which read
 //! fewer spellings than Go's: no `0x` hexadecimal, no `_` separators and no leading-zero octal
 //! (`0755` is the decimal 755), so a scalar spelled that way is a string here, where yaml.v3
-//! resolved it to a number (README Q17).
+//! resolved it to a number (docs/migration.md, Q17).
 
 /// `!!null`.
 pub(super) const NULL_TAG: &str = "!!null";

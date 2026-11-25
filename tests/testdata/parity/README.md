@@ -1,7 +1,7 @@
 # Go release parity captures
 
 What the Go 1.x release (`v1.0.3`) answered, for `tests/parity.rs` to compare the Rust binary
-with (`docs/rust-port.md`, end-to-end parity with the Go release). The ignored test
+with (`docs/internal/rust-port.md`, end-to-end parity with the Go release). The ignored test
 `capture_go_parity` writes the `go-*` files from the Go binary that `SDA_GO_BINARY` names:
 
 ```bash

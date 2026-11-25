@@ -24,7 +24,7 @@
 //! it (clap alone would read `-unknown` as the short cluster `-u` and print the help for `-hx`),
 //! and a positional argument is clap's error; both exit 2. `-h` and `--help` print the help to
 //! stdout and exit 0. Kept from Go: the names, defaults and help texts, last value wins,
-//! `--dry-run=false` and every `strconv.ParseBool` spelling, the repeatable device lists, which
+//! `--dry-run=false`, the repeatable device lists, which
 //! flags were given on the command line (Go's `flag.Visit`, which counts a value equal to the
 //! default), and the `launch` split at the first `--`, after which everything goes to the daemon
 //! verbatim. The values themselves are checked later, as Go checks them: the daemon's after the

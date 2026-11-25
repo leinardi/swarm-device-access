@@ -1,0 +1,402 @@
+# Blocks rewritten or dropped on purpose by restructure 1 (report.md); reviewed by the owner.
+
+[[rewritten]]
+id = "m1"
+blocks = ["d0d6a008a4624d6f"]
+to = "CONTRIBUTING.md"
+heading = "src/cgroup/ — NVIDIA-derived code"
+
+[[rewritten]]
+id = "m2"
+blocks = ["fe2437f3f3ee16f3"]
+to = "CONTRIBUTING.md"
+heading = "Verification"
+
+[[rewritten]]
+id = "m3"
+blocks = ["68944150f24fa30d"]
+to = "README.md"
+heading = "swarm-device-access"
+
+[[rewritten]]
+id = "m4"
+blocks = ["61786462a16218a7"]
+to = "docs/getting-started.md"
+heading = "Getting started"
+
+[[rewritten]]
+id = "m5"
+blocks = ["2fb6be59007511db"]
+to = "docs/configuration.md"
+heading = "Config file"
+
+[[rewritten]]
+id = "m6"
+blocks = ["6a06409831d8c715"]
+to = "docs/configuration.md"
+heading = "Config file"
+
+[[rewritten]]
+id = "m7"
+blocks = ["7e7650fe82b16ad7"]
+to = "docs/labels.md"
+heading = "Container labels"
+
+[[rewritten]]
+id = "m8"
+blocks = ["ec957f27ce8e930d"]
+to = "docs/migration.md"
+heading = "Migrating from 1.x"
+
+[[rewritten]]
+id = "m9"
+blocks = ["bb4f9a98cf6255bb"]
+to = "docs/migration.md"
+heading = "Migrating from 1.x"
+
+[[rewritten]]
+id = "m10"
+blocks = ["1eccd00056480bf4"]
+to = "docs/getting-started.md"
+heading = "Verifying device passthrough"
+
+[[rewritten]]
+id = "m11"
+blocks = ["050ea9e1ed9a9d4e"]
+to = "README.md"
+heading = "Prerequisites"
+
+[[rewritten]]
+id = "m12"
+blocks = ["956ec736ab5c3e98"]
+to = "README.md"
+heading = "📜 License"
+
+[[rewritten]]
+id = "m13"
+blocks = ["c6d03a136a6dd712"]
+to = "SECURITY.md"
+heading = "Threat model"
+
+[[rewritten]]
+id = "m14"
+blocks = ["0263088c9df16433"]
+to = "SECURITY.md"
+heading = "Known design constraints"
+
+[[rewritten]]
+id = "m15"
+blocks = ["9f756656d90273e8"]
+to = "docs/architecture.md"
+heading = "BPF program structure"
+
+[[rewritten]]
+id = "m16"
+blocks = ["635c09f69c15c2ff"]
+to = "docs/architecture.md"
+heading = "Device mount collection"
+
+[[rewritten]]
+id = "m17"
+blocks = ["378574a3ee0367c9"]
+to = "docs/architecture.md"
+heading = "Device mount collection"
+
+[[rewritten]]
+id = "m18"
+blocks = ["77f6bdab252e5747"]
+to = "docs/architecture.md"
+heading = "Runtime contract"
+
+[[rewritten]]
+id = "m19"
+blocks = ["fa3586a9258eb856"]
+to = "docs/architecture.md"
+heading = "No debug server (--debug-addr)"
+
+[[rewritten]]
+id = "m20"
+blocks = ["c49a37ed7fcbac89"]
+to = "docs/architecture.md"
+heading = "No debug server (--debug-addr)"
+
+[[rewritten]]
+id = "m21"
+blocks = ["48c18470d33e9325"]
+to = "docs/architecture.md"
+heading = "Daemon cannot connect to Docker"
+
+[[rewritten]]
+id = "m22"
+blocks = ["677d579ce834381a"]
+to = "docs/internal/release.md"
+heading = "What a release produces"
+
+[[rewritten]]
+id = "m23"
+blocks = ["baa125c154d46db8"]
+to = "docs/internal/release.md"
+heading = "Dependabot releases"
+
+[[rewritten]]
+id = "m24"
+blocks = ["7cd993df0f4a7454"]
+to = "docs/internal/release.md"
+heading = "Why the build happens before the tag"
+
+[[rewritten]]
+id = "m25"
+blocks = ["6a9f92d9655adc92"]
+to = "docs/internal/release.md"
+heading = "Environment and credentials"
+
+[[rewritten]]
+id = "m26"
+blocks = ["a5d523e70b710579"]
+to = "docs/internal/release.md"
+heading = "Environment and credentials"
+
+[[rewritten]]
+id = "m27"
+blocks = ["846cc91dd67a2248"]
+to = "docs/internal/release.md"
+heading = "Environment and credentials"
+
+[[rewritten]]
+id = "m28"
+blocks = ["737da2074815c59a"]
+to = "docs/internal/release.md"
+heading = "Environment and credentials"
+
+[[rewritten]]
+id = "m29"
+blocks = ["c9aca51a4a940948"]
+to = "docs/internal/release.md"
+heading = "Required checks"
+
+[[rewritten]]
+id = "m30"
+blocks = ["e829fc463d5ca638"]
+to = "docs/internal/history/go-releases.md"
+heading = "Historical notes: the Go releases (1.x)"
+
+[[rewritten]]
+id = "m31"
+blocks = ["5a45522e32e76986"]
+to = "docs/internal/rust-port.md"
+heading = "Rust port: design and provenance record"
+
+[[rewritten]]
+id = "m32"
+blocks = ["90f0fb1a90a4df48"]
+to = "docs/internal/rust-port.md"
+heading = "Design decisions"
+
+[[rewritten]]
+id = "m33"
+blocks = ["e252005e991d195b"]
+to = "docs/internal/rust-port.md"
+heading = "Design decisions"
+
+[[rewritten]]
+id = "m34"
+blocks = ["068fd76894280d81"]
+to = "docs/internal/rust-port.md"
+heading = "Design decisions"
+
+[[rewritten]]
+id = "m35"
+blocks = ["b3fa63969069057c"]
+to = "docs/internal/rust-port.md"
+heading = "Intended differences from 1.x"
+
+[[rewritten]]
+id = "m36"
+blocks = ["a8664477d35567a8"]
+to = "docs/internal/rust-port.md"
+heading = "Reuse ledger"
+
+[[rewritten]]
+id = "m37"
+blocks = ["9d7bb38af0215faa"]
+to = "docs/internal/rust-port.md"
+heading = "Post-port maintenance"
+
+[[rewritten]]
+id = "m38"
+blocks = ["eba7fc6c38977ad5"]
+to = "docs/internal/rust-port.md"
+heading = "Post-port maintenance"
+
+[[rewritten]]
+id = "m39"
+blocks = ["f57d31877ad27aff"]
+to = "docs/internal/rust-port.md"
+heading = "Post-port maintenance"
+
+[[rewritten]]
+id = "m40"
+blocks = ["6554527c28f8953f"]
+to = "docs/testing.md"
+heading = "Testing"
+
+[[rewritten]]
+id = "m41"
+blocks = ["a23231647954ec56"]
+to = "docs/testing.md"
+heading = "Testing"
+
+[[rewritten]]
+id = "m42"
+blocks = ["b792d4269cc1a093"]
+to = "docs/testing.md"
+heading = "Testing"
+
+[[rewritten]]
+id = "m43"
+blocks = ["6816824d82330aa7"]
+to = "docs/testing.md"
+heading = "Testing"
+
+[[rewritten]]
+id = "m44"
+blocks = ["942f564facb84b96"]
+to = "docs/testing.md"
+heading = "Dry-Run Coverage"
+
+[[dropped]]
+id = "m45"
+blocks = ["5249916e43ed6e81"]
+proof = "contradicted by the code: a dry run never reads /proc/<pid>/cgroup or resolves a cgroup path (src/processor/reconcile.rs:430-431); report.md row 14"
+
+[[rewritten]]
+id = "m46"
+blocks = ["57ba31549a05a7df"]
+to = "docs/testing.md"
+heading = "Native Privileged Checklist"
+
+[[rewritten]]
+id = "m47"
+blocks = ["2796426b59c3bdef"]
+to = "docs/internal/qa/field-test.md"
+heading = "Field test"
+
+[[rewritten]]
+id = "m48"
+blocks = ["f093bf60780dbe8f"]
+to = "docs/internal/qa/field-test.md"
+heading = "Results"
+
+[[rewritten]]
+id = "m53"
+blocks = ["6581db15ff0ca79e"]
+to = "docs/configuration.md"
+heading = "Configuration"
+
+[[rewritten]]
+id = "m54"
+blocks = ["632e8356dad76b89"]
+to = "docs/configuration.md"
+heading = "Config file"
+
+[[rewritten]]
+id = "m55"
+blocks = ["2052e5c665ffe71a"]
+to = "docs/configuration.md"
+heading = "Config file"
+
+[[rewritten]]
+id = "m56"
+blocks = ["df316a431bce88a5"]
+to = "docs/deployment.md"
+heading = "Deployment"
+
+[[rewritten]]
+id = "m57"
+blocks = ["b51fe0b91be7a3cd"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m58"
+blocks = ["e1b06ccd9db8e0ed"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m59"
+blocks = ["3d713a0088f3710d"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m60"
+blocks = ["6b96fefcab526431"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m61"
+blocks = ["795e0ef210297198"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m62"
+blocks = ["943e461ceb5e1e76"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m63"
+blocks = ["6e8ae5613d1c430d"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m64"
+blocks = ["3930cc8c13e9eb36"]
+to = "docs/host-requirements.md"
+heading = "Host requirements"
+
+[[rewritten]]
+id = "m65"
+blocks = ["4edd4dddb0cbbe5c"]
+to = "docs/labels.md"
+heading = "Container labels"
+
+[[rewritten]]
+id = "m66"
+blocks = ["0de51278599f6297"]
+to = "docs/migration.md"
+heading = "Migrating from 1.x"
+
+[[rewritten]]
+id = "m67"
+blocks = ["3b3fc194d4dfb8c0"]
+to = "docs/security.md"
+heading = "Security model"
+
+[[github_loss]]
+id = "m49"
+path = "README.md"
+anchors = ["-alternatives", "-migrating-from-1x", "-quick-start", "-security", "-tips-and-limitations", "-verifying-device-passthrough", "config-file", "container-labels", "devices-that-appear-after-the-container-starts", "docker-compose-for-swarm", "fuse", "host-requirements", "placing-tasks-on-nodes-with-the-device", "stable-names-for-usb-and-serial-devices", "️-configuration"]
+reason = "the sections moved to published pages under docs/ (d3); stage 3 rewrites the README"
+
+[[github_loss]]
+id = "m50"
+path = "docs/release.md"
+page = true
+reason = "moved to docs/internal/release.md (d2)"
+
+[[github_loss]]
+id = "m51"
+path = "docs/rust-port.md"
+page = true
+reason = "moved to docs/internal/rust-port.md (d1)"
+
+[[github_loss]]
+id = "m52"
+path = "docs/testing.md"
+anchors = ["results"]
+reason = "the Field test section moved to docs/internal/qa/field-test.md (d4)"
