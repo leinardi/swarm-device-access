@@ -101,7 +101,7 @@ fragments in the Markdown.
 
 ## Architecture
 
-See [`docs/architecture.md`](docs/architecture.md) for the sequence diagram, BPF program structure,
+See [`docs/architecture.md`](docs/architecture.md) for the flow diagram, BPF program structure,
 module layout, and troubleshooting guide.
 
 Four layers, all under `src/`:

@@ -1,116 +1,101 @@
-# swarm-device-access
+<h1 align="center">
+  <img alt="swarm-device-access logo" src="docs/assets/icon.svg" width="96">
+  <br>swarm-device-access
+</h1>
 
-`swarm-device-access` is a small Linux daemon for Docker Swarm nodes. It gives
-Swarm services the device access they usually expect from bind-mounting
-`/dev/...` paths, such as GPUs, USB buses, serial devices, or other host
-devices.
+<p align="center"><strong>Linux daemon that enables GPU, USB, and other /dev device passthrough
+for Docker Swarm services by injecting cgroup device-allow rules for bind-mounted
+devices.</strong></p>
 
-Docker Swarm rejects `devices:` and `device_cgroup_rules:` in service compose
-files. A task can still bind-mount `/dev/nvidia0` or `/dev/bus/usb`, but the
-kernel's cgroup device policy may block the container from opening the device.
-The result is confusing: the file is visible inside the container, but access
-fails with `EACCES`.
+<p align="center">
+  <a href="https://github.com/leinardi/swarm-device-access/actions/workflows/ci.yaml"><img alt="CI"
+    src="https://img.shields.io/github/actions/workflow/status/leinardi/swarm-device-access/ci.yaml?branch=master&style=flat-square"></a>
+  <a href="https://github.com/leinardi/swarm-device-access/releases/latest"><img alt="Release"
+    src="https://img.shields.io/github/v/release/leinardi/swarm-device-access?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License"
+    src="https://img.shields.io/github/license/leinardi/swarm-device-access?style=flat-square"></a>
+</p>
 
-This daemon watches Docker for container starts and unpauses. When a matching
-container has a bind mount under `/dev`, it adds the needed cgroup device rule
-for that device's major/minor pair. On cgroup v2 hosts that means attaching a
-`BPF_CGROUP_DEVICE` program. On cgroup v1 hosts it writes to `devices.allow`.
+<p align="center">
+  <a href="https://leinardi.github.io/swarm-device-access/">Documentation</a> ·
+  <a href="#-installation">Install</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-This project is a fork of
-[`allfro/device-mapping-manager`](https://github.com/allfro/device-mapping-manager).
-The cgroup/BPF code in `src/cgroup/` (`api.rs`, `ebpf.rs`, `v1.rs` and `v2.rs`) is
-ported from [NVIDIA's libnvidia-container](https://github.com/NVIDIA/libnvidia-container)
-and remains Apache 2.0 licensed.
+Docker Swarm rejects `devices:` and `device_cgroup_rules:` in service compose files. A task can
+still bind-mount `/dev/nvidia0` or `/dev/bus/usb`, but the kernel's cgroup device policy may block
+the container from opening it: the file is visible, and access fails with `EACCES`. This daemon
+watches Docker and adds the cgroup device rule each matching container needs.
 
-Version 2.0 is a Rust rewrite of the 1.x Go daemon, with the same behaviour
-except for the differences listed in
-[Migrating from 1.x](docs/migration.md), the first of them that every flag
-is spelled with two dashes.
+It is a fork of [`allfro/device-mapping-manager`](https://github.com/allfro/device-mapping-manager).
+Version 2.0 is a Rust rewrite of the 1.x Go daemon; the differences are listed in
+[Migrating from 1.x][migration].
 
-## 💡 What It Does
+## ✨ Features
 
-At runtime the daemon:
+- **Device access Swarm leaves out:** each bind mount under `/dev` gets its device rule: a
+  `BPF_CGROUP_DEVICE` program on cgroup v2, `devices.allow` on cgroup v1.
+- **Opt-in, narrowed by labels:** only labelled containers by default; allow and deny globs judge
+  each device by its real name, deny wins, and a label can only narrow the policy.
+- **Rules that stay applied:** a startup pass over running containers, Docker events with
+  reconnect, and, with `--dbus`, rules reapplied after `systemctl daemon-reload`.
+- **One global Swarm service:** an unprivileged launcher creates the privileged daemon from its own
+  image ID, so service updates and rollbacks move the daemon with it.
 
-- Processes already-running containers at startup, so daemon restarts do not
-  leave existing tasks without device access.
-- Subscribes to Docker `start` and `unpause` events (to grant) and `die` and
-  `destroy` events (to clean up after a run), with reconnect and backoff if the
-  Docker event stream drops.
-- Inspects each eligible container for bind mounts whose source is under
-  `/dev`.
-- Walks directory mounts such as `/dev/bus/usb` and applies one rule per device
-  file.
-- Applies cgroup v1 `devices.allow` rules or cgroup v2 BPF device rules,
-  depending on the host.
-- Optionally watches systemd over DBus and reapplies rules after
-  `systemctl daemon-reload`, which clears cgroup BPF programs.
-
-## 📚 Documentation
-
-- [Getting started](docs/getting-started.md): the Swarm service, a consumer example and a
-  passthrough check.
-- [Deployment](docs/deployment.md): the launcher, its flags, updates and rollbacks.
-- [Host requirements](docs/host-requirements.md): kernel, cgroup v2 and v1, and how grants are
-  kept and revoked.
-- [Configuration](docs/configuration.md): flags, the config file and reloads.
-- [Container labels](docs/labels.md): opt-in, allow and deny globs, device identity.
-- [Security model](docs/security.md), [Tips and limitations](docs/tips.md),
-  [Alternatives](docs/alternatives.md) and [Migrating from 1.x](docs/migration.md).
-- [Verifying releases](docs/verifying-releases.md), [Architecture](docs/architecture.md) and
-  [Testing](docs/testing.md).
-
-## 🛠️ Development
-
-### Prerequisites
-
-- Linux host. The daemon is Linux-only.
-- Rust, through `rustup`: `rust-toolchain.toml` pins the exact release and its components.
-- Docker, logged in to `dhi.io` (`docker login dhi.io`): the image builds from Docker Hardened
-  Images.
-- `pre-commit`, `cargo-deny`, [droast](https://github.com/immanuwell/dockerfile-roast),
-  `markdownlint-cli2`, `yamllint`, `shellcheck`, `actionlint`, and `checkmake`. The pre-commit
-  hooks install most of these tools when needed; droast is built from source, which needs `cargo`.
-- A local `shellcheck` at the release the `shellcheck-py` hook in `.pre-commit-config.yaml` wraps:
-  droast's required ShellCheck bridge runs the one on PATH.
-- For the static release binaries only (`make rust-release-binaries`): the zig and cargo-zigbuild
-  releases the Makefile pins, on PATH. QEMU (binfmt) to run the arm64 image tests on
-  another architecture.
-
-### Common Tasks
+## 📦 Installation
 
 ```bash
-make help              # list all available targets
-make check             # run every pre-commit hook on every file
-make verify            # build, format check, clippy and every test, meta-tests included
-make rust-build        # build the workspace (target/debug/swarm-device-access)
-make docker-build      # build the container image's default target, which compiles the binary
-make rust-release-dist # the static release binaries, then checksums.txt, into dist/
-make image-build-test  # the prebuilt image from those binaries, then its tests
-make test-integration  # the integration suite against the image (Docker, dhi.io login)
+git clone https://github.com/leinardi/swarm-device-access.git
+cd swarm-device-access/deployments/docker
+docker stack deploy -c docker-compose.yaml swarm-device-access
 ```
 
-See [`docs/testing.md`](docs/testing.md) for the CI-safe integration suite and
-the opt-in native privileged checklist.
+This deploys the image `ghcr.io/leinardi/swarm-device-access:2` as a global service on every node.
+Hosts need Linux 5.6 or newer and, on cgroup v2, the runtime's device filter attached with
+`BPF_F_ALLOW_MULTI` (runc 1.0+, crun and systemd do): see [Host requirements][host] and the
+[Getting started][start] guide.
 
-The Makefile pulls shared logic from
-[`leinardi/make-common`](https://github.com/leinardi/make-common), pinned by
-`.mk/.mk-common-version`. On the first `make` run, the bootstrap script downloads
-the snippets into `.mk/`.
+## 🚀 Usage
 
-### Multi-Arch Image Build
+Give a service's containers the opt-in label and bind-mount the devices they need, with top-level
+`labels:` (labels under `deploy.labels:` are ignored):
 
-```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -f deployments/docker/Dockerfile \
-  --build-arg VERSION=dev \
-  --build-arg COMMIT=$(git rev-parse --short HEAD) \
-  --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  -t ghcr.io/leinardi/swarm-device-access:dev .
+```yaml
+services:
+  app:
+    image: alpine
+    volumes:
+      - /dev/ttyS0:/dev/ttyS0
+    labels:
+      swarm-device-access.enable: "true"
+      swarm-device-access.device-allow: "/dev/ttyS0"
 ```
 
-## 📜 License
+Every label, the global allow and deny globs and the daemon's flags are in the [documentation][docs].
 
-[Apache License 2.0](LICENSE). `src/cgroup/{api,ebpf,v1,v2}.rs` are ported from
-[NVIDIA's libnvidia-container](https://github.com/NVIDIA/libnvidia-container) under
-the same license.
+## 📖 Documentation
+
+- [Getting started][start]: the Swarm service, a consumer example and a passthrough check.
+- [Deployment](docs/deployment.md), [Configuration](docs/configuration.md) and
+  [Container labels](docs/labels.md): the launcher, the flags, the config file and the labels.
+- [Architecture](docs/architecture.md), [Security model](docs/security.md) and
+  [Migrating from 1.x][migration].
+- [Contributing](CONTRIBUTING.md): building, testing and the commit conventions;
+  [Releasing](RELEASING.md) for maintainers.
+- Bug reports and questions: the [issue tracker](https://github.com/leinardi/swarm-device-access/issues).
+
+## 🔒 Security
+
+The daemon runs privileged, with the host Docker socket and `/dev`. Report vulnerabilities
+privately, as [SECURITY.md](SECURITY.md) describes.
+
+## 📝 License
+
+[Apache License 2.0](LICENSE). The cgroup code in `src/cgroup/{api,ebpf,v1,v2}.rs` is ported from
+[NVIDIA's libnvidia-container](https://github.com/NVIDIA/libnvidia-container) and keeps its Apache
+2.0 copyright header.
+
+[docs]: https://leinardi.github.io/swarm-device-access/
+[start]: docs/getting-started.md
+[host]: docs/host-requirements.md
+[migration]: docs/migration.md

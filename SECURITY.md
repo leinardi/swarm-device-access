@@ -86,6 +86,6 @@ confirmed issues.
   (it runs unprivileged in tests), so grants left by a previous live run stay until a live start
   or a container restart; the daemon warns about this at every dry-run start. Restart live with a
   narrower policy, or restart the affected containers, to take grants back.
-- The cgroup BPF code in `src/cgroup/` is derived from [NVIDIA's container
-  toolkit](https://github.com/NVIDIA/libnvidia-container) (Apache 2.0). Security issues in that code
-  should also be reported to NVIDIA.
+- The cgroup BPF code in `src/cgroup/` is derived from [NVIDIA's
+  libnvidia-container](https://github.com/NVIDIA/libnvidia-container) (Apache 2.0). Security issues
+  in that code should also be reported to NVIDIA.
