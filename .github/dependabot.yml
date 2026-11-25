@@ -99,6 +99,14 @@ updates:
       prefix: "fix(deps)"
       prefix-development: "chore(deps)"
     open-pull-requests-limit: 5
+    ignore:
+      # The Recorder registers service-kit's ProcessCollector on its prometheus-client Registry, so
+      # this crate must stay on the prometheus-client release rust-common's service-kit uses: a
+      # 0.x minor bump alone builds two incompatible copies and fails to compile. Move it by hand,
+      # together with the rust-common tag that brings the same release (AGENTS.md, "Shared
+      # crates"). Patch releases still come through Dependabot.
+      - dependency-name: "prometheus-client"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
     groups:
       cargo-crates:
         dependency-type: "production"
