@@ -23,9 +23,9 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use jiff::Timestamp;
+use service_kit::tokio_util::sync::CancellationToken;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 use super::coordinator::testing::{WITHIN, base};
 use super::{DOCKER_CALL_TIMEOUT, OnSubscribed, Options, Readiness, run_with};

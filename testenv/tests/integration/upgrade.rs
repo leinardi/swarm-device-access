@@ -35,13 +35,13 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use bollard::query_parameters::InspectContainerOptions;
 use swarm_device_access::policy::LABEL_ENABLE;
 use testenv::enforce::{
     Build, DUMP_FLAG, ENV_ENFORCE, ProgramDump, cgroup_problem, granted_problems, revoked_problems,
     runtime_originals,
 };
 use testenv::host::{OP_TIMEOUT, with_timeout};
+use testenv_core::bollard::query_parameters::InspectContainerOptions;
 use tokio::process::Command;
 
 use crate::daemon::require_processed;

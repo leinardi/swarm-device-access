@@ -27,8 +27,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
+use service_kit::tokio_util::sync::CancellationToken;
+use service_kit::tokio_util::task::TaskTracker;
 use tracing::warn;
 
 use self::events::{Listener, subscribe};

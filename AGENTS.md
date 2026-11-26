@@ -201,9 +201,12 @@ the rust-common crates)**
 `clock`, `docker-client`,
 `service-kit`, `tracing-setup`, `testenv-core` and `repo-meta` come from
 [leinardi/rust-common](https://github.com/leinardi/rust-common), a git dependency pinned by the
-release tag (`tag = "v3.0.0"`, with `version = "3.0"`, the tag's `<major>.<minor>`) in the root
-`Cargo.toml`'s `[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and
-its own features.
+release tag (`tag`, with `version` the tag's `<major>.<minor>`) in the root `Cargo.toml`'s
+`[workspace.dependencies]`; each member opts in with `<name>.workspace = true` and its own
+features. `make rust-pin-bump TAG=vX.Y.Z` moves the pin, and the line below, and checks that only
+rust-common moved in `Cargo.lock`.
+
+The current pin is `v4.0.0`. <!-- rust-pin-current -->
 
 - **Shared code lives in rust-common.** Never copy a shared crate's code back into this repository.
   A behaviour difference between projects is a parameter of the shared crate, never a fork here:
@@ -213,11 +216,19 @@ its own features.
   labels and resources (`testenv/src/config.rs`) and runner settings
   (`testenv/tests/integration/main.rs`) to testenv-core, and
   `buildinfo!("SWARM_DEVICE_ACCESS", …)` (service-kit).
-- **A fix to shared code lands in rust-common first**, then reaches this repository in a release, by
-  moving the `tag` (and `version` with it) on every rust-common line, with the ledger in
-  [`docs/internal/rust-port.md`](docs/internal/rust-port.md) updated in the same commit. Refresh the
-  lock with `cargo fetch`, never `cargo update -p`; `git diff Cargo.lock` must touch only
-  rust-common lines.
+- **A fix to shared code lands in rust-common first**, then reaches this repository in a release,
+  through `make rust-pin-bump TAG=vX.Y.Z`: it moves the `tag` and `version` on every rust-common
+  line and the current-pin line above, re-resolves `Cargo.lock` without `cargo update` and fails,
+  restoring every file, unless only rust-common's packages moved. The ledger in
+  [`docs/internal/rust-port.md`](docs/internal/rust-port.md) is updated in the same change.
+- **The crates at rust-common's boundary are rust-common's.** A pre-1.0 crate whose types cross a
+  shared crate's API is taken through its re-export and never declared here:
+  `service_kit::prometheus_client` (the `Recorder`'s registry, which service-kit's
+  `ProcessCollector` joins; its label sets are hand-written, as the derive names
+  `::prometheus_client`), `service_kit::tokio_util` and `testenv_core::bollard`. Every boundary
+  crate, re-exported or not (jiff, tracing, tokio, hyper, ...), is one package in the graph:
+  `meta/tests/rust_common_boundary.rs` (`repo_meta::boundary`, run in CI before the build) names
+  any second copy and the import to use.
 - **Local iteration on a shared crate** uses an uncommitted
   `[patch."https://github.com/leinardi/rust-common"]` table in the root `Cargo.toml`, one
   `path = "../rust-common/crates/<name>"` line for every rust-common crate the workspace uses,

@@ -26,8 +26,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use jiff::Timestamp;
+use service_kit::tokio_util::sync::CancellationToken;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 use super::{Coordinator, Reconciler, Settings};
 use crate::config::{Runtime, new_store};

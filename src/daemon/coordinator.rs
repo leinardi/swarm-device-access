@@ -43,10 +43,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use jiff::Timestamp;
+use service_kit::tokio_util::sync::CancellationToken;
+use service_kit::tokio_util::task::TaskTracker;
 use tokio::sync::Notify;
 use tokio::time::{Instant, MissedTickBehavior};
-use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
 
 use super::{MAX_BACKOFF, MIN_BACKOFF};
 use crate::docker::types::{ContainerSummary, Event};

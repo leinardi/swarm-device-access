@@ -32,10 +32,10 @@ use std::time::Duration;
 use std::{env, fmt};
 
 use futures_core::Stream;
+use service_kit::tokio_util::sync::CancellationToken;
 use tokio::sync::mpsc;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
 use zbus::message::Type;
 use zbus::{Connection, DBusError, MatchRule, Message, MessageStream, Structure, Variant};
 

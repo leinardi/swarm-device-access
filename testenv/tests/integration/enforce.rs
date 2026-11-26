@@ -28,12 +28,6 @@ use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
 use std::sync::Arc;
 use std::time::Duration;
 
-use bollard::container::LogOutput;
-use bollard::exec::StartExecResults;
-use bollard::models::{
-    ContainerCreateBody, DeviceMapping, ExecConfig, HostConfig, HostConfigCgroupnsModeEnum,
-};
-use bollard::query_parameters::{KillContainerOptions, StopContainerOptions};
 use futures_util::StreamExt as _;
 use swarm_device_access::policy::LABEL_ENABLE;
 use testenv::enforce::{
@@ -41,6 +35,12 @@ use testenv::enforce::{
     reload_unsupported,
 };
 use testenv::host::{OP_TIMEOUT, with_timeout};
+use testenv_core::bollard::container::LogOutput;
+use testenv_core::bollard::exec::StartExecResults;
+use testenv_core::bollard::models::{
+    ContainerCreateBody, DeviceMapping, ExecConfig, HostConfig, HostConfigCgroupnsModeEnum,
+};
+use testenv_core::bollard::query_parameters::{KillContainerOptions, StopContainerOptions};
 use testenv_core::context::Context;
 use tokio::process::Command;
 use tokio::time::Instant;

@@ -29,8 +29,8 @@ use std::future::Future;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use service_kit::tokio_util::sync::CancellationToken;
 use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
 
 use super::Error;
 

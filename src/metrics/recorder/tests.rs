@@ -79,7 +79,7 @@ fn recorder_sequence(recorder: &Recorder) {
     let cet = TimeZone::fixed(Offset::constant(1));
     let event_time = date(2026, 10, 25)
         .at(14, 3, 4, 567_891_234)
-        .to_zoned(cet)
+        .to_zoned_datetime(cet)
         .expect("event time")
         .timestamp();
     recorder.set_last_event(event_time);
@@ -567,4 +567,64 @@ fn label_values_are_escaped() {
         1.0,
         "the value reads back",
     );
+}
+
+/// The exposition as the scrape golden holds it. A label-keyed family keeps its series in a hash
+/// map, so its series are put in the order of their labels (`le` aside); within a series (a
+/// histogram's buckets, `_count` and `_sum`) and in a family without labels, the lines keep the
+/// encoder's order. The `process_*` families (read from /proc) keep their HELP and TYPE
+/// lines only. Every line is otherwise byte for byte what a scrape answers.
+fn canonical_scrape(body: &str) -> String {
+    /// The labels of a sample line, without the `le` a histogram bucket adds last.
+    fn series_key(line: &str) -> &str {
+        let labels = match (line.find('{'), line.rfind('}')) {
+            (Some(open), Some(close)) if open < close => &line[open + 1..close],
+            _ => "",
+        };
+        if labels.starts_with("le=\"") {
+            ""
+        } else if let Some(at) = labels.rfind(",le=\"") {
+            &labels[..at]
+        } else {
+            labels
+        }
+    }
+    fn flush(series: &mut Vec<(&str, Vec<&str>)>, out: &mut String) {
+        series.sort_by(|left, right| left.0.cmp(right.0));
+        for line in series.drain(..).flat_map(|(_, lines)| lines) {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    let mut out = String::new();
+    let mut series: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut process = false;
+    for line in body.lines() {
+        if line.starts_with('#') {
+            flush(&mut series, &mut out);
+            process = line.starts_with("# HELP process_") || line.starts_with("# TYPE process_");
+            out.push_str(line);
+            out.push('\n');
+        } else if !process {
+            let key = series_key(line);
+            match series.iter_mut().find(|(known, _)| *known == key) {
+                Some((_, lines)) => lines.push(line),
+                None => series.push((key, vec![line])),
+            }
+        }
+    }
+    flush(&mut series, &mut out);
+    out
+}
+
+/// A scrape after Go's `recorderSequence` is byte for byte the committed golden (in the
+/// canonical form above), taken before the move to rust-common v4.0.0 and prometheus-client 0.26:
+/// the names, help texts, label escaping, value formatting and `# EOF` do not move with them.
+#[test]
+fn the_scrape_is_the_golden_byte_for_byte() {
+    let recorder = Recorder::new();
+    recorder_sequence(&recorder);
+    let body = String::from_utf8(recorder.exposition().body).expect("text");
+    let want = String::from_utf8(testdata("scrape.golden")).expect("golden");
+    assert_eq!(canonical_scrape(&body), want);
 }
